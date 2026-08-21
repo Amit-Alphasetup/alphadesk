@@ -1,0 +1,13 @@
+{
+  "name": "AlphaDesk",
+  "short_name": "AlphaDesk",
+  "start_url": "./AlphaDesk_Final_Research_v2.html",
+  "display": "standalone",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "description": "Free-first ETF research, portfolio and backtesting desk",
+  "icons": [
+    {"src":"./icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"./icon-512.png","sizes":"512x512","type":"image/png"}
+  ]
+}
