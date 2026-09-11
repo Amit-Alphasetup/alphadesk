@@ -1,29 +1,19 @@
-// AlphaDesk service worker — deploy alongside index.html at the same origin.
-// Bump CACHE on every release or clients keep serving the previous build.
-const CACHE='alphadesk-v318';
+const CACHE='alphadesk-v321';
 const SHELL=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
-
 self.addEventListener('install',e=>{
-  // addAll is all-or-nothing: one missing shell file aborts the whole install,
-  // so cache entries individually and tolerate a miss.
-  e.waitUntil(caches.open(CACHE).then(c=>Promise.all(
-    SHELL.map(u=>c.add(u).catch(err=>console.warn('AlphaDesk SW: skipped',u,err)))
-  )));
+  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));
   self.skipWaiting();
 });
-
 self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(
-    keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))
-  )));
+  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
   self.clients.claim();
 });
-
 self.addEventListener('fetch',e=>{
-  if(e.request.method!=='GET')return;
+  // Network-first for API/data calls, cache-first for the app shell
   const url=new URL(e.request.url);
-  // Never cache market data, bridge calls, or anything cross-origin or query-bearing.
-  if(url.origin!==self.location.origin||/\.(json|csv)$/.test(url.pathname)||url.search)return;
+  if(url.origin!==self.location.origin||url.pathname.match(/\\.(json|csv)$/)||url.search){
+    return; // pass through — don't cache dynamic data
+  }
   e.respondWith(
     caches.match(e.request).then(cached=>{
       const ac=new AbortController();

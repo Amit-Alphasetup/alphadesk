@@ -52,7 +52,7 @@
     https://gist.githubusercontent.com;
 " http-equiv="Content-Security-Policy"/>
 <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0" name="viewport"/>
-<title>AlphaDesk V3.17 — Money Deployable Audited</title>
+<title>AlphaDesk V3.21 — EOD2 Certified Data</title>
 <meta content="#0a0c10" name="theme-color"/>
 <meta content="yes" name="mobile-web-app-capable"/>
 <meta content="yes" name="apple-mobile-web-app-capable"/>
@@ -1490,7 +1490,7 @@ td.c,th.c{text-align:center}
 </div>
 <div id="monthly-alpha-body"><div class="empty" style="padding:10px 0">Need closed trades to generate report</div></div>
 </div>
-<div class="two-col"><div class="card" style="margin-bottom:14px;grid-column:1/-1"><div class="settings-section-title">🌐 AlphaDesk V3.17 Verified Market Data Engine</div><div style="font-size:11px;color:var(--mist);line-height:1.7;margin-bottom:10px">Primary: <b>Upstox V3 through your read-only Cloudflare Market Bridge</b>. Google Sheet is an independent reference/gap filler; Yahoo is emergency fallback. Cached bars are display-only fallbacks and are never labelled live. The Upstox token stays in the Worker secret, never in this HTML.</div><div class="form-group"><label class="form-label">Market Bridge Worker URL</label><input class="form-input" id="s-market-bridge" placeholder="https://alphadesk-market.your-subdomain.workers.dev" type="url"/><div id="market-bridge-status" style="font-size:10px;color:var(--fog);margin-top:5px">Not configured</div></div><div style="font-size:10px;color:var(--fog);line-height:1.6;margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px">This page origin: <code id="market-origin-hint">detecting…</code><br/>If you open AlphaDesk directly from Android Downloads (<code>content://</code>) or as a local file, the browser normally sends <code>Origin: null</code>. Put the literal value <b>null</b> in the Worker's <code>ALLOWED_ORIGINS</code>.</div><div id="market-data-health" style="font-size:10px;color:var(--fog);line-height:1.65;margin:8px 0">Market-data health has not been tested this session.</div><div class="form-row"><button class="action-btn sm" onclick="testMarketBridge(true)">Test bridge + token</button><button class="action-btn sm" onclick="fetchAllPrices()">Refresh prices</button><button class="action-btn sm" onclick="copyMarketBridgeWorker()">Copy Worker code</button><button class="action-btn sm" onclick="downloadMarketBridgeWorker()">Download Worker</button></div><div style="font-size:10px;color:var(--fog);margin-top:8px">Deployment gate for real-money signals: Worker test must pass, Upstox token must validate, and Tenet's live scanner must show fresh verified index + ETF data. AlphaDesk blocks Tenet actionable BUY/BID/SELL buttons when that gate is not met.</div></div>
+<div class="two-col"><div class="card" style="margin-bottom:14px;grid-column:1/-1"><div class="settings-section-title">🌐 AlphaDesk V3.21 Verified Market Data Engine</div><div style="font-size:11px;color:var(--mist);line-height:1.7;margin-bottom:10px">Primary: <b>Upstox V3 through your read-only Cloudflare Market Bridge</b>. Google Sheet is an independent reference/gap filler; Yahoo is emergency fallback. Cached bars are display-only fallbacks and are never labelled live. The Upstox token stays in the Worker secret, never in this HTML.</div><div class="form-group"><label class="form-label">Market Bridge Worker URL</label><input class="form-input" id="s-market-bridge" placeholder="https://alphadesk-market.your-subdomain.workers.dev" type="url"/><div id="market-bridge-status" style="font-size:10px;color:var(--fog);margin-top:5px">Not configured</div></div><div style="font-size:10px;color:var(--fog);line-height:1.6;margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px">This page origin: <code id="market-origin-hint">detecting…</code><br/>If you open AlphaDesk directly from Android Downloads (<code>content://</code>) or as a local file, the browser normally sends <code>Origin: null</code>. Put the literal value <b>null</b> in the Worker's <code>ALLOWED_ORIGINS</code>.</div><div id="market-data-health" style="font-size:10px;color:var(--fog);line-height:1.65;margin:8px 0">Market-data health has not been tested this session.</div><div class="form-row"><button class="action-btn sm" onclick="testMarketBridge(true)">Test bridge + token</button><button class="action-btn sm" onclick="fetchAllPrices()">Refresh prices</button><button class="action-btn sm" onclick="copyMarketBridgeWorker()">Copy Worker code</button><button class="action-btn sm" onclick="downloadMarketBridgeWorker()">Download Worker</button></div><div style="font-size:10px;color:var(--fog);margin-top:8px">Deployment gate for real-money signals: Worker test must pass, Upstox token must validate, and Tenet's live scanner must show fresh verified index + ETF data. AlphaDesk blocks Tenet actionable BUY/BID/SELL buttons when that gate is not met.</div></div>
 <div class="card">
 <div class="card-head">
 <div class="card-title">🏆 Top Picks <span id="mom-signal-date" style="font-size:10px;color:var(--fog);font-weight:400"></span></div>
@@ -2128,6 +2128,11 @@ or one per line" rows="4" style="resize:vertical"></textarea>
   <div class="card"><div class="card-title">Tenet Homa 2.0 Backtest</div>
     <div style="font-size:10px;color:var(--fog);margin-bottom:10px">Canonical simulation: Monday→Friday trading week; weekly entry at the final session CLOSE (the sheet's after-3PM approximation); daily target exits using the day's HIGH at the exact target price; strict LIFO; no stop-loss. Historical point-in-time universe snapshots are used when supplied; otherwise the result is labelled CONFIGURED-UNIVERSE. Partial final weeks are not treated as completed weekly signals.</div>
     <div class="form-row"><div class="form-group"><label class="form-label">From</label><input class="form-input" type="date" id="tenet-bt-from"></div><div class="form-group"><label class="form-label">To</label><input class="form-input" type="date" id="tenet-bt-to"></div><div class="form-group"><label class="form-label">Allocated capital</label><input class="form-input" type="number" id="tenet-bt-cap" value="500000"></div><button class="action-btn azure-btn" onclick="runTenetBacktestV3()">▶ Run Tenet 2.0</button></div>
+    <div class="form-row"><button class="action-btn" id="tenet-probe-btn" onclick="tenetRunCoverageProbe()" title="Checks whether the >=5y / >=2y-holdout edge gate is even reachable with your instruments' listing history">◎ Run Coverage Probe</button></div>
+    <div class="form-row"><button class="action-btn" onclick="eod2VerifyAllUI()" title="Fetch and SHA-verify every file in the certified EOD2 export">✔ Verify EOD2 dataset</button></div>
+    <div id="tenet-probe-out" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
+    <div class="form-row" style="align-items:center"><label style="display:flex;align-items:center;gap:6px;font-size:11px"><input type="checkbox" id="tenet-bt-conservative" checked> Conservative exits — at most one lot per ETF per session (a single daily HIGH cannot prove several stacked targets filled in sequence)</label></div>
+    <div id="tenet-bt-evidence" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
     <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
   </div>
   <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
@@ -7892,105 +7897,215 @@ function researchCashflowsFromDm(result){
 // Historical waterfall: validated IDB cache → Upstox Market Bridge → Yahoo fallback → Supabase persistence/fallback → Apps Script bridge.
 // The cache is a persistence layer; external fallbacks are never allowed to
 // silently replace a structurally valid, newer Yahoo bar.
-async function fetchHistDaily(sym,yfSym,startTs,endTs){
-  const startDate=fmt(new Date(startTs*1000));
-  const endDate=fmt(new Date(endTs*1000));
-  const today=localDate();
-
-  // ── 1) IDB per-bar range query — cache hit if we have data covering the window ──
-  const cached=await idbHistGetRange(sym,startDate,endDate);
-  const cachedDates=Object.keys(cached).sort();
-  const latestCached=cachedDates[cachedDates.length-1]||null;
-  // Consider the cache complete if: we have >200 bars AND latest cached bar is today or yesterday
-  // (markets closed weekends so 2-day tolerance is correct)
-  const msPerDay=86400000;
-  const cacheAge=latestCached?Math.floor((Date.now()-new Date(latestCached).getTime())/msPerDay):999;
-  if(cachedDates.length>200 && cacheAge<=3){
-    const data={};
-    cachedDates.filter(d=>d>=startDate&&d<=endDate).forEach(d=>{if(validateBar(cached[d]))data[d]=cached[d];});
-    const q=dataQuality(data);
-    if(Object.keys(data).length>50 && q.invalid===0){clearHistFetchFailure(sym);return data;}
+// ══ V3.21 EOD2 CERTIFIED DATA LAYER ═══════════════════════════════════════════
+// The certified EOD2 export (./data/manifest.json + ./data/{etf,index}/*.json) is
+// the ONLY historical source for every backtest and every history read. No Yahoo,
+// proxy, Supabase, Apps Script or Upstox history. Any defect BLOCKS with a reason.
+const EOD2_BASE='./data/';
+const EOD2_CUTOFF_MIN=20*60;                 // publish job 19:15 + pipeline -> 20:00 IST
+const EOD2_DB='alphadesk_eod2', EOD2_STORE='series';
+class EOD2Block extends Error{
+  constructor(sym,date,reason){
+    super(`BACKTEST BLOCKED — ${sym||'DATASET'} · ${date||'—'} · ${reason}`);
+    this.name='EOD2Block';this.sym=sym||'DATASET';this.date=date||null;this.reason=reason;
   }
-  // Partial cache: fetch from the day after the latest cached bar to avoid re-downloading known data
-  const cacheNeedsOHLC=cachedDates.some(d=>cached[d]&&!cached[d].open&&!cached[d].high&&!cached[d].low);
-  const fetchFromTs=latestCached&&cachedDates.length>50&&!cacheNeedsOHLC
-    ? Math.floor(new Date(latestCached).getTime()/1000)+86400
-    : startTs;
-  const fetchFromDate=fmt(new Date(fetchFromTs*1000));
-
-  // ── 2) V3 Upstox via Market Bridge — canonical external historical source ──
-  if(S.config.marketBridgeUrl){
-    const up=await marketBridgeHistory(sym,fetchFromDate,endDate);
-    if(Object.keys(up).length>10){
-      const newBars=Object.entries(up).map(([date,v])=>({date,open:v.open,high:v.high,low:v.low,close:v.close,adjClose:v.close,prev:v.prev||null,vol:v.vol||0,src:'upstox'})).filter(validateBar);
-      await idbHistPutBars(sym,newBars);
-      const full=await idbHistGetRange(sym,startDate,endDate);const q=dataQuality(full);
-      if(Object.keys(full).length>50&&q.invalid===0){clearHistFetchFailure(sym);return full;}
-    }
+}
+const EOD2Store=(()=>{
+  let man=null,manAt=0,manP=null,purgeP=null,pin=null,depth=0;
+  const mem=new Map(); let blocks=[];
+  const istNow=()=>{const ps=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());const o={};ps.forEach(p=>o[p.type]=p.value);return{date:`${o.year}-${o.month}-${o.day}`,minutes:(+o.hour%24)*60+(+o.minute)};};
+  const isoAdd=(d,n)=>{const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);};
+  const isSession=(d,hol)=>{const w=new Date(d+'T00:00:00Z').getUTCDay();return w!==0&&w!==6&&!hol.has(d);};
+  // Latest session that SHOULD be published now. Holidays come from the manifest
+  // (exporter copies EOD2 meta.json). Without them: weekday-only calendar, which
+  // can only false-BLOCK on a holiday evening, never false-PASS.
+  function expectedLatest(m,now=istNow()){
+    const has=Array.isArray(m&&m.holidays), hol=new Set(has?m.holidays:[]);
+    let d=now.date; if(!(isSession(d,hol)&&now.minutes>=EOD2_CUTOFF_MIN))d=isoAdd(d,-1);
+    let g=0; while(!isSession(d,hol)&&g++<20)d=isoAdd(d,-1);
+    return {date:d,calendar:has?'manifest':'weekday-only'};
   }
-
-  // ── 3) Yahoo proxies — emergency fallback / independent source ──
-  const fetchData=await fetchHistoricalData(yfSym,fetchFromTs,endTs,`${sym}_${fetchFromDate}_${endDate}`);
-  if(Object.keys(fetchData).length>10){
-    const newBars=Object.entries(fetchData).map(([date,v])=>({date,open:+v.open||null,high:+v.high||null,low:+v.low||null,close:+v.close,adjClose:+v.adjClose||+v.close,prev:v.prev||null,vol:v.vol||0,src:'yahoo'})).filter(validateBar);
-    await idbHistPutBars(sym,newBars);
-    sbSaveDailyPrices(sym,fetchData);
-    const yahooFull=await idbHistGetRange(sym,startDate,endDate);
-    const yq=dataQuality(yahooFull);
-    if(Object.keys(yahooFull).length>50 && yq.invalid===0){clearHistFetchFailure(sym);return yahooFull;}
+  async function sha256Hex(text){
+    if(!(globalThis.crypto&&crypto.subtle))throw new Error('crypto.subtle unavailable (needs https)');
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
   }
-  // ── 4) Supabase — persistence/fallback only ──
-  try{
-    // F-10 FIX: interpolated PostgREST filter values were unencoded — a crafted
-    // symbol could inject additional filter params (&limit=, &select=, etc.)
-    const rows=await sbFetch(`daily_prices?symbol=eq.${encodeURIComponent(sym)}&d=gte.${encodeURIComponent(fetchFromDate)}&d=lte.${encodeURIComponent(endDate)}&order=d.asc&select=d,c,vol&limit=6000`);
-    if(rows?.length>10){
-      const newBars=[];
-      rows.forEach(r=>newBars.push({date:r.d,close:+r.c,prev:null,vol:r.vol||0,src:'supabase'}));
-      await idbHistPutBars(sym,newBars);
-      // Return full range from IDB (now includes newly stored bars)
-      const full=await idbHistGetRange(sym,startDate,endDate);
-      if(Object.keys(full).length>50){clearHistFetchFailure(sym);return full;}
-    }
-  }catch(e){swallow('fetchHistDaily/supabase',e);}
-
-  // ── 5) Apps Script bridge — full window (bridge returns full history, let IDB dedupe) ──
-  if(S.config.sheetUrl){
-    try{
-      const years=Math.min(15,Math.ceil((endTs-startTs)/31536000));
-      const r=await fetchT(urlWithParams(S.config.sheetUrl,{hist:sym,years}),25000,{});
-      const j=await r.json();
-      if(Array.isArray(j)&&j.length>100){
-        const newBars=[];
-        j.forEach(row=>{
-          const d=row[0],cl=+row[1],vol=(row.length>2?+row[2]:0)||0;
-          if(!cl||typeof d!=='string')return;
-          const t=new Date(d).getTime()/1000;
-          if(t<startTs-86400||t>endTs+86400)return;
-          newBars.push({date:d,close:cl,prev:null,vol,src:'bridge'});
-        });
-        if(newBars.length>100){
-          await idbHistPutBars(sym,newBars);
-          sbSaveDailyPrices(sym,Object.fromEntries(newBars.map(b=>[b.date,{close:b.close,vol:b.vol}])));
-          const full=await idbHistGetRange(sym,startDate,endDate);
-          if(Object.keys(full).length>50){clearHistFetchFailure(sym);return full;}
+  function db(){return new Promise((res,rej)=>{if(typeof indexedDB==='undefined')return rej(new Error('no IDB'));const r=indexedDB.open(EOD2_DB,1);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains(EOD2_STORE))d.createObjectStore(EOD2_STORE,{keyPath:'k'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  async function idbGet(k){try{const d=await db();return await new Promise(res=>{const q=d.transaction(EOD2_STORE).objectStore(EOD2_STORE).get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null);});}catch(e){return null;}}
+  async function idbPut(v){try{const d=await db();await new Promise(res=>{const tx=d.transaction(EOD2_STORE,'readwrite');tx.objectStore(EOD2_STORE).put(v);tx.oncomplete=res;tx.onerror=res;});}catch(e){}}
+  // Retention: current + previous dataset only.
+  async function idbRetain(keep){try{const d=await db();await new Promise(res=>{const tx=d.transaction(EOD2_STORE,'readwrite');const q=tx.objectStore(EOD2_STORE).openCursor();q.onsuccess=()=>{const c=q.result;if(!c)return;if(!keep.includes(String(c.key).split(':')[1]))c.delete();c.continue();};tx.oncomplete=res;tx.onerror=res;});}catch(e){}}
+  // One-time purge of mixed-provider history (Yahoo/Supabase/bridge/close-only
+  // bars and old TENET:* series). Pure cache: ledger, pairs, credentials untouched.
+  function purgeLegacy(){
+    if(purgeP)return purgeP;
+    purgeP=(async()=>{
+      try{if(localStorage.getItem('eod2_legacy_purged_v321'))return;}catch(e){return;}
+      try{Object.keys(localStorage).filter(k=>k.startsWith('bth_')).forEach(k=>localStorage.removeItem(k));}catch(e){}
+      try{
+        const d=await openHistDB();
+        await new Promise(res=>{const tx=d.transaction(HIST_STORE,'readwrite');tx.objectStore(HIST_STORE).clear();tx.oncomplete=res;tx.onerror=res;});
+        localStorage.setItem('eod2_legacy_purged_v321',new Date().toISOString());
+      }catch(e){console.warn('EOD2 legacy purge',e);}
+    })();
+    return purgeP;
+  }
+  async function loadManifest(force=false){
+    if(!force&&man&&Date.now()-manAt<10*60*1000)return man;
+    if(manP)return manP;
+    manP=(async()=>{
+      await purgeLegacy();
+      let r;
+      try{r=await fetch(EOD2_BASE+'manifest.json?t='+Date.now(),{cache:'no-store'});}
+      catch(e){throw new EOD2Block('',null,'MANIFEST_UNREACHABLE: '+(e&&e.message||e));}
+      if(!r.ok)throw new EOD2Block('',null,'MANIFEST_HTTP_'+r.status);
+      let m;try{m=await r.json();}catch(e){throw new EOD2Block('',null,'MANIFEST_INVALID_JSON');}
+      const bad=[];
+      if(m.dataset!=='EOD2')bad.push('dataset≠EOD2');
+      if(!/^[0-9a-f]{16,}$/i.test(String(m.datasetHash||'')))bad.push('datasetHash missing');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(m.latestSession||'')))bad.push('latestSession missing');
+      if(m.certification==='FAIL')bad.push('certification FAIL');
+      else if(!['PASS','PARTIAL'].includes(m.certification))bad.push('certification unknown');
+      if(m.providerMixing!==false)bad.push('providerMixing≠false');
+      if(m.fallbackUsed!==false)bad.push('fallbackUsed≠false');
+      if(!m.files||typeof m.files!=='object')bad.push('files missing');
+      if(bad.length)throw new EOD2Block('',m.latestSession||null,'MANIFEST_REJECTED: '+bad.join(', '));
+      try{
+        const cur=localStorage.getItem('eod2_cur_hash');
+        if(cur!==m.datasetHash){
+          if(cur)localStorage.setItem('eod2_prev_hash',cur);
+          localStorage.setItem('eod2_cur_hash',m.datasetHash);
+          mem.clear(); idbRetain([m.datasetHash,cur].filter(Boolean));
         }
-      }
-    }catch(e){swallow('fetchHistDaily/bridge',e);}
+      }catch(e){}
+      man=m;manAt=Date.now();return m;
+    })();
+    try{return await manP;}finally{manP=null;}
   }
+  const norm=s=>String(s||'').trim().toUpperCase();
+  function entryFor(m,sym){const f=m.files;for(const k of [sym,sym.replace(/ /g,'_')])if(f[k])return{key:k,...f[k]};return null;}
+  function quarantineOf(m,sym){const q=m.quarantined||{};return q[sym]||q[sym.replace(/ /g,'_')]||null;}
+  const num=v=>v==null||v===''?null:+v;
+  async function getSeries(sym,kind,retried=false){
+    const m=await loadManifest(), S0=norm(sym);
+    const q=quarantineOf(m,S0);
+    if(q)throw new EOD2Block(S0,m.latestSession,'QUARANTINED: '+[].concat(q).join('; '));
+    const e=entryFor(m,S0);
+    if(!e)throw new EOD2Block(S0,m.latestSession,'NOT_IN_CERTIFIED_EXPORT');
+    const k=`eod2:${m.datasetHash}:${e.key}`;
+    if(mem.has(k))return mem.get(k);
+    const hit=await idbGet(k);
+    if(hit&&hit.sha256===e.sha256&&Array.isArray(hit.bars)){mem.set(k,hit);return hit;}
+    const isIdx=kind==='INDEX'||kind==='IDX'||e.kind==='INDEX';
+    const path=String(e.path||((isIdx?'index/':'etf/')+e.key+'.json')).replace(/\\/g,'/').replace(/^\.?\/?(data\/)?/,'');
+    let text;
+    try{const r=await fetch(EOD2_BASE+path+'?h='+m.datasetHash.slice(0,12),{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);text=await r.text();}
+    catch(err){throw new EOD2Block(S0,m.latestSession,'FILE_UNREACHABLE: '+(err&&err.message||err));}
+    let got;
+    try{got=await sha256Hex(text.replace(/\r\n/g,'\n'));}catch(err){throw new EOD2Block(S0,m.latestSession,'SHA_UNVERIFIABLE: '+err.message);}
+    if(String(e.sha256||'').toLowerCase()!==got){
+      if(!retried){const m2=await loadManifest(true);if(m2.datasetHash!==m.datasetHash)return getSeries(sym,kind,true);}
+      throw new EOD2Block(S0,m.latestSession,`SHA_MISMATCH (manifest ${String(e.sha256||'').slice(0,12)}…, file ${got.slice(0,12)}…)`);
+    }
+    let j;try{j=JSON.parse(text);}catch(err){throw new EOD2Block(S0,m.latestSession,'FILE_INVALID_JSON');}
+    if(j.provider!=='EOD2'||!Array.isArray(j.bars)||!Array.isArray(j.fields))throw new EOD2Block(S0,m.latestSession,'FILE_CONTRACT: provider/fields/bars');
+    const fi=n=>j.fields.indexOf(n),iD=fi('date'),iO=fi('open'),iH=fi('high'),iL=fi('low'),iC=fi('close'),iV=fi('volume');
+    if(iD<0||iC<0)throw new EOD2Block(S0,m.latestSession,'FILE_CONTRACT: date/close fields');
+    const g=(b,i)=>i<0?null:num(b[i]);
+    const bars=j.bars.map(b=>[String(b[iD]),g(b,iO),g(b,iH),g(b,iL),g(b,iC),g(b,iV)]);
+    for(let i=1;i<bars.length;i++)if(!(bars[i][0]>bars[i-1][0]))throw new EOD2Block(S0,bars[i][0],'FILE_UNSORTED_OR_DUPLICATE_DATE');
+    const rec={k,sym:S0,kind:j.kind||(isIdx?'INDEX':'ETF'),sha256:e.sha256,first:bars[0]&&bars[0][0],last:bars.length?bars[bars.length-1][0]:null,bars};
+    mem.set(k,rec); idbPut(rec); return rec;
+  }
+  // Returns the app's existing hist shape: {date:{open,high,low,close,adjClose,prev,vol,_src}}
+  async function getHist(sym,kind,from,to){
+    try{
+      const m=await loadManifest();
+      if(pin&&m.datasetHash!==pin)throw new EOD2Block(norm(sym),m.latestSession,'DATASET_CHANGED_MID_RUN');
+      const rec=await getSeries(sym,kind);
+      const end=to>m.latestSession?m.latestSession:to;
+      const out={};let prev=null;const bad=[];const isEtf=!(kind==='INDEX'||kind==='IDX'||rec.kind==='INDEX');
+      for(const b of rec.bars){
+        const [d,o,h,l,c,v]=b; if(d>end)break;
+        if(d>=from){
+          const bar={open:o,high:h,low:l,close:c,adjClose:c,prev,vol:v||0,_src:'eod2',src:'eod2'};
+          if(!validateBar(bar))bad.push(d);
+          else if(isEtf&&!(o>0&&h>0&&l>0))bad.push(d);
+          out[d]=bar;
+        }
+        prev=c;
+      }
+      if(bad.length)throw new EOD2Block(rec.sym,bad[0],`INVALID_OR_CLOSE_ONLY_BAR ×${bad.length}`);
+      if(!Object.keys(out).length)throw new EOD2Block(rec.sym,from,`NO_BARS_IN_RANGE (series ${rec.first}→${rec.last})`);
+      return out;
+    }catch(e){
+      const b=e instanceof EOD2Block?e:new EOD2Block(norm(sym),null,'LOADER_ERROR: '+(e&&e.message||e));
+      if(depth>0&&!blocks.some(x=>x.message===b.message))blocks.push(b);
+      throw b;
+    }
+  }
+  function beginRun(hash){if(depth++===0){pin=hash;blocks=[];}}
+  function endRun(){if(--depth<=0){depth=0;pin=null;}}
+  function takeBlocks(){const b=blocks;if(depth===0)blocks=[];return b;}
+  function stamp(m){return{dataset:'EOD2',datasetHash:m.datasetHash,latestSession:m.latestSession,certification:m.certification,quarantined:Object.keys(m.quarantined||{}).length,fallbackUsed:'NO',exporter:m.exporter_version||''};}
+  // Diagnostic: fetch + SHA-verify every file in the manifest.
+  async function verifyAll(onProgress){
+    const m=await loadManifest(true),res=[];const keys=Object.keys(m.files);
+    for(let i=0;i<keys.length;i++){const k=keys[i];try{const r=await getSeries(k,m.files[k].kind);res.push({sym:k,ok:true,bars:r.bars.length,first:r.first,last:r.last});}catch(e){res.push({sym:k,ok:false,reason:e.reason||e.message});}if(onProgress)onProgress(i+1,keys.length);}
+    return {manifest:stamp(m),results:res};
+  }
+  return {loadManifest,getSeries,getHist,expectedLatest,istNow,beginRun,endRun,takeBlocks,stamp,verifyAll,_mem:mem};
+})();
 
-  // Return whatever IDB has for the full window now
-  const final=await idbHistGetRange(sym,startDate,endDate);
-  if(Object.keys(final).length>50){clearHistFetchFailure(sym);return final;}
-  // Last resort: return whatever we fetched from Yahoo + what was already cached
-  const merged={...cached,...fetchData};
-  const mergedFiltered={};
-  Object.keys(merged).filter(d=>d>=startDate&&d<=endDate).forEach(d=>{mergedFiltered[d]=merged[d];});
-  if(Object.keys(mergedFiltered).length>50) clearHistFetchFailure(sym);
-  else recordHistFetchFailure(sym);
-  return mergedFiltered;
+// Pre-run gate: dataset validity, certified-window start, end vs latestSession,
+// zero-lag freshness for latest-mode. Returns an error string or null.
+async function eod2Preflight(from,to){
+  let m;try{m=await EOD2Store.loadManifest();}catch(e){return e.message;}
+  const now=EOD2Store.istNow(),today=now.date;
+  if(from&&m.windowStart&&from<m.windowStart)return new EOD2Block('DATASET',from,`START_BEFORE_CERTIFIED_WINDOW (${m.windowStart})`).message;
+  if(!to||to>=today){
+    const ex=EOD2Store.expectedLatest(m,now);
+    if(m.latestSession<ex.date)return new EOD2Block('DATASET',m.latestSession,`STALE: latestSession ${m.latestSession} < expected ${ex.date} (cutoff 20:00 IST, calendar ${ex.calendar})`).message;
+  }else if(to>m.latestSession)return new EOD2Block('DATASET',to,`END_BEYOND_LATEST_SESSION (${m.latestSession})`).message;
+  return null;
+}
+async function eod2GuardRun(label,from,to,fn){
+  const pre=await eod2Preflight(from,to);
+  if(pre)return{error:pre+' — No backtest was run.',blocked:true};
+  const m=await EOD2Store.loadManifest();
+  EOD2Store.beginRun(m.datasetHash);
+  let r;try{r=await fn();}finally{EOD2Store.endRun();}
+  const bl=EOD2Store.takeBlocks();
+  if(r&&r.error&&bl.length)r={...r,error:bl.map(b=>b.message).join(' | ')+' — No backtest was run.',blocked:true};
+  if(r&&!r.error){r.dataStamp=EOD2Store.stamp(m);try{window.EOD2_LAST_STAMP={...r.dataStamp,strategy:label,from,to};eod2ShowStamp(label);}catch(e){}}
+  return r;
+}
+function eod2StampRow(){const s=(typeof window!=='undefined'&&window.EOD2_LAST_STAMP)||{};return['DataSource',s.dataset||'UNSTAMPED','DatasetHash',s.datasetHash||'','LatestSession',s.latestSession||'','Certification',s.certification||'','FallbackUsed',s.fallbackUsed||'','',''];}
+function eod2ShowStamp(label){try{const s=window.EOD2_LAST_STAMP;if(!s)return;const anchor=document.getElementById(label==='DM'?'dm-progress':'bt-progress-wrap');if(!anchor||!anchor.parentNode)return;const id='eod2-stamp-'+label;let el=document.getElementById(id);if(!el){el=document.createElement('div');el.id=id;el.style.cssText='font-size:10px;color:var(--fog);margin-top:6px;font-family:monospace';anchor.parentNode.insertBefore(el,anchor.nextSibling);}el.textContent=`Data: EOD2 · hash ${String(s.datasetHash).slice(0,12)} · latest ${s.latestSession} · cert ${s.certification} · Fallback used: NO`;}catch(e){}}
+async function eod2VerifyAllUI(){
+  toast('EOD2: verifying all certified files…','ok');
+  try{const r=await EOD2Store.verifyAll();const bad=r.results.filter(x=>!x.ok);
+    const msg=`EOD2 ${r.manifest.certification} · ${r.manifest.latestSession} · ${r.results.length-bad.length}/${r.results.length} verified`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'');
+    console.log('[EOD2 verifyAll]',r);toast(msg,bad.length?'err':'ok');alert(msg);return r;}
+  catch(e){toast(e.message,'err');alert(e.message);}
 }
 
+// V3.21: EOD2-only history. Signature and return shape unchanged, so every
+// caller (frozen LIFO/DM cores, validators, live 52WL, benchmark card) moves to
+// certified data without touching a frozen function. Throws EOD2Block on defect.
+async function fetchHistDaily(sym,yfSym,startTs,endTs){
+  const startDate=fmt(new Date(startTs*1000)),endDate=fmt(new Date(endTs*1000));
+  let out;
+  try{out=await EOD2Store.getHist(sym,'ETF',startDate,endDate);}
+  catch(e){recordHistFetchFailure(sym);throw e;}
+  // Mirror certified bars into the live-reader cache (getLive52WL, bar-fill).
+  // Backtests never read this store.
+  await idbHistPutBars(sym,Object.entries(out).map(([date,v])=>({date,...v})));
+  clearHistFetchFailure(sym);
+  return out;
+}
+
+// Legacy Yahoo reader: no longer called by any history path (kept inert).
 async function fetchHistoricalData(yfSym,startTs,endTs,ck){
   const sym=yfSym.replace('.NS','');
   const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?period1=${startTs}&period2=${endTs}&interval=1d&events=history`;
@@ -9168,6 +9283,7 @@ function exportBtCSV(){
     ['Buy Date','ETF','Buy Price','Qty','Invested','Sell Date','Sell Price','Hold Days','Avg Count','Net P&L','P&L%','Exit'],
   ];
   BT.trades.forEach(t=>rows.push([t.buyDate,t.sym,t.buyPrice.toFixed(2),t.qty,t.invested.toFixed(0),t.sellDate,t.sellPrice.toFixed(2),t.holdDays,t.avgCount,t.netPnl.toFixed(0),t.pnlPct.toFixed(2),t.exitReason]));
+  rows.splice(2,0,eod2StampRow());
   dlCSV(rows,'lifo_backtest');
 }
 function renderBtInventoryCard(){
@@ -9681,7 +9797,24 @@ async function addSingleETF(){
   if(!v){toast('Enter symbol','err');return;}
   if(v.length<2||v.length>20){toast('Symbol must be 2–20 letters/digits','err');return;}if(S.universe.some(e=>e.sym===v)){toast(v+' already in universe','warn');return;}const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const linkedIndex=sanIndexName(document.getElementById('uni-linked-index')?.value||'');const linkedIndexYf=sanIndexTicker(document.getElementById('uni-linked-index-yf')?.value||'');S.universe.push({sym:v,yf:v+'.NS',name:v,tag,assetClass,linkedIndex,linkedIndexYf});rebuildUniverses();saveState();document.getElementById('uni-single').value='';if(document.getElementById('uni-linked-index'))document.getElementById('uni-linked-index').value='';if(document.getElementById('uni-linked-index-yf'))document.getElementById('uni-linked-index-yf').value='';renderUniverse();populateLifoDropdown();tenetPopulatePairBuilder();await syncUniverseToSB();}
 async function addBulkETFs(){const raw=document.getElementById('uni-bulk').value||'';const syms=raw.split(/[,\n\r]+/).map(s=>s.trim().toUpperCase().replace(/\.NS$/i,'').replace(/[^A-Z0-9]/g,'')).filter(s=>s.length>=2&&s.length<=20);const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const news=syms.filter(s=>!S.universe.some(e=>e.sym===s));if(!news.length){toast('All already in universe','warn');return;}news.forEach(s=>S.universe.push({sym:s,yf:s+'.NS',name:s,tag,assetClass}));rebuildUniverses();saveState();document.getElementById('uni-bulk').value='';renderUniverse();populateLifoDropdown();await syncUniverseToSB();toast(`Added ${news.length} ETF(s) tagged ${tag}`,'ok');}
-async function removeETF(s){S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
+async function removeETF(s){
+  // S0-6b: this path bypassed Tenet pair protection completely. Deleting an ETF
+  // from Master Universe could orphan a live Tenet pair — or a pair with an OPEN
+  // position — leaving holdings whose reference mapping no longer exists.
+  const _t=(S.tenet&&S.tenet.pairs)?S.tenet:null;
+  if(_t){
+    if((_t.holdings||[]).some(h=>h.etf===s))
+      return toast(`${s} has an open Tenet position. Sell it before removing the instrument.`,'warn');
+    const inPair=(_t.pairs||[]).find(p=>p.green===s||p.red===s);
+    if(inPair&&!confirm(`${s} is assigned to the Tenet slot "${inPair.underlying}".\n\nRemoving it will clear that side of the pair and change future per-buy sizing.\n\nContinue?`))return;
+    if(inPair){
+      _t.pairs=(_t.pairs||[]).map(p=>p.green===s?{...p,green:''}:p.red===s?{...p,red:''}:p)
+        .filter(p=>p.green||p.red);
+    }
+  }
+  S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();
+  if(_t&&typeof tenetRenderPairList==='function'){tenetRenderPairList();tenetRenderHoldings();}
+  await syncUniverseToSB();}
 async function resetToDefault(){if(!confirm('Reset universe to defaults?'))return;S.universe=buildDefaultUniverse();rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
 async function clearAllETFs(){
   if(!confirm('Clear entire universe?'))return;
@@ -10230,6 +10363,7 @@ function factoryReset(){
 // Source of truth: user-supplied Tenet Homa Version 2.0 rules.
 // IMPORTANT: this module shares only market-data/cache helpers with AlphaDesk.
 // It does not call or mutate the proven LIFO or Dual Momentum strategy cores.
+const TENET_HOLIDAY_CALENDAR_YEAR=2026;
 const TENET_NSE_HOLIDAYS_2026=[
   '2026-01-15','2026-01-26','2026-02-19','2026-03-03','2026-03-19','2026-03-26','2026-03-31','2026-04-01','2026-04-03','2026-04-14',
   '2026-05-01','2026-05-28','2026-06-26','2026-08-26','2026-09-14','2026-10-02','2026-10-20','2026-11-10','2026-11-24','2026-12-25'
@@ -10237,8 +10371,16 @@ const TENET_NSE_HOLIDAYS_2026=[
 function tenetDefaults(){return{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[]};}
 function tenetState(){
   if(!S.tenet)S.tenet={};const t=S.tenet;
-  t.config={...tenetDefaults(),...(t.config||{})};
-  if(t.config.selectionDistancePct==null&&t.config.highExclusionPct!=null)t.config.selectionDistancePct=+t.config.highExclusionPct||5;
+  // S0-2: legacy migration must read RAW stored config. It previously ran after
+  // the defaults merge, by which point selectionDistancePct was always present
+  // (defaulted to 5), so the `==null` test never fired and an old
+  // highExclusionPct setting was silently discarded.
+  const _rawCfg=t.config||{};
+  if(_rawCfg.selectionDistancePct==null&&_rawCfg.highExclusionPct!=null){
+    const legacy=parseFloat(_rawCfg.highExclusionPct);
+    if(Number.isFinite(legacy))_rawCfg.selectionDistancePct=Math.min(100,Math.max(0,legacy));
+  }
+  t.config={...tenetDefaults(),..._rawCfg};
   t.capital=Array.isArray(t.capital)?t.capital:[];t.pairs=Array.isArray(t.pairs)?t.pairs:[];t.holdings=Array.isArray(t.holdings)?t.holdings:[];t.sold=Array.isArray(t.sold)?t.sold:[];t.bidWeeks=t.bidWeeks||{};t.universeHistory=Array.isArray(t.universeHistory)?t.universeHistory:[];t._indexMetrics=t._indexMetrics||{};
   return t;
 }
@@ -10249,7 +10391,27 @@ function tenetDaysBetween(a,b){return Math.round((new Date(b+'T00:00:00Z')-new D
 function tenetISTNow(){const ps=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());const o=Object.fromEntries(ps.map(x=>[x.type,x.value]));return{date:`${o.year}-${o.month}-${o.day}`,minutes:(+o.hour%24)*60+(+o.minute),hour:+o.hour%24,minute:+o.minute};}
 function tenetHolidaySet(){const t=tenetState(),s=new Set(TENET_NSE_HOLIDAYS_2026);for(const d of (t.config.extraHolidays||[]))if(/^\d{4}-\d{2}-\d{2}$/.test(d))s.add(d);return s;}
 function tenetWeekCalendar(date){const mon=tenetWeekKey(date),h=tenetHolidaySet(),sessions=[];for(let i=0;i<5;i++){const d=new Date(mon+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+i);const k=d.toISOString().slice(0,10);if(!h.has(k))sessions.push(k);}return{weekKey:mon,first:sessions[0]||null,last:sessions.at(-1)||null,sessions};}
-function tenetLiveGate(){const now=tenetISTNow(),cal=tenetWeekCalendar(now.date),isFinal=now.date===cal.last,after3=now.minutes>=tenetState().config.signalAfterMinutes;return{...now,...cal,isFinal,after3,actionable:!!(isFinal&&after3)};}
+function tenetLiveGate(){
+  // S0-3: the gate opened after 15:00 with NO upper bound, so it stayed
+  // "actionable" all evening and all night on the final session's date — long
+  // after NSE closed, against stale prices. It also trusted a hardcoded 2026
+  // holiday table: from 2027 onward every Mon-Fri looks like a trading session,
+  // so a holiday would be mistaken for the week's final session. Both are
+  // fail-closed now.
+  const now=tenetISTNow(),cal=tenetWeekCalendar(now.date),cfg=tenetState().config;
+  const closeMin=Number.isFinite(cfg.sessionCloseMinutes)?cfg.sessionCloseMinutes:(15*60+30);
+  const isFinal=now.date===cal.last;
+  const after3=now.minutes>=cfg.signalAfterMinutes;
+  const beforeClose=now.minutes<=closeMin;
+  const calYear=+String(now.date).slice(0,4);
+  const calendarStale=calYear>TENET_HOLIDAY_CALENDAR_YEAR&&!(cfg.extraHolidays||[]).some(d=>String(d).startsWith(calYear+'-'));
+  let blockedReason='';
+  if(!isFinal)blockedReason=`Not the final NSE session of this week (final: ${cal.last||'unknown'})`;
+  else if(!after3)blockedReason=`Action window opens at ${String(Math.floor(cfg.signalAfterMinutes/60)).padStart(2,'0')}:${String(cfg.signalAfterMinutes%60).padStart(2,'0')} IST`;
+  else if(!beforeClose)blockedReason=`Session closed at ${String(Math.floor(closeMin/60)).padStart(2,'0')}:${String(closeMin%60).padStart(2,'0')} IST — prices are no longer live`;
+  else if(calendarStale)blockedReason=`No verified NSE holiday calendar for ${calYear} — add ${calYear} holidays in Tenet settings before acting`;
+  return{...now,...cal,isFinal,after3,beforeClose,calendarStale,blockedReason,
+    actionable:!!(isFinal&&after3&&beforeClose&&!calendarStale)};}
 function tenetAllocatedCapital(){return Math.max(0,tenetState().capital.reduce((a,x)=>a+(+x.amount||0),0));}
 function tenetRealizedProfit(){return tenetState().sold.reduce((a,x)=>a+(+x.profit||0),0);}
 function tenetOpenCost(hold=tenetState().holdings){return hold.reduce((a,x)=>a+(+x.buyPrice||0)*(+x.qty||0),0);}
@@ -10261,14 +10423,31 @@ function tenetAddCapital(){const a=+prompt('Capital to add (₹):','100000');if(
 function tenetWithdrawCapital(){const t=tenetState(),a=+prompt('Capital to withdraw/reduce from Tenet allocation (₹):','100000');if(!(a>0))return;const next=tenetAllocatedCapital()-a;if(next<0)return toast('Withdrawal exceeds allocated Tenet capital','warn');if(next<tenetOpenCost())return toast('Cannot reduce allocation below current open cost basis','warn');t.capital.push({date:tenetISTNow().date,amount:-a,type:'WITHDRAW'});saveState();tenetRenderHoldings();}
 function sanIndexName(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9 &()\/\-]/g,'').slice(0,60);}
 function sanIndexTicker(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9^&.\-]/g,'').slice(0,40);}
-function tenetEtfTurnover(sym){const q=PRICES[sym]||{};return (+q.cmp||0)*(+q.vol||0);}
+// S1-2: this read the LIVE PRICES map unconditionally, so a historical run
+// broke ties on TODAY's turnover — state contamination from outside the
+// simulated timeline. Callers in a backtest now pass point-in-time turnover.
+function tenetEtfTurnover(sym,ctx){
+  if(ctx&&Object.prototype.hasOwnProperty.call(ctx,sym))return +ctx[sym]||0;
+  if(ctx)return 0;                      // historical context supplied but symbol absent
+  const q=PRICES[sym]||{};return (+q.cmp||0)*(+q.vol||0);
+}
 function tenetIndexRegistry(){const m=new Map();for(const e of (S.universe||[])){const name=sanIndexName(e.linkedIndex);if(!name)continue;const yf=sanIndexTicker(e.linkedIndexYf);if(!m.has(name))m.set(name,{name,yf,etfs:[]});const x=m.get(name);if(!x.yf&&yf)x.yf=yf;if(yf&&x.yf&&x.yf!==yf)x.conflict=true;x.etfs.push(e.sym);}for(const x of m.values())x.etfs=[...new Set(x.etfs)].sort((a,b)=>tenetEtfTurnover(b)-tenetEtfTurnover(a)||a.localeCompare(b));return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name));}
 function tenetIndexOptions(selected=''){return '<option value="">Select linked index…</option>'+tenetIndexRegistry().map(x=>`<option value="${escapeHtml(x.name)}" ${x.name===selected?'selected':''}>${escapeHtml(x.name)}${x.yf?' · '+escapeHtml(x.yf):''} (${x.etfs.length} ETF${x.etfs.length===1?'':'s'})</option>`).join('');}
 function tenetEtfOptions(index,selected='',allowBlank=false){const reg=tenetIndexRegistry().find(x=>x.name===sanIndexName(index)),syms=reg?.etfs||[];return (allowBlank?'<option value="">— None —</option>':'<option value="">Select ETF…</option>')+syms.map((sym,i)=>`<option value="${escapeHtml(sym)}" ${sym===selected?'selected':''}>${escapeHtml(sym)}${tenetEtfTurnover(sym)>0?' · turnover '+fmtINR(tenetEtfTurnover(sym)):''}${i===0?' · highest':''}</option>`).join('');}
 function tenetOnUnderlyingChange(){const u=sanIndexName(document.getElementById('tenet-pair-underlying')?.value),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(g)g.innerHTML=tenetEtfOptions(u,'',false);if(r)r.innerHTML=tenetEtfOptions(u,'',true);}
 function tenetPopulatePairBuilder(){const u=document.getElementById('tenet-pair-underlying'),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(!u||!g||!r)return;const keep=sanIndexName(u.value);u.innerHTML=tenetIndexOptions(keep);if(keep)u.value=keep;const active=sanIndexName(u.value);g.innerHTML=tenetEtfOptions(active,g.value,false);r.innerHTML=tenetEtfOptions(active,r.value,true);tenetRenderPairList();tenetFillConfigUI();}
 function tenetValidatePairs(pairs=tenetState().pairs){const regs=new Map(tenetIndexRegistry().map(x=>[x.name,x])),master=new Map((S.universe||[]).map(e=>[e.sym,e])),errs=[],seenU=new Set(),seenEtf=new Map();if(pairs.length>tenetState().config.maxGreen)errs.push(`Maximum ${tenetState().config.maxGreen} GREEN slots exceeded`);for(const [i,p] of pairs.entries()){const u=sanIndexName(p.underlying),g=sanSym(p.green),r=sanSym(p.red);if(!u||!g)errs.push(`Slot ${i+1}: underlying index and GREEN ETF are required`);if(u&&!regs.has(u))errs.push(`Slot ${i+1}: ${u} is not linked in Master Universe`);for(const [role,sym] of [['GREEN',g],['RED',r]])if(sym){const e=master.get(sym);if(!e)errs.push(`Slot ${i+1}: ${role} ${sym} is not in Master Universe`);else if(sanIndexName(e.linkedIndex)!==u)errs.push(`Slot ${i+1}: ${role} ${sym} is linked to ${e.linkedIndex||'no index'}, not ${u}`);if(seenEtf.has(sym))errs.push(`ETF ${sym} is already used in ${seenEtf.get(sym)}; Tenet scanner ETFs must be unique`);else seenEtf.set(sym,`${role} slot ${i+1}`);}if(g&&r&&g===r)errs.push(`Slot ${i+1}: GREEN and RED cannot be the same ETF`);if(seenU.has(u))errs.push(`Slot ${i+1}: duplicate underlying index ${u}`);seenU.add(u);}return errs;}
-function tenetAddPairFromBuilder(){const t=tenetState(),u=sanIndexName(document.getElementById('tenet-pair-underlying')?.value),g=sanSym(document.getElementById('tenet-pair-green')?.value),r=sanSym(document.getElementById('tenet-pair-red')?.value);if(!u||!g)return toast('Choose an underlying index and GREEN ETF','warn');if(g===r&&r)return toast('GREEN and RED must be different ETFs','warn');const idx=t.pairs.findIndex(p=>sanIndexName(p.underlying)===u),old=idx>=0?t.pairs[idx]:null;if(!old&&t.pairs.length>=t.config.maxGreen)return toast(`Tenet allows a maximum of ${t.config.maxGreen} GREEN slots`,'warn');if(old){const heldOld=[old.green,old.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));const removing=heldOld.filter(sym=>sym!==g&&sym!==r);if(removing.length)return toast(`Cannot replace ${removing.join(', ')} while Tenet holdings are still open`,'warn');}
+function tenetAddPairFromBuilder(){const t=tenetState(),u=sanIndexName(document.getElementById('tenet-pair-underlying')?.value),g=sanSym(document.getElementById('tenet-pair-green')?.value),r=sanSym(document.getElementById('tenet-pair-red')?.value);if(!u||!g)return toast('Choose an underlying index and GREEN ETF','warn');if(g===r&&r)return toast('GREEN and RED must be different ETFs','warn');const idx=t.pairs.findIndex(p=>sanIndexName(p.underlying)===u),old=idx>=0?t.pairs[idx]:null;if(!old&&t.pairs.length>=t.config.maxGreen)return toast(`Tenet allows a maximum of ${t.config.maxGreen} GREEN slots`,'warn');if(old){
+    // S0-6a: the old guard only checked that a held symbol still appeared
+    // SOMEWHERE in the new pair, so swapping it from GREEN to RED passed. That
+    // silently flips the weekly direction test and the BID team check for an
+    // already-open position. A held ETF must stay on the exact same side.
+    const heldOf=sym=>!!sym&&t.holdings.some(h=>h.etf===sym);
+    const viol=[];
+    if(heldOf(old.green)&&old.green!==g)viol.push(`${old.green} (held on GREEN)`);
+    if(heldOf(old.red)&&old.red!==(r||''))viol.push(`${old.red} (held on RED)`);
+    if(viol.length)return toast(`Cannot change ${viol.join(' and ')} while Tenet holdings are open. Sell the position first, or add a new slot.`,'warn');
+  }
   const next=t.pairs.map(x=>({...x})),pair={underlying:u,green:g,red:r||''};if(idx>=0)next[idx]=pair;else next.push(pair);const errs=tenetValidatePairs(next);if(errs.length)return toast(errs[0],'err');t.pairs=next;saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Tenet slot saved: ${u} → GREEN ${g}${r?' / RED '+r:''}`,'ok');}
 function tenetEditPair(underlying){const p=tenetState().pairs.find(x=>x.underlying===underlying);if(!p)return;const u=document.getElementById('tenet-pair-underlying'),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(!u||!g||!r)return;u.innerHTML=tenetIndexOptions(p.underlying);u.value=p.underlying;g.innerHTML=tenetEtfOptions(p.underlying,p.green,false);r.innerHTML=tenetEtfOptions(p.underlying,p.red||'',true);g.value=p.green;r.value=p.red||'';u.scrollIntoView({behavior:'smooth',block:'center'});}
 function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.underlying===underlying);if(!p)return;const held=[p.green,p.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));if(held.length)return toast(`Keep this scanner slot until holdings are fully sold: ${held.join(', ')}`,'warn');t.pairs=t.pairs.filter(x=>x.underlying!==underlying);saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Removed ${underlying} from Tenet scanner`,'ok');}
@@ -10276,25 +10455,198 @@ function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanInd
 async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}e.linkedIndex=clean;e.linkedIndexYf=yf;saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
 function tenetRenderPairList(){const host=document.getElementById('tenet-pair-list'),msg=document.getElementById('tenet-pair-validation');if(!host)return;const t=tenetState(),errs=tenetValidatePairs(),conflicts=tenetIndexRegistry().filter(x=>x.conflict),activeEtfs=tenetActiveEtfs(),per=tenetPerBuy();if(msg){msg.style.color=errs.length||conflicts.length?'var(--bad)':'var(--go)';msg.textContent=errs.length?`⚠ ${errs.join(' · ')}`:conflicts.length?`⚠ Conflicting Yahoo index tickers: ${conflicts.map(x=>x.name).join(', ')}`:`✓ ${t.pairs.length}/${t.config.maxGreen} GREEN slots · ${activeEtfs.length} actual ETFs · per-buy ${fmtINR(per)}.`;}
   host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=t._indexMetrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
-function tenetSaveConfigFromUI(){const t=tenetState(),num=id=>+document.getElementById(id)?.value;t.config.firstTargetPct=Math.max(0,num('tenet-cfg-target')||3.14);t.config.targetStepPct=Math.max(0,num('tenet-cfg-step')||0);t.config.avgTriggerPct=Math.max(0,num('tenet-cfg-bid')||3.14);t.config.selectionDistancePct=Math.max(0,num('tenet-cfg-52w')||5);t.config.requireVerifiedLive=(document.getElementById('tenet-cfg-data-safety')?.value||'verified')==='verified';const raw=document.getElementById('tenet-cfg-holidays')?.value||'';t.config.extraHolidays=[...new Set(raw.split(/[\s,;]+/).map(x=>x.trim()).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)))];saveState();tenetRenderPairList();tenetRenderSignals();toast('Tenet 2.0 rule + data-safety settings saved','ok');}
+function tenetSaveConfigFromUI(){const t=tenetState();
+  // S0-1: `+el.value || fallback` silently rewrote an explicit 0 back to the
+  // default — the same defect class already fixed twice in the LIFO engine. A
+  // 52W threshold of 0 is a legitimate setting (accept every distance); it must
+  // survive a save. Fall back ONLY when the value is absent or non-finite.
+  const num=(id,fallback)=>{const el=document.getElementById(id);if(!el)return fallback;
+    const raw=String(el.value??'').trim();if(raw==='')return fallback;
+    const v=parseFloat(raw);return Number.isFinite(v)?v:fallback;};
+  t.config.firstTargetPct=Math.max(0,num('tenet-cfg-target',3.14));
+  t.config.targetStepPct=Math.max(0,num('tenet-cfg-step',1.5));
+  t.config.avgTriggerPct=Math.max(0,num('tenet-cfg-bid',3.14));
+  t.config.selectionDistancePct=Math.min(100,Math.max(0,num('tenet-cfg-52w',5)));t.config.requireVerifiedLive=(document.getElementById('tenet-cfg-data-safety')?.value||'verified')==='verified';const raw=document.getElementById('tenet-cfg-holidays')?.value||'';t.config.extraHolidays=[...new Set(raw.split(/[\s,;]+/).map(x=>x.trim()).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)))];saveState();tenetRenderPairList();tenetRenderSignals();toast('Tenet 2.0 rule + data-safety settings saved','ok');}
 function tenetFillConfigUI(){const t=tenetState(),set=(id,v)=>{const e=document.getElementById(id);if(e&&document.activeElement!==e)e.value=v??'';};set('tenet-cfg-target',t.config.firstTargetPct);set('tenet-cfg-step',t.config.targetStepPct);set('tenet-cfg-bid',t.config.avgTriggerPct);set('tenet-cfg-52w',t.config.selectionDistancePct);set('tenet-cfg-data-safety',t.config.requireVerifiedLive===false?'fallback':'verified');set('tenet-cfg-holidays',(t.config.extraHolidays||[]).join(', '));}
 
 // Dedicated Tenet history adapter. It deliberately does NOT call fetchHistDaily()
 // for short index windows because that shared loader has long-history thresholds.
-async function tenetFetchHistory(kind,key,providerSymbol,yahooSymbol,startDate,endDate){const cacheKey=`TENET:${kind}:${sanIndexName(key)||sanSym(key)}`,cached=await idbHistGetRange(cacheKey,startDate,endDate),today=tenetISTNow().date,age=tenetDaysBetween(endDate,today),days=Math.max(1,tenetDaysBetween(startDate,endDate)+1),minBars=Math.max(1,Math.floor(days*0.42));if(age>5&&Object.keys(cached).length>=minBars)return cached;let merged={...cached};
-  if(S.config.marketBridgeUrl&&providerSymbol){try{const up=await marketBridgeHistory(providerSymbol,startDate,endDate);const bars=Object.entries(up).map(([date,v])=>({date,open:+v.open||null,high:+v.high||null,low:+v.low||null,close:+v.close,adjClose:+v.close,prev:v.prev||null,vol:+v.vol||0,src:'upstox'})).filter(validateBar);if(bars.length){await idbHistPutBars(cacheKey,bars);merged={...merged,...up};}}catch(e){console.warn('Tenet Upstox history',providerSymbol,e?.message||e);}}
-  if((!Object.keys(merged).length||age<=5)&&yahooSymbol){try{const st=Math.floor(new Date(startDate+'T00:00:00Z').getTime()/1000),en=Math.floor(new Date(endDate+'T23:59:59Z').getTime()/1000)+1,y=await fetchHistoricalData(yahooSymbol,st,en,`tenet_${kind}_${key}_${startDate}_${endDate}`);const bars=Object.entries(y).map(([date,v])=>({date,open:+v.open||null,high:+v.high||null,low:+v.low||null,close:+v.close,adjClose:+v.adjClose||+v.close,prev:v.prev||null,vol:+v.vol||0,src:'yahoo'})).filter(validateBar);if(bars.length){await idbHistPutBars(cacheKey,bars);merged={...merged,...y};}}catch(e){console.warn('Tenet Yahoo history',yahooSymbol,e?.message||e);}}
-  const final=await idbHistGetRange(cacheKey,startDate,endDate);return Object.keys(final).length?final:merged;}
+// ── S-MINUS-1: TENET DATA COVERAGE PROBE ─────────────────────────────────────
+// Runs BEFORE any Tenet build work. The lean plan's S3/S4 edge gate demands a
+// certified window of >=5 years with a >=2-year holdout across every instrument
+// it touches. Several preset ETFs are recent listings (silver and some sector
+// funds), so the intersection across all 16 may be far shorter than five years
+// — which would return INSUFFICIENT EVIDENCE no matter how well the engine is
+// built. This probe answers "is the gate reachable at all?" for a few minutes of
+// network time, before anyone writes engine code.
+//
+// It also probes the primary benchmark. Section 7 of the plan requires NIFTY 50
+// Total Return; plain unadjusted NIFTYBEES close is explicitly insufficient for
+// the primary verdict. If TRI is unreachable through the bridge, that is a
+// blocker to discover now, not at the checkpoint.
+const TENET_PROBE_FROM='2010-01-01';
+const TENET_TRI_CANDIDATES=['NIFTY 50 TRI','NIFTY 50 TOTAL RETURN','NIFTY TOTAL RETURN INDEX','NIFTY 50'];
+
+async function tenetProbeInstrument(label,kind,providerSymbol){
+  const to=tenetISTNow().date;
+  const rec={label,kind,symbol:providerSymbol||'',firstBar:null,lastBar:null,bars:0,error:''};
+  if(!providerSymbol){rec.error='no symbol configured';return rec;}
+  try{
+    const map=await marketBridgeHistory(providerSymbol,TENET_PROBE_FROM,to);
+    const dates=Object.keys(map||{}).filter(d=>+map[d]?.close>0).sort();
+    if(!dates.length){rec.error='bridge returned no usable bars';return rec;}
+    rec.firstBar=dates[0]; rec.lastBar=dates[dates.length-1]; rec.bars=dates.length;
+  }catch(e){rec.error=String(e?.message||e);}
+  return rec;
+}
+
+async function tenetRunCoverageProbe(){
+  const btn=document.getElementById('tenet-probe-btn');
+  const out=document.getElementById('tenet-probe-out');
+  const write=h=>{if(out){out.style.display='block';out.innerHTML=h;}};
+  if(!S.config.marketBridgeUrl){write('<div style="font-size:11px;color:var(--loss)">Market Bridge is not configured. The probe needs it to read history.</div>');return;}
+  const t=tenetState();
+  if(!t.pairs.length){write('<div style="font-size:11px;color:var(--loss)">Configure the Tenet pair universe first — there is nothing to probe.</div>');return;}
+  if(btn){btn.disabled=true;btn.textContent='⏳ Probing coverage…';}
+  write('<div style="font-size:11px;color:var(--fog)">Probing first-available bar for every ETF and underlying reference…</div>');
+
+  // Build the job list: every GREEN, every RED, every underlying reference.
+  const jobs=[];
+  t.pairs.forEach(p=>{
+    if(p.green)jobs.push({label:p.green,kind:'GREEN ETF',sym:p.green,pair:p.underlying});
+    if(p.red)  jobs.push({label:p.red,  kind:'RED ETF',  sym:p.red,  pair:p.underlying});
+    jobs.push({label:p.underlying,kind:'underlying',sym:tenetIndexYf(p.underlying)||p.underlying,pair:p.underlying});
+  });
+
+  let recs=[];
+  try{
+    // Concurrency 2 — same discipline as everywhere else; the bridge is rate-limited.
+    recs=await mapWithConcurrency(jobs,2,async j=>{
+      const r=await tenetProbeInstrument(j.label,j.kind,j.sym);
+      return {...r,pair:j.pair};
+    });
+  }catch(e){
+    write(`<div style="font-size:11px;color:var(--loss)">Probe failed: ${escapeHtml(String(e?.message||e))}</div>`);
+    if(btn){btn.disabled=false;btn.textContent='◎ Run Coverage Probe';}
+    return;
+  }
+
+  // Benchmark probe — try each TRI candidate until one resolves.
+  let tri={found:false,symbol:'',firstBar:null,error:''};
+  for(const c of TENET_TRI_CANDIDATES){
+    const r=await tenetProbeInstrument(c,'benchmark',c);
+    if(r.bars>0){tri={found:true,symbol:c,firstBar:r.firstBar,error:''};break;}
+    tri.error=r.error;
+  }
+
+  const ok=recs.filter(r=>r.bars>0), bad=recs.filter(r=>!r.bars);
+  const today=tenetISTNow().date;
+  const yrs=(a,b)=>Math.max(0,(new Date(b)-new Date(a))/(365.25*86400000));
+
+  // STRICT: every instrument must have data (intersection across all 16+refs).
+  const strictStart=ok.length?ok.map(r=>r.firstBar).sort().slice(-1)[0]:null;
+  const strictYears=strictStart?yrs(strictStart,today):0;
+
+  // PER-PAIR: each pair contributes from its own inception. The longest-lived
+  // pair sets the achievable window if sizing uses the active count at each date.
+  const pairStarts={};
+  recs.forEach(r=>{
+    if(!r.bars){pairStarts[r.pair]='BLOCKED';return;}
+    if(pairStarts[r.pair]==='BLOCKED')return;
+    if(!pairStarts[r.pair]||r.firstBar>pairStarts[r.pair])pairStarts[r.pair]=r.firstBar;
+  });
+  const usablePairs=Object.entries(pairStarts).filter(([,v])=>v!=='BLOCKED');
+  const perPairStart=usablePairs.length?usablePairs.map(([,v])=>v).sort()[0]:null;
+  const perPairYears=perPairStart?yrs(perPairStart,today):0;
+
+  const verdict=(years)=>{
+    const holdout=years*0.30;
+    if(bad.length)return{cls:'loss',txt:`BLOCKED — ${bad.length} instrument${bad.length>1?'s have':' has'} no usable history`};
+    if(years>=5&&holdout>=2)return{cls:'gain',txt:`REACHABLE — ${years.toFixed(1)}y total, ${holdout.toFixed(1)}y holdout`};
+    if(years>=5)return{cls:'gold',txt:`MARGINAL — ${years.toFixed(1)}y total but holdout only ${holdout.toFixed(1)}y (need 2y)`};
+    return{cls:'loss',txt:`INSUFFICIENT — ${years.toFixed(1)}y total (need 5y), holdout ${holdout.toFixed(1)}y`};
+  };
+  const vStrict=verdict(strictYears), vPair=verdict(perPairYears);
+  const col=c=>c==='gain'?'var(--gain)':c==='gold'?'var(--gold)':'var(--loss)';
+  const bg =c=>c==='gain'?'rgba(34,197,94,.12)':c==='gold'?'rgba(234,179,8,.12)':'rgba(239,68,68,.12)';
+
+  const rows=recs.slice().sort((a,b)=>String(b.firstBar||'9999').localeCompare(String(a.firstBar||'9999')))
+    .map(r=>`<tr style="text-align:right;border-top:1px solid var(--line)">
+      <td style="text-align:left;padding:4px">${escapeHtml(r.label)}</td>
+      <td style="text-align:left;padding:4px;color:var(--fog)">${escapeHtml(r.kind)}</td>
+      <td class="mono" style="padding:4px;color:${r.bars?'var(--fg)':'var(--loss)'}">${r.firstBar||'—'}</td>
+      <td class="mono" style="padding:4px">${r.bars?yrs(r.firstBar,today).toFixed(1)+'y':'—'}</td>
+      <td class="mono" style="padding:4px">${r.bars||0}</td>
+      <td style="text-align:left;padding:4px;color:var(--loss);font-size:9px">${escapeHtml(r.error||'')}</td></tr>`).join('');
+
+  write(`
+  <div style="font-size:11px">
+    <div style="font-weight:600;margin-bottom:3px">🔍 Tenet Data Coverage Probe</div>
+    <div style="color:var(--fog);font-size:10px;margin-bottom:8px">
+      Probed ${recs.length} instruments as of ${today}. The S3/S4 edge gate needs ≥5 years certified
+      coverage with a ≥2-year holdout. This checks whether that gate is reachable before any engine work.
+    </div>
+    <div style="padding:7px 9px;border-radius:5px;margin-bottom:6px;background:${bg(vStrict.cls)};color:${col(vStrict.cls)};font-weight:600">
+      Strict (all instruments share one window): ${vStrict.txt}${strictStart?` · starts ${strictStart}`:''}
+    </div>
+    <div style="padding:7px 9px;border-radius:5px;margin-bottom:6px;background:${bg(vPair.cls)};color:${col(vPair.cls)};font-weight:600">
+      Per-pair (each pair joins at its own inception): ${vPair.txt}${perPairStart?` · oldest pair starts ${perPairStart}`:''}
+    </div>
+    <div style="padding:7px 9px;border-radius:5px;margin-bottom:9px;background:${tri.found?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)'};color:${tri.found?'var(--gain)':'var(--loss)'}">
+      Primary benchmark (NIFTY 50 Total Return): ${tri.found
+        ? `resolved as “${escapeHtml(tri.symbol)}” from ${tri.firstBar}`
+        : `NOT REACHABLE through the bridge. ${escapeHtml(tri.error||'')} — the plan rules unadjusted NIFTYBEES close insufficient for the primary verdict, so this must be sourced before S3.`}
+    </div>
+    <div style="color:var(--fog);font-size:10px;margin-bottom:4px">Per-pair earliest usable start:</div>
+    <div style="margin-bottom:9px;font-size:10px">${Object.entries(pairStarts).sort((a,b)=>String(b[1]).localeCompare(String(a[1])))
+      .map(([k,v])=>`<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 7px;border-radius:4px;background:var(--line)">${escapeHtml(k)}: <span class="mono">${v==='BLOCKED'?'<span style="color:var(--loss)">blocked</span>':v}</span></span>`).join('')}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px">
+      <tr style="color:var(--fog);text-align:right">
+        <th style="text-align:left;padding:4px">Instrument</th><th style="text-align:left;padding:4px">Role</th>
+        <th style="padding:4px">First bar</th><th style="padding:4px">Span</th><th style="padding:4px">Bars</th>
+        <th style="text-align:left;padding:4px">Error</th></tr>
+      ${rows}
+    </table>
+    <div style="color:var(--fog);margin-top:7px;font-size:9.5px">
+      Youngest instrument sets the strict window. If strict fails but per-pair passes, the design decision is
+      to let each pair join at its own inception with the active-ETF sizing denominator computed per date —
+      that preserves a long window on the older pairs instead of truncating everything to the newest.
+    </div>
+  </div>`);
+
+  if(btn){btn.disabled=false;btn.textContent='◎ Run Coverage Probe';}
+}
+
+async function tenetFetchHistory(kind,key,providerSymbol,yahooSymbol,startDate,endDate){
+  // V3.21: EOD2 certified export only. Upstox/Yahoo history removed.
+  const isIdx=kind==='IDX'||kind==='INDEX';
+  return EOD2Store.getHist(isIdx?sanIndexName(key):sanSym(key),isIdx?'INDEX':'ETF',startDate,endDate);
+}
 async function tenetYahooQuote(yf){if(!yf)return null;try{const u=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yf)}`,j=await yahooProxyFetch(u,8000,'Tenet index '+yf),q=j?.quoteResponse?.result?.[0];if(!q)return null;return{price:+q.regularMarketPrice||0,open:+q.regularMarketOpen||0,high:+q.regularMarketDayHigh||0,low:+q.regularMarketDayLow||0,asOf:q.regularMarketTime?new Date(q.regularMarketTime*1000).toISOString():new Date().toISOString(),source:'yahoo'};}catch(e){return null;}}
-async function tenetBridgeQuote(symbol){if(!S.config.marketBridgeUrl||!symbol)return null;const j=await marketBridgeFetch('/quotes',{symbols:symbol},10000),q=Array.isArray(j?.quotes)?j.quotes[0]:null;if(!q||!(+q.price>0))return null;return{price:+q.price,open:+q.open||0,high:+q.high||0,low:+q.low||0,asOf:q.asOf||new Date().toISOString(),source:'upstox'};}
+async function tenetBridgeQuote(symbol){if(!S.config.marketBridgeUrl||!symbol)return null;const j=await marketBridgeFetch('/quotes',{symbols:symbol},10000),q=Array.isArray(j?.quotes)?j.quotes[0]:null;if(!q||!(+q.price>0))return null;
+  // S0-5: `asOf: q.asOf || new Date()` stamped MISSING provider timestamps with
+  // the current time, so an arbitrarily stale quote presented as fresh and
+  // passed every downstream freshness check. The Worker itself fabricates a
+  // timestamp the same way. A quote with no verifiable observation time is
+  // marked untimestamped and must not authorise action.
+  const stamped=typeof q.asOf==='string'&&!Number.isNaN(Date.parse(q.asOf));
+  const ageSec=stamped?Math.max(0,(Date.now()-Date.parse(q.asOf))/1000):null;
+  return{price:+q.price,open:+q.open||0,high:+q.high||0,low:+q.low||0,
+    asOf:stamped?q.asOf:null,timestamped:stamped,ageSec,
+    stale:stamped?ageSec>900:true,
+    source:'upstox',
+    quality:stamped?(ageSec>900?'stale':'fresh'):'untimestamped'};}
 function tenetBarsInWeek(h,date){const wk=tenetWeekKey(date);return Object.keys(h||{}).filter(d=>tenetWeekKey(d)===wk&&d<=date&&h[d]?.close>0).sort();}
-async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){quote=await tenetBridgeQuote(index);if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+(h[firstDate].open||h[firstDate].close):0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
-  const yearDates=Object.keys(h).filter(d=>d<=date&&d>=histStart).sort().slice(-260),highs=yearDates.map(d=>+(h[d].high||h[d].close)||0).filter(v=>v>0);if(todayQuote?.high>0)highs.push(todayQuote.high);const high52=highs.length?Math.max(...highs):0,distance=high52>0&&close>0?(high52-close)/high52*100:null,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';return{index,yf,h,weekStart:firstDate,weekEnd:lastDate,open,close,direction,high52,distance,source:todayQuote?.source||(lastDate?h[lastDate]?._src:null),quote:todayQuote,liveFresh:!!todayQuote,verifiedLive:todayQuote?.source==='upstox'};}
-function tenetCandidateSort(a,b){const ta=a.team==='GREEN'?0:1,tb=b.team==='GREEN'?0:1;if(ta!==tb)return ta-tb;return (Number.isFinite(b.distance)?b.distance:-999)-(Number.isFinite(a.distance)?a.distance:-999)||tenetEtfTurnover(b.etf)-tenetEtfTurnover(a.etf)||a.etf.localeCompare(b.etf);}
+async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){quote=await tenetBridgeQuote(index);if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+h[firstDate].open:0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
+  const yearDates=Object.keys(h).filter(d=>d<=date&&d>=histStart).sort().slice(-260),highs=yearDates.map(d=>(+h[d].high||0)||0).filter(v=>v>0);if(todayQuote?.high>0)highs.push(todayQuote.high);const high52=highs.length?Math.max(...highs):0,distance=high52>0&&close>0?(high52-close)/high52*100:null,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';return{index,yf,h,weekStart:firstDate,weekEnd:lastDate,open,close,direction,high52,distance,source:todayQuote?.source||(lastDate?h[lastDate]?._src:null),quote:todayQuote,liveFresh:!!todayQuote,verifiedLive:todayQuote?.source==='upstox'};}
+// S1-2: turnoverCtx makes the tie-break point-in-time. Passing null keeps the
+// live behaviour (read PRICES); a backtest passes that session's turnover map.
+function tenetCandidateSort(a,b,turnoverCtx=null){const ta=a.team==='GREEN'?0:1,tb=b.team==='GREEN'?0:1;if(ta!==tb)return ta-tb;return (Number.isFinite(b.distance)?b.distance:-999)-(Number.isFinite(a.distance)?a.distance:-999)||tenetEtfTurnover(b.etf,turnoverCtx)-tenetEtfTurnover(a.etf,turnoverCtx)||a.etf.localeCompare(b.etf);}
 function tenetPriceQuality(sym){const t=tenetState(),f=priceFreshStatus(sym),verified=f.source==='UPSTOX',allowed=f.ok&&(t.config.requireVerifiedLive===false||verified);return{...f,verified,allowed,reason:!f.price?'price unavailable':!f.ok?`stale/not refreshed this session (${f.source||'unknown'})`:t.config.requireVerifiedLive!==false&&!verified?`source ${f.source||'unknown'} is not verified Upstox`:'ready'};}
-function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=tenetState().holdings,weekKey=null,requireLiveQuality=false}={}){const t=tenetState(),buys=[],bids=[],diag=[];for(const p of pairs){if(p.error){diag.push({underlying:p.underlying,status:'DATA ERROR',reason:p.error,indexSource:p.indexSource||''});continue;}for(const side of ['green','red']){const etf=p[side],team=side==='green'?'GREEN':'RED';if(!etf)continue;const candleOk=(team==='GREEN'&&p.direction==='BULLISH')||(team==='RED'&&p.direction==='BEARISH');if(!candleOk){diag.push({underlying:p.underlying,etf,team,status:'NO',reason:`${p.direction||'NO'} index candle`,indexSource:p.indexSource||''});continue;}const price=+(priceMap[etf]?.cmp||priceMap[etf]?.close||0);if(!(price>0)){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:'ETF price unavailable',indexSource:p.indexSource||''});continue;}if(requireLiveQuality&&priceMap===PRICES){const q=tenetPriceQuality(etf);if(!q.allowed){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:q.reason,priceSource:q.source,indexSource:p.indexSource||''});continue;}}const lots=holdings.filter(x=>x.etf===etf),base={etf,team,price,underlying:p.underlying,distance:p.distance,direction:p.direction,indexSource:p.indexSource||'',priceSource:priceMap===PRICES?String(PRICES[etf]?._src||''):''};if(!lots.length){buys.push(base);diag.push({...base,status:actionable?'BUY':'PREVIEW',reason:'team candle matched · not currently held'});}else{const last=tenetLatestLot(etf,holdings),fall=(last.buyPrice-price)/last.buyPrice*100;if(fall>=t.config.avgTriggerPct){bids.push({...base,fall,last});diag.push({...base,status:actionable?'BID ELIGIBLE':'PREVIEW BID',reason:`down ${fall.toFixed(2)}% from latest lot`});}else diag.push({...base,status:'NO',reason:`holding exists · fall ${fall.toFixed(2)}% < ${t.config.avgTriggerPct.toFixed(2)}%`});}}}
-  buys.sort(tenetCandidateSort);bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
-async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}t._indexMetrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive};}catch(e){return{...p,error:e?.message||String(e)}}});t._live=rows;const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · after 3:00 PM IST · live-data safety enforced`:`BUY/BID gate closed · final NSE session this week: ${gate.last||'unknown'} · directional preview may show now, but action buttons open only after 3:00 PM IST on that date. SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
+function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=tenetState().holdings,weekKey=null,requireLiveQuality=false,turnoverCtx=null}={}){const t=tenetState(),buys=[],bids=[],diag=[];for(const p of pairs){if(p.error){diag.push({underlying:p.underlying,status:'DATA ERROR',reason:p.error,indexSource:p.indexSource||''});continue;}for(const side of ['green','red']){const etf=p[side],team=side==='green'?'GREEN':'RED';if(!etf)continue;const candleOk=(team==='GREEN'&&p.direction==='BULLISH')||(team==='RED'&&p.direction==='BEARISH');if(!candleOk){diag.push({underlying:p.underlying,etf,team,status:'NO',reason:`${p.direction||'NO'} index candle`,indexSource:p.indexSource||''});continue;}const price=+(priceMap[etf]?.cmp||priceMap[etf]?.close||0);if(!(price>0)){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:'ETF price unavailable',indexSource:p.indexSource||''});continue;}if(requireLiveQuality&&priceMap===PRICES){const q=tenetPriceQuality(etf);if(!q.allowed){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:q.reason,priceSource:q.source,indexSource:p.indexSource||''});continue;}}const lots=holdings.filter(x=>x.etf===etf),base={etf,team,price,underlying:p.underlying,distance:p.distance,direction:p.direction,indexSource:p.indexSource||'',priceSource:priceMap===PRICES?String(PRICES[etf]?._src||''):''};if(!lots.length){buys.push(base);diag.push({...base,status:actionable?'BUY':'PREVIEW',reason:'team candle matched · not currently held'});}else{const last=tenetLatestLot(etf,holdings),fall=(last.buyPrice-price)/last.buyPrice*100;if(fall>=t.config.avgTriggerPct){bids.push({...base,fall,last});diag.push({...base,status:actionable?'BID ELIGIBLE':'PREVIEW BID',reason:`down ${fall.toFixed(2)}% from latest lot`});}else diag.push({...base,status:'NO',reason:`holding exists · fall ${fall.toFixed(2)}% < ${t.config.avgTriggerPct.toFixed(2)}%`});}}}
+  const _tc=turnoverCtx||null;
+  buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
+async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}t._indexMetrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive};}catch(e){return{...p,error:e?.message||String(e)}}});t._live=rows;const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
 async function tenetTestIndexMappings(){const t=tenetState(),msg=document.getElementById('tenet-pair-validation');if(!S.config.marketBridgeUrl)return toast('Configure Market Bridge first','warn');if(!t.pairs.length)return toast('Add Tenet scanner pairs first','warn');if(msg)msg.textContent='Testing Upstox index mappings…';const rows=await mapWithConcurrency(t.pairs,2,async p=>{const j=await marketBridgeFetch('/resolve',{symbol:p.underlying},10000);return{u:p.underlying,ok:!!j?.mapping,key:j?.mapping?.key||'',name:j?.mapping?.name||'',err:j?.error||''};});const bad=rows.filter(x=>!x.ok);if(msg){msg.style.color=bad.length?'var(--bad)':'var(--go)';msg.textContent=bad.length?`⚠ Mapping failed: ${bad.map(x=>x.u+' — '+(x.err||'no mapping')).join(' · ')}`:`✓ Upstox mappings verified: ${rows.map(x=>x.u+' → '+x.key).join(' · ')}`;}toast(bad.length?`${bad.length} Tenet index mapping(s) failed`:'All Tenet index mappings verified',bad.length?'warn':'ok');}
 function tenetRecordBuy(etf,team,price,underlying,isBid=false){const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const pair=(t._live||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(t._live,{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
 function tenetRecordSell(id,price){const t=tenetState(),i=t.holdings.findIndex(x=>x.id===id);if(i<0)return;const h=t.holdings[i],last=tenetLatestLot(h.etf);if(last?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');if(+price<h.targetPrice)return toast('Target not reached','warn');t.holdings.splice(i,1);const sellDate=tenetISTNow().date;t.sold.push({...h,sellDate,sellPrice:+price,profit:(+price-h.buyPrice)*h.qty,holdingDays:Math.max(0,tenetDaysBetween(h.buyDate,sellDate)),sellPriceSource:q.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet SELL recorded: ${h.etf}`,'ok');}
@@ -10316,7 +10668,7 @@ async function tenetRunHistoricalScanner(){
       try{
         const snap=await tenetIndexSnapshot(p.underlying,e,{live:false,startOverride:new Date(new Date(e+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),endOverride:e}),h=snap.h;
         if(!h[s]?.close||!h[e]?.close)throw new Error('Selected start/end are not both trading dates for this index');
-        const open=+(h[s].open||h[s].close),close=+h[e].close,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';
+        const open=+h[s].open,close=+h[e].close,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';
         return{...p,direction,distance:snap.distance,indexOpen:open,indexClose:close,weekStart:s,weekEnd:e};
       }catch(err){return{...p,error:err?.message||String(err)}}
     });
@@ -10345,11 +10697,88 @@ async function tenetRunHistoricalScanner(){
 
 async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.config.marketBridgeUrl){t.universeHistory=[];return[];}const j=await marketBridgeFetch('/universe-history',{start:from,end:to},15000),rows=Array.isArray(j?.rows)?j.rows:[];t.universeHistory=rows.map(r=>({effectiveDate:String(r.effectiveDate||r.date||r.effective_date||'').slice(0,10),underlying:sanIndexName(r.underlying||r.index||r.underlyingAsset||''),indexYf:sanIndexTicker(r.indexYf||r.indexYahoo||r.yahoo||''),etf:sanSym(r.etf||r.symbol||''),team:String(r.team||r.side||'GREEN').toUpperCase(),counterETF:sanSym(r.counterETF||r.red||''),turnover:Number.isFinite(+(r.turnover??r.turnoverValue))?+(r.turnover??r.turnoverValue):null,distance52w:Number.isFinite(+(r.distance52w??r.distance??r.distanceFrom52WHigh))?+(r.distance52w??r.distance??r.distanceFrom52WHigh):null})).filter(r=>r.effectiveDate&&r.underlying&&r.etf);return t.universeHistory;}
 function tenetPairsForDate(date){const t=tenetState(),hist=t.universeHistory||[];if(!hist.length)return t.pairs.map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
-function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>+(h[d].high||h[d].close)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
+function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>(+h[d].high||0)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
 function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to)){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
-function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+(first.open||first.close),close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
+function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
 function tenetExactBar(h,date){return h?.[date]?.close>0?h[date]:null;}
-function tenetSellDailyLifo(hold,trades,data,date){let soldAny=true;while(soldAny){soldAny=false;const etfs=[...new Set(hold.map(x=>x.etf))];for(const etf of etfs){const last=tenetLatestLot(etf,hold),bar=tenetExactBar(data[etf],date);if(!last||!bar)continue;const high=+(bar.high||bar.close)||0;if(high>=last.targetPrice){const i=hold.findIndex(x=>x.id===last.id),sellPrice=last.targetPrice,profit=(sellPrice-last.buyPrice)*last.qty;trades.push({date,action:'SELL',etf,team:last.team,price:sellPrice,qty:last.qty,profit,buyDate:last.buyDate,buySeq:last.buySeq,targetPct:last.targetPct,holdingDays:Math.max(0,tenetDaysBetween(last.buyDate,date))});hold.splice(i,1);soldAny=true;}}}}
+// ── TENET COST MODEL ─────────────────────────────────────────────────────────
+// S1-3: the Tenet engine modelled ZERO friction. Delivery ETF trades on NSE pay
+// brokerage, exchange txn charges, SEBI fee, stamp duty (buy only), GST and —
+// for equity ETFs — STT on both legs. Modelling none of that flatters a
+// high-turnover strategy whose average target is 3.14%: friction is a material
+// fraction of the edge, not a rounding error. Deliberately NOT reusing
+// lifoFriction(): that frozen helper bakes in modelled slippage and has no
+// asset-class argument, and the lean plan forbids blind reuse.
+function tenetFriction(turnoverINR,side,assetClass){
+  const v=Math.max(0,+turnoverINR||0); if(!v)return 0;
+  const c=tenetState().config||{};
+  const brokerage=Math.min(
+    Number.isFinite(c.brokerageCap)?c.brokerageCap:20,
+    v*((Number.isFinite(c.brokeragePct)?c.brokeragePct:0)/100));
+  const isEquity=assetClass!=='commodity';
+  // STT: equity ETF delivery attracts it on both legs; gold/silver ETFs do not.
+  const stt=isEquity?v*0.001:0;
+  const exch=v*0.0000297;
+  const sebi=v*0.000001;
+  const stamp=side==='BUY'?v*0.00015:0;
+  const gst=(brokerage+exch+sebi)*0.18;
+  return +(brokerage+stt+exch+sebi+stamp+gst).toFixed(2);
+}
+function tenetAssetClassOf(sym){
+  const e=(S.universe||[]).find(x=>x.sym===sym);
+  const hay=String(e?.assetClass||e?.name||sym||'').toUpperCase();
+  return /GOLD|SILVER/.test(hay)?'commodity':'equity';
+}
+
+// S1-1 (CRITICAL) + S1-5.
+// Previously this function removed the lot and wrote a SELL trade but NEVER
+// credited the proceeds to cash, and no caller did either. Sale money simply
+// vanished: a reproduced fixture ended at Rs.4,000 cash instead of Rs.10,188.40
+// and reported a fabricated 60% drawdown. Every Tenet backtest produced by this
+// build was invalid. It now returns the net proceeds so the caller credits cash.
+//
+// S1-5: the old `while(soldAny)` loop could unlock and sell SEVERAL stacked lots
+// of the same ETF against a SINGLE day's HIGH, with no evidence the intraday
+// path actually reached each successive target in sequence. `conservative` caps
+// exits at one lot per ETF per session, which is the defensible assumption.
+function tenetSellDailyLifo(hold,trades,data,date,opts={}){
+  const conservative=opts.conservative!==false;
+  let proceeds=0, guard=0;
+  let soldAny=true;
+  while(soldAny){
+    soldAny=false;
+    if(++guard>500)break;
+    const etfs=[...new Set(hold.map(x=>x.etf))];
+    const soldThisPass=new Set();
+    for(const etf of etfs){
+      if(conservative&&soldThisPass.has(etf))continue;
+      const last=tenetLatestLot(etf,hold), bar=tenetExactBar(data[etf],date);
+      if(!last||!bar)continue;
+      const high=+bar.high;if(!(high>0))continue;
+      if(high>=last.targetPrice){
+        const i=hold.findIndex(x=>x.id===last.id);
+        const sellPrice=last.targetPrice;
+        const gross=sellPrice*last.qty;
+        const cls=tenetAssetClassOf(etf);
+        const sellFee=tenetFriction(gross,'SELL',cls);
+        const buyFee=Number.isFinite(last.buyFee)?last.buyFee:tenetFriction(last.buyPrice*last.qty,'BUY',cls);
+        const profit=(sellPrice-last.buyPrice)*last.qty-sellFee-buyFee;
+        proceeds+=gross-sellFee;
+        trades.push({date,action:'SELL',etf,team:last.team,price:sellPrice,qty:last.qty,
+          gross:+gross.toFixed(2),fees:+(sellFee+buyFee).toFixed(2),
+          sellFee:+sellFee.toFixed(2),buyFeeAlloc:+buyFee.toFixed(2),profit:+profit.toFixed(2),
+          buyDate:last.buyDate,buySeq:last.buySeq,targetPct:last.targetPct,
+          holdingDays:Math.max(0,tenetDaysBetween(last.buyDate,date))});
+        hold.splice(i,1);
+        soldThisPass.add(etf);
+        soldAny=true;
+      }
+    }
+    if(conservative)break;
+  }
+  return +proceeds.toFixed(2);
+}
+
 async function runTenetBacktestV3(){
   const t=tenetState();
   const from=document.getElementById('tenet-bt-from')?.value;
@@ -10367,7 +10796,15 @@ async function runTenetBacktestV3(){
   }
   try{
     if(st)st.textContent='Loading point-in-time scanner snapshots (if bridge provides them)…';
-    try{await tenetLoadUniverseHistory(from,to);}catch(e){console.warn('Tenet universe-history',e);t.universeHistory=[];}
+    try{await tenetLoadUniverseHistory(from,to);}
+    catch(e){console.warn('Tenet universe-history',e);
+      // S0-4: a failed refresh used to wipe universeHistory to []. One bridge
+      // timeout then silently destroyed imported point-in-time snapshots and
+      // the backtest fell back to TODAY's pairs — look-ahead, with no warning.
+      // Keep the last good history and surface the degradation instead.
+      t._universeHistoryStale=String(e?.message||e);
+      if(st)st.textContent='⚠ Universe-history refresh failed — using last known snapshots. '+(t.universeHistory?.length?`${t.universeHistory.length} rows retained.`:'No snapshots available; point-in-time fidelity is NOT available for this run.');
+    }
 
     const histPairs=(t.universeHistory||[]).map(r=>({
       underlying:r.underlying,
@@ -10394,6 +10831,7 @@ async function runTenetBacktestV3(){
         return{kind:'ETF',key:sym,provider:sym,yf:e?.yf||sym+'.NS'};
       })
     ];
+    {const _g=await eod2Preflight(from,to);if(_g){if(st)st.textContent=_g+' Backtest not run.';return;}}
     const rows=await mapWithConcurrency(jobs,2,async j=>{
       try{
         const h=await tenetFetchHistory(j.kind,j.key,j.provider,j.yf,warmStart,historyTo);
@@ -10423,10 +10861,15 @@ async function runTenetBacktestV3(){
     const bidWeeks={};
     let maxInvested=0;
     const skips=[];
+    const lastMark={};                 // S1-4: last known close per ETF
+    let staleValuationDays=0;          // S1-4: sessions with >=1 stale mark
+    const conservativeExits=document.getElementById('tenet-bt-conservative')?.checked!==false;
 
     for(const d of allDates){
       // Selling is NOT weekly-gated. GTT/target exits can happen on any session.
-      tenetSellDailyLifo(hold,trades,data,d);
+      // S1-1: credit the proceeds. This line is the entire cash-recycling fix —
+      // without it, sold capital was destroyed and could never be redeployed.
+      cash+=tenetSellDailyLifo(hold,trades,data,d,{conservative:conservativeExits});
 
       const w=decisionByDate.get(d);
       if(w){
@@ -10446,30 +10889,35 @@ async function runTenetBacktestV3(){
         const per=active.length?initial*t.config.newBuyAllocPct/100/active.length:0;
         const newMax=initial*t.config.newBuyAllocPct/100;
         const bidMax=initial*t.config.bidAllocPct/100;
-        const priceMap={};
+        const priceMap={},turnoverCtx={};
         for(const sym of active){
           const bar=tenetExactBar(data[sym],d);
-          if(bar)priceMap[sym]={cmp:+bar.close};
+          if(bar){priceMap[sym]={cmp:+bar.close};
+            // S1-2: that session's own turnover, so the ranking tie-break never
+            // reaches outside the simulated timeline into today's PRICES.
+            turnoverCtx[sym]=(+bar.close||0)*(+bar.volume||+bar.vol||0);}
         }
-        const sig=tenetSignalsFromPairs(pairRows,{actionable:true,priceMap,holdings:hold,weekKey:w.weekKey});
+        const sig=tenetSignalsFromPairs(pairRows,{actionable:true,priceMap,holdings:hold,weekKey:w.weekKey,turnoverCtx});
 
         // New buys: all eligible, GREEN first, then RED; within team farthest 52W distance first.
         for(const c of sig.buys){
           const q=Math.floor(per/c.price);
           const cost=q*c.price;
+          const buyFee=tenetFriction(cost,'BUY',tenetAssetClassOf(c.etf));
           const usage=tenetPoolUsage(hold);
           if(q<1){skips.push({date:d,etf:c.etf,reason:'qty<1'});continue;}
           if(usage.newUsed+cost>newMax+1e-6){skips.push({date:d,etf:c.etf,reason:'60% new pool'});continue;}
-          if(cash<cost-1e-6){skips.push({date:d,etf:c.etf,reason:'cash'});continue;}
+          // S1-3: cash must cover the charges too, not just the notional.
+          if(cash<cost+buyFee-1e-6){skips.push({date:d,etf:c.etf,reason:'cash'});continue;}
           const n=hold.filter(x=>x.etf===c.etf).length+1;
           const tp=tenetTarget(n);
           hold.push({
             id:`BT_${trades.length}_${c.etf}_${d}`,
             etf:c.etf,team:c.team,underlying:c.underlying,buyDate:d,buyPrice:c.price,qty:q,
-            buySeq:n,targetPct:tp,targetPrice:c.price*(1+tp/100),isBid:false
+            buySeq:n,targetPct:tp,targetPrice:c.price*(1+tp/100),isBid:false,buyFee
           });
-          cash-=cost;
-          trades.push({date:d,action:'BUY',etf:c.etf,team:c.team,price:c.price,qty:q,buySeq:n,targetPct:tp,distance:c.distance});
+          cash-=cost+buyFee;
+          trades.push({date:d,action:'BUY',etf:c.etf,team:c.team,price:c.price,qty:q,buySeq:n,targetPct:tp,distance:c.distance,fees:buyFee});
         }
 
         // BID: maximum one per week, choose the single largest fall across all eligible holdings.
@@ -10478,18 +10926,19 @@ async function runTenetBacktestV3(){
           const b=sig.bids[0];
           const q=Math.floor(per/b.price);
           const cost=q*b.price;
+          const bidFee=tenetFriction(cost,'BUY',tenetAssetClassOf(b.etf));
           const usage=tenetPoolUsage(hold);
-          if(q>0&&usage.bidUsed+cost<=bidMax+1e-6&&cash>=cost-1e-6){
+          if(q>0&&usage.bidUsed+cost<=bidMax+1e-6&&cash>=cost+bidFee-1e-6){
             const n=hold.filter(x=>x.etf===b.etf).length+1;
             const tp=tenetTarget(n);
             hold.push({
               id:`BT_${trades.length}_${b.etf}_${d}`,
               etf:b.etf,team:b.team,underlying:b.underlying,buyDate:d,buyPrice:b.price,qty:q,
-              buySeq:n,targetPct:tp,targetPrice:b.price*(1+tp/100),isBid:true
+              buySeq:n,targetPct:tp,targetPrice:b.price*(1+tp/100),isBid:true,buyFee:bidFee
             });
-            cash-=cost;
+            cash-=cost+bidFee;
             bidWeeks[wk]=1;
-            trades.push({date:d,action:'BID',etf:b.etf,team:b.team,price:b.price,qty:q,buySeq:n,targetPct:tp,fall:b.fall,distance:b.distance});
+            trades.push({date:d,action:'BID',etf:b.etf,team:b.team,price:b.price,qty:q,buySeq:n,targetPct:tp,fall:b.fall,distance:b.distance,fees:bidFee});
           }else{
             skips.push({date:d,etf:b.etf,reason:'40% bid pool/cash'});
           }
@@ -10498,12 +10947,22 @@ async function runTenetBacktestV3(){
 
       const invested=tenetOpenCost(hold);
       maxInvested=Math.max(maxInvested,invested);
-      let value=cash;
+      let value=cash,staleMark=0;
       for(const h of hold){
         const bar=tenetExactBar(data[h.etf],d);
-        value+=(bar?.close||h.buyPrice)*h.qty;
+        if(bar){lastMark[h.etf]={px:+bar.close,date:d};}
+        // S1-4: a missing bar used to fall back to the BUY price, which silently
+        // reports an open position at exactly zero P&L — erasing a real loss
+        // from the equity curve and the drawdown. Carry the last known close
+        // instead, and count how many marks are stale so a degraded valuation
+        // can never pass as a certified one.
+        const mk=lastMark[h.etf];
+        if(bar)value+=bar.close*h.qty;
+        else if(mk){value+=mk.px*h.qty;if(tenetDaysBetween(mk.date,d)>5)staleMark++;}
+        else {value+=h.buyPrice*h.qty;staleMark++;}
       }
-      eq.push({date:d,value,invested});
+      if(staleMark)staleValuationDays++;
+      eq.push({date:d,value,invested,staleMark});
     }
 
     const finalValue=eq.at(-1)?.value??initial;
@@ -10523,6 +10982,61 @@ async function runTenetBacktestV3(){
     document.getElementById('tenet-bt-avgdays').textContent=avgDays==null?'—':avgDays.toFixed(1);
     document.getElementById('tenet-bt-dd').textContent=(-dd*100).toFixed(2)+'%';
     document.getElementById('tenet-bt-trades').textContent=trades.length;
+
+    // ── S1 GATE: MONEY IDENTITY ────────────────────────────────────────────
+    // The lean plan requires accounting identities to PASS before any
+    // performance number may be interpreted. The identity is:
+    //   initial - buy notional - all fees + sell gross == terminal cash
+    // and terminal cash + open market value == final equity.
+    // If this fails, the engine is losing or inventing money and no CAGR on
+    // this screen means anything.
+    // Each leg is counted exactly once: BUY/BID rows carry their own fee;
+    // SELL rows carry sellFee separately from the buy-leg fee they attribute
+    // into profit (buyFeeAlloc), which was already debited at purchase.
+    const buyRows=trades.filter(x=>x.action==='BUY'||x.action==='BID');
+    const sellRows=trades.filter(x=>x.action==='SELL');
+    const buyNotional=buyRows.reduce((a,x)=>a+x.price*x.qty,0);
+    const buyFees=buyRows.reduce((a,x)=>a+(+x.fees||0),0);
+    const sellGross=sellRows.reduce((a,x)=>a+(+x.gross||0),0);
+    const sellFees=sellRows.reduce((a,x)=>a+(+x.sellFee||0),0);
+    const allFees=buyFees+sellFees;
+    const expectedCash=initial-buyNotional-buyFees+sellGross-sellFees;
+    const openMV=(eq.at(-1)?.value??initial)-cash;
+    const cashDrift=Math.abs(cash-expectedCash);
+    const identityOk=cashDrift<=Math.max(1,initial*1e-6);
+    const negCash=cash<-1e-6;
+    const certified=identityOk&&!negCash&&staleValuationDays===0&&!t._universeHistoryStale;
+
+    const evBox=document.getElementById('tenet-bt-evidence');
+    if(evBox){
+      const inr=v=>fmtINR(v||0);
+      const line=(ok,label,detail)=>`<div style="margin:3px 0;color:${ok?'var(--gain)':'var(--loss)'}">${ok?'✓':'✗'} ${label}<span style="color:var(--fog)"> — ${detail}</span></div>`;
+      evBox.style.display='block';
+      evBox.innerHTML=`
+      <div style="font-weight:600;font-size:12px;margin-bottom:4px">🔒 S1 Accounting Gate</div>
+      <div style="padding:7px 9px;border-radius:5px;margin-bottom:8px;font-weight:600;background:${certified?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)'};color:${certified?'var(--gain)':'var(--loss)'}">
+        ${certified?'CERTIFIED — accounting identities hold; the performance numbers above are interpretable.'
+                  :'NOT CERTIFIED — do not interpret the performance numbers above until every failing line below is resolved.'}
+      </div>
+      <div style="font-size:10.5px">
+        ${line(identityOk,'Cash identity',`terminal ${inr(cash)} vs expected ${inr(expectedCash)} · drift ${inr(cashDrift)}`)}
+        ${line(!negCash,'No negative cash',`terminal cash ${inr(cash)}`)}
+        ${line(staleValuationDays===0,'Terminal valuation complete',`${staleValuationDays} session(s) valued with a stale or missing mark`)}
+        ${line(!t._universeHistoryStale,'Point-in-time universe',t._universeHistoryStale?`snapshot refresh failed: ${escapeHtml(String(t._universeHistoryStale))}`:(t.universeHistory?.length?`${t.universeHistory.length} snapshot rows`:'no snapshots — CURRENT pairs used for all dates (look-ahead)'))}
+        ${line(true,'Execution model',conservativeExits?'Conservative — at most one lot exit per ETF per session':'Canonical — stacked lots may exit against one daily HIGH')}
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+        <div class="stat-card" style="flex:1;min-width:110px"><div class="stat-label">Terminal Cash</div><div class="stat-val">${inr(cash)}</div><div class="stat-sub">recycled, not destroyed</div></div>
+        <div class="stat-card" style="flex:1;min-width:110px"><div class="stat-label">Open Market Value</div><div class="stat-val">${inr(openMV)}</div><div class="stat-sub">${hold.length} lot(s) still open</div></div>
+        <div class="stat-card" style="flex:1;min-width:110px"><div class="stat-label">Total Friction</div><div class="stat-val" style="color:var(--loss)">${inr(allFees)}</div><div class="stat-sub">${initial>0?(allFees/initial*100).toFixed(2):'0'}% of capital</div></div>
+        <div class="stat-card" style="flex:1;min-width:110px"><div class="stat-label">Unrealised</div><div class="stat-val" style="color:${openMV-tenetOpenCost(hold)<0?'var(--loss)':'var(--gain)'}">${inr(openMV-tenetOpenCost(hold))}</div><div class="stat-sub">absent from realised P&L</div></div>
+      </div>
+      <div style="color:var(--fog);font-size:9.5px;margin-top:7px">
+        Tenet has no stop-loss, so losing lots never close and never appear in realised profit or win rate.
+        Read equity and Unrealised, not realised P&L. Friction is modelled (brokerage, STT on equity legs,
+        exchange, SEBI, stamp, GST) — it is not a broker contract note.
+      </div>`;
+    }
     document.getElementById('tenet-bt-log').innerHTML=`<table><thead><tr><th>Date</th><th>Action</th><th>ETF</th><th>Team</th><th>Price</th><th>Qty</th><th>Lot</th><th>Target</th><th>Fall/52W</th><th>P/L</th></tr></thead><tbody>${trades.map(x=>`<tr><td>${escapeHtml(x.date)}</td><td>${escapeHtml(x.action)}</td><td>${escapeHtml(x.etf)}</td><td>${escapeHtml(x.team||'')}</td><td>${fmtINR(x.price)}</td><td>${x.qty}</td><td>${x.buySeq||'—'}</td><td>${x.targetPct!=null?x.targetPct.toFixed(2)+'%':'—'}</td><td>${x.fall!=null?'fall '+x.fall.toFixed(2)+'%':x.distance!=null?'52W '+x.distance.toFixed(2)+'%':'—'}</td><td>${fmtINR(x.profit||0)}</td></tr>`).join('')}</tbody></table>`;
     if(st)st.textContent=`Completed · ${weeks.length} weekly decision points · ${trades.length} trades · ${sells.length} sells · ${skips.length} capital/data skips · ${t.universeHistory.length?'POINT-IN-TIME SCANNER SNAPSHOTS':'CONFIGURED-UNIVERSE'}. Daily target exits use HIGH; weekly entries use final-session CLOSE.`;
   }catch(e){
@@ -11751,6 +12265,7 @@ function exportDmBtCSV(){
     rows.push([],['SKIPPED BUYS — INSUFFICIENT CASH'],['Date','ETF','Needed ₹','Available ₹','Deficit ₹']);
     _dmBtResult.shortfallLog.forEach(s=>rows.push([s.date,s.sym,s.neededCash,s.availCash,s.deficit]));
   }
+  rows.push([],eod2StampRow());
   dlCSV(rows,'dm_backtest_full');
   toast('DM Backtest full export downloaded','ok');
 }
@@ -12196,12 +12711,17 @@ function _reportInitFailures(){
   el.style.display='block';
 }
 
+// V3.21 EOD2 run guards. Frozen cores are wrapped, never edited: their source
+// (and MD5) is unchanged; the originals remain reachable via .__frozen.
+runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};return eod2GuardRun('LIFO',p.startDate,p.endDate,()=>core(p));};w.__frozen=core;return w;})(runLifoBacktestCore);
+runDMBacktestCore=(function(core){const w=async function(p){p=p||{};return eod2GuardRun('DM',p.fromDate,p.toDate,()=>core(p));};w.__frozen=core;return w;})(runDMBacktestCore);
+
 // PWA — deployable same-origin service worker. A real ./sw.js file is required; downloadPwaFiles() exports the matching assets.
 // Caches the app shell so it loads offline after first visit.
 let swCode='';
 if('serviceWorker' in navigator){
   swCode=`
-const CACHE='alphadesk-v318';
+const CACHE='alphadesk-v321';
 const SHELL=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));
