@@ -1,0 +1,283 @@
+{
+  "dataset": "EOD2",
+  "exporter_version": "1.1.0",
+  "exportedAt": "2026-09-11T05:22:50+00:00",
+  "eod2_data_version": 3.4,
+  "eod2_last_update": "2026-09-10T00:00:00+05:30",
+  "latestSession": "2026-09-10",
+  "windowStart": "2019-01-14",
+  "adjustments": "split+bonus; ETF splits applied at export (see splits)",
+  "dividendsAdjusted": false,
+  "providerMixing": false,
+  "fallbackUsed": false,
+  "certification": "PASS",
+  "certifier_scope_hash": "e20a71716938fd43ed1733feaaa7ab5ba847bde30d6a88135a4af76371f54906",
+  "splits": [
+    {
+      "symbol": "NIFTYBEES",
+      "date": "2019-12-19",
+      "ratio": 10
+    },
+    {
+      "symbol": "BANKBEES",
+      "date": "2019-12-19",
+      "ratio": 10
+    },
+    {
+      "symbol": "GOLDBEES",
+      "date": "2019-12-19",
+      "ratio": 100
+    },
+    {
+      "symbol": "SETFGOLD",
+      "date": "2022-01-06",
+      "ratio": 100
+    },
+    {
+      "symbol": "ITIETF",
+      "date": "2022-09-01",
+      "ratio": 10
+    },
+    {
+      "symbol": "HDFCNIFBAN",
+      "date": "2024-02-02",
+      "ratio": 10
+    },
+    {
+      "symbol": "AUTOIETF",
+      "date": "2024-03-01",
+      "ratio": 10
+    }
+  ],
+  "genuine_moves": [
+    {
+      "symbol": "SILVERBEES",
+      "date": "2026-01-30",
+      "note": "silver crash, matches TATSILV"
+    },
+    {
+      "symbol": "TATSILV",
+      "date": "2026-01-22",
+      "note": "silver crash, matches SILVERBEES"
+    },
+    {
+      "symbol": "TATSILV",
+      "date": "2026-02-02",
+      "note": "silver crash, matches SILVERBEES"
+    },
+    {
+      "symbol": "MID150BEES",
+      "date": "2020-03-19",
+      "note": "real NSE print, verified on TradingView; off-NAV (index -4%), thin liquidity"
+    }
+  ],
+  "anomalies": [],
+  "known_no_trade": {
+    "MID150BEES": [
+      "2019-02-05",
+      "2019-02-18",
+      "2019-02-20"
+    ]
+  },
+  "patches": {
+    "2022-05-11": "EOD2 missed equity bhavcopy; ETF bars patched from NSE cm11MAY2022bhav (factor 1.0)"
+  },
+  "benchmark": {
+    "NIFTY50_TRI": "NOT_INCLUDED (separate provider; blocks S3 edge only)"
+  },
+  "datasetHash": "04c5d4192fb0cb2621327e6ac9e9863971f8d976711b7d3f0d744eba2108d29a",
+  "files": {
+    "NIFTYBEES": {
+      "path": "data/etf/NIFTYBEES.json",
+      "sha256": "5fa186efb2c8c1c6a6215dfd42e95401569bd8967fe5ebc7d2fe6b8ae7fe503b",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "JUNIORBEES": {
+      "path": "data/etf/JUNIORBEES.json",
+      "sha256": "97ef1af49d7e0fb9e35c2447cbb4ef3cac05a071f6c73310588a8b0db5374b67",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "BANKBEES": {
+      "path": "data/etf/BANKBEES.json",
+      "sha256": "b01d64ba2e41b3b104759e24deb23cffabdaa5d02afa89f4fd695c5fa8a4b770",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "GOLDBEES": {
+      "path": "data/etf/GOLDBEES.json",
+      "sha256": "783d4d25b7820464a6bc259c6b4c8652461f97f1dae07362e85e92b94e873d3d",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "SILVERBEES": {
+      "path": "data/etf/SILVERBEES.json",
+      "sha256": "310c52e4c62be2fac441614aaec3420a1a68ba650a513e034d342380dee89f5f",
+      "first": "2022-02-07",
+      "last": "2026-09-10",
+      "bars": 1140,
+      "stale": false
+    },
+    "TATSILV": {
+      "path": "data/etf/TATSILV.json",
+      "sha256": "142e60d1ba251bd80669b1c71313ba4d8337cf2fa359ec7bdadde101e472fc79",
+      "first": "2024-01-17",
+      "last": "2026-09-10",
+      "bars": 658,
+      "stale": false
+    },
+    "MID150BEES": {
+      "path": "data/etf/MID150BEES.json",
+      "sha256": "82962c4671fff7b56b1d658a8bb8e74e898553e5df6ce40710c346142f1900d5",
+      "first": "2019-02-04",
+      "last": "2026-09-10",
+      "bars": 1879,
+      "stale": false
+    },
+    "MIDCAPETF": {
+      "path": "data/etf/MIDCAPETF.json",
+      "sha256": "a7b93133d9ef628e9733f876b46e7ef9daba237f4965e0649cb8435328394526",
+      "first": "2022-03-15",
+      "last": "2026-09-10",
+      "bars": 1115,
+      "stale": false
+    },
+    "ITBEES": {
+      "path": "data/etf/ITBEES.json",
+      "sha256": "266c987f51c9cf34d711b7362bc356e225c2c323aae23cded917f75e79478fea",
+      "first": "2020-07-01",
+      "last": "2026-09-10",
+      "bars": 1540,
+      "stale": false
+    },
+    "ITIETF": {
+      "path": "data/etf/ITIETF.json",
+      "sha256": "875cfb487a6dc9ecc7f5ce4bf21c55279adb304568063ac7d14bf94692414beb",
+      "first": "2020-08-20",
+      "last": "2026-09-10",
+      "bars": 1504,
+      "stale": false
+    },
+    "AUTOBEES": {
+      "path": "data/etf/AUTOBEES.json",
+      "sha256": "e361ba7b3bc10a8830b4f2dcdd9c669a6dde3869339f169219451f3ac12fb280",
+      "first": "2022-01-25",
+      "last": "2026-09-10",
+      "bars": 1148,
+      "stale": false
+    },
+    "AUTOIETF": {
+      "path": "data/etf/AUTOIETF.json",
+      "sha256": "c79052f0e414ae660dbff0d8f898ed2a01bea8706435a39a9ff113df5e724fb4",
+      "first": "2022-01-18",
+      "last": "2026-09-10",
+      "bars": 1153,
+      "stale": false
+    },
+    "SETFNIF50": {
+      "path": "data/etf/SETFNIF50.json",
+      "sha256": "c62d2f515367e640138bfdcd06ee2f2df43e8f88800a7d6ba3b0f76536f453cd",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "SETFNN50": {
+      "path": "data/etf/SETFNN50.json",
+      "sha256": "1f234b907390aecc4272e41ae91d3cc6c13d5ccaf923111645a70a356a7e64e2",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "SETFGOLD": {
+      "path": "data/etf/SETFGOLD.json",
+      "sha256": "353d0e5577d399abd64ce3b4fae574c6b3ab8d005f49fb235597dec790fbb1ff",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "HDFCNIFBAN": {
+      "path": "data/etf/HDFCNIFBAN.json",
+      "sha256": "5feb4b61a8349ec63a6403a38d1f774ab278c62d4ce4482c9a5695dfe811c380",
+      "first": "2020-08-28",
+      "last": "2026-09-10",
+      "bars": 1498,
+      "stale": false
+    },
+    "CPSEETF": {
+      "path": "data/etf/CPSEETF.json",
+      "sha256": "fbf9ee4a4f67f5945d225bf3e80d648ba7c3b6859efbacb4e2f6f8ffc200ec90",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "LIQUIDBEES": {
+      "path": "data/etf/LIQUIDBEES.json",
+      "sha256": "84f6934a9cc4d9d945827ccf5da4b0973d2930859f62e39c2cc6c209ffc75e88",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY 50": {
+      "path": "data/index/NIFTY_50.json",
+      "sha256": "5b97cf81616cd06edbea44258e9d252bdf3bcfe16d8b9dd1b372be66ba6f411f",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY BANK": {
+      "path": "data/index/NIFTY_BANK.json",
+      "sha256": "a74e023fbc8317e2c80574a704aed5f8c2e0de0a5771d5710fd246927a9c299c",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY IT": {
+      "path": "data/index/NIFTY_IT.json",
+      "sha256": "88b46e3de6516215369be81427a89a35f7ed8a8ec562db09dc48e00d8eea1182",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY MIDCAP 150": {
+      "path": "data/index/NIFTY_MIDCAP_150.json",
+      "sha256": "468f7061fa1d91076fc189461e17e52281c37addbc77cd767b8ba8deee9fc027",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY NEXT 50": {
+      "path": "data/index/NIFTY_NEXT_50.json",
+      "sha256": "d46596dff1d24d4ee7bde6f601237d20b4c659e82c17203ff05708ae90d923d0",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    },
+    "NIFTY AUTO": {
+      "path": "data/index/NIFTY_AUTO.json",
+      "sha256": "fa590b035de94116b4b41c173f391dc86dc6ca1e5b5bab636aed43a869616949",
+      "first": "2019-01-14",
+      "last": "2026-09-10",
+      "bars": 1897,
+      "stale": false
+    }
+  }
+}
