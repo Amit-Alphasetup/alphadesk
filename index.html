@@ -36,6 +36,7 @@
   form-action 'self';
   frame-ancestors 'none';
   connect-src 'self'
+    https://amit-alphasetup.github.io
     https://query1.finance.yahoo.com
     https://query2.finance.yahoo.com
     https://api.allorigins.win
@@ -2833,6 +2834,7 @@ let S = {
     // D4 — '52 week low' method: 'spike' (filtered) or 'raw' (sheet-exact MIN over 364d)
     wl52Method:'spike',
     dmRebalanceDays:30,  // rebalance interval: 7, 15, 30, or custom
+    eod2BaseUrl:'https://amit-alphasetup.github.io/market-data/', eod2UseMirror:true,   // A2-5: EOD2 v3 source; app-local ./data/ mirror is a fallback until A6-6
   }
 };
 
@@ -3740,13 +3742,28 @@ async function testMarketBridge(showToast=true){
   let msg;
   if(j?.ok)msg=`${ok?'✓':'⚠'} ${j.provider||'UPSTOX'} · ${j.mode||'read-only'} · token ${j.tokenConfigured?(j.tokenValid===false?'INVALID':j.tokenValid===true?'verified':'configured'):'MISSING'} · origin ${j.requestOrigin||_marketOrigin()}${j.googleBridgeConfigured?' · Google reference configured':''}`;
   else msg='✕ '+_marketBridgeHelpMessage();
-  if(el){el.textContent=msg;el.style.color=ok?'var(--go)':'var(--stop)';}
+  const outdated=!!(j?.ok&&String(j.version||'')!==MARKET_BRIDGE_WORKER_VERSION);   // A2-1: Worker must send provider timestamps + exact identity
+  if(outdated)msg+=` · Worker v${j.version||'?'} is outdated (need v${MARKET_BRIDGE_WORKER_VERSION}): Settings → Copy Worker code → Redeploy Worker. Until then live quotes are rejected.`;
+  if(el){el.textContent=msg;el.style.color=ok&&!outdated?'var(--go)':'var(--stop)';}
   renderMarketDataHealth();if(showToast)toast(msg,ok?'ok':'warn');return ok;
 }
 async function marketBridgeQuotes(master){
   if(!S.config.marketBridgeUrl||!master.length)return{quotes:[],unresolved:[],requested:0,resolved:0};
   const syms=master.map(x=>x.sym).join(','),j=await marketBridgeFetch('/quotes',{symbols:syms},18000);
-  return{quotes:Array.isArray(j?.quotes)?j.quotes:[],unresolved:Array.isArray(j?.unresolved)?j.unresolved:[],requested:+j?.requested||master.length,resolved:+j?.resolved||0,error:j?.ok===false?(j.error||'quote request failed'):''};
+  // A2-2 (F02): a quote row is accepted only if it carries the exact identity of the symbol we asked for
+  const rows=Array.isArray(j?.quotes)?j.quotes:[],unresolved=Array.isArray(j?.unresolved)?[...j.unresolved]:[],good=[];
+  for(const q of rows){if(bridgeQuoteIdentityOk(q,q&&q.symbol))good.push(q);else unresolved.push({symbol:q&&q.symbol,error:'IDENTITY_MISMATCH: tradingSymbol '+(q&&q.tradingSymbol)+' does not match requested symbol (redeploy the Worker if identity is missing)'});}
+  return{quotes:good,unresolved,requested:+j?.requested||master.length,resolved:+j?.resolved||0,error:j?.ok===false?(j.error||'quote request failed'):''};
+}
+const MARKET_BRIDGE_WORKER_VERSION='3.22.0';
+function _bridgeNorm(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();}
+// exact identity: NSE_EQ rows must have tradingSymbol == requested; NSE_INDEX rows must have name == requested
+function bridgeQuoteIdentityOk(q,requested){
+  const id=q&&q.identity;if(!id||!requested)return false;
+  if(String(id.exchange||'').toUpperCase()!=='NSE')return false;
+  if(id.segment==='NSE_EQ')return _bridgeNorm(q.tradingSymbol)===_bridgeNorm(requested);
+  if(id.segment==='NSE_INDEX')return _bridgeNorm(id.name)===_bridgeNorm(requested);
+  return false;
 }
 async function marketBridgeHistory(sym,startDate,endDate){
   if(!S.config.marketBridgeUrl)return{};
@@ -3755,9 +3772,9 @@ async function marketBridgeHistory(sym,startDate,endDate){
   rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(r=>{const b={open:+r.open||null,high:+r.high||null,low:+r.low||null,close:+r.close,adjClose:+r.close,prev,vol:+r.volume||0,_src:'upstox'};if(b.close>0){out[r.date]=b;prev=b.close;}});return out;
 }
 async function marketBridgeReference(params={}){if(!S.config.marketBridgeUrl)return null;return marketBridgeFetch('/reference',params,12000);}
-const MARKET_BRIDGE_WORKER_V317="/** AlphaDesk V3.17 Verified Market Bridge \u2014 Cloudflare Worker\n * Required secret: UPSTOX_ANALYTICS_TOKEN\n * Required variable: ALLOWED_ORIGINS = comma-separated exact origins.\n *   Android/local HTML opened with content:// or file:// normally uses Origin: null,\n *   so include the literal word: null\n * Optional variable: GOOGLE_BRIDGE_URL = existing Google Apps Script web-app URL.\n * Read-only by design: no broker order endpoint exists in this Worker.\n */\nconst UP='https://api.upstox.com';\nconst keyCache=new Map();\nconst quoteCache=new Map();\nconst histCache=new Map();\nconst now=()=>Date.now();\nconst UPSTREAM_TIMEOUT_MS=12000;\nasync function fetchTimeout(url,opts={},ms=UPSTREAM_TIMEOUT_MS){\n  const ac=new AbortController();\n  const t=setTimeout(()=>ac.abort(),ms);\n  try{return await fetch(url,{...opts,signal:ac.signal});}\n  catch(e){if(e?.name==='AbortError')throw new Error(`Upstream timeout after ${ms}ms`);throw e;}\n  finally{clearTimeout(t);}\n}\nconst norm=v=>String(v||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,' ' ).replace(/\\s+/g,' ').trim();\nconst compact=v=>norm(v).replace(/\\s/g,'');\nfunction corsHeaders(origin=''){return origin?{'access-control-allow-origin':origin,'vary':'Origin'}:{}}\nfunction json(x,status=200,origin=''){return new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json;charset=UTF-8','cache-control':'no-store',...corsHeaders(origin)}})}\nfunction originPolicy(req,env){\n  const origin=req.headers.get('Origin')||'';\n  const list=String(env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);\n  if(!list.length)return{ok:false,origin,error:'ALLOWED_ORIGINS is not configured'};\n  if(!origin)return{ok:false,origin,error:'Request Origin header is missing'};\n  if(!list.includes(origin))return{ok:false,origin,error:`Origin not allowed: ${origin}`};\n  return{ok:true,origin};\n}\nasync function up(env,path){\n  if(!env.UPSTOX_ANALYTICS_TOKEN)throw new Error('UPSTOX_ANALYTICS_TOKEN secret is not configured');\n  const r=await fetchTimeout(UP+path,{headers:{Accept:'application/json','Content-Type':'application/json',Authorization:`Bearer ${env.UPSTOX_ANALYTICS_TOKEN}`}});\n  const t=await r.text();let body;try{body=JSON.parse(t)}catch{body={raw:t}}\n  if(!r.ok){const msg=body?.errors?.[0]?.message||body?.message||t.slice(0,180)||`HTTP ${r.status}`;throw new Error(`Upstox ${r.status}: ${msg}`)}\n  return body;\n}\nfunction scoreCandidate(q,x){\n  const n=norm(q),c=compact(q),ts=norm(x.trading_symbol),nm=norm(x.name),seg=String(x.segment||'').toUpperCase();\n  let s=0;\n  if(ts===n)s+=120;if(nm===n)s+=115;if(compact(ts)===c)s+=105;if(compact(nm)===c)s+=100;\n  if(ts.startsWith(n)||nm.startsWith(n))s+=35;if(ts.includes(n)||nm.includes(n))s+=20;\n  const looksIndex=/\\b(NIFTY|SENSEX|INDEX|BANK|MIDCAP|SMALLCAP|FIN SERVICE|FINANCIAL|AUTO|IT|FMCG|METAL|PHARMA|REALTY|ENERGY|PSU|MEDIA)\\b/.test(n)&&n.includes(' ');\n  if(looksIndex&&seg.includes('INDEX'))s+=30;\n  if(!looksIndex&&seg.includes('_EQ'))s+=20;\n  if(String(x.exchange||'').toUpperCase()==='NSE')s+=10;\n  return s;\n}\nasync function resolveKey(env,symbol){\n  const raw=String(symbol||'').trim();if(!raw)throw new Error('Empty instrument symbol');\n  const ck=norm(raw);if(keyCache.has(ck))return keyCache.get(ck);\n  const q=encodeURIComponent(raw);\n  const j=await up(env,`/v2/instruments/search?query=${q}&exchanges=NSE&segments=EQ,INDEX&page_number=1&records=30`);\n  const a=Array.isArray(j.data)?j.data:[];\n  if(!a.length)throw new Error(`No Upstox instrument mapping for ${raw}`);\n  const ranked=a.map(x=>({x,score:scoreCandidate(raw,x)})).sort((a,b)=>b.score-a.score);\n  const best=ranked[0];\n  if(!best?.x?.instrument_key||best.score<20)throw new Error(`No confident Upstox mapping for ${raw}`);\n  const v={requested:raw,symbol:raw,key:best.x.instrument_key,trading_symbol:best.x.trading_symbol,name:best.x.name,segment:best.x.segment,exchange:best.x.exchange,score:best.score};\n  keyCache.set(ck,v);return v;\n}\nasync function mapLimited(items,limit,fn){const out=new Array(items.length);let next=0;async function w(){while(true){const i=next++;if(i>=items.length)return;out[i]=await fn(items[i],i)}}await Promise.all(Array.from({length:Math.min(limit,items.length)},w));return out}\nasync function quotes(env,symbols){\n  const cacheKey=[...symbols].map(norm).sort().join(',');const hit=quoteCache.get(cacheKey);if(hit&&now()-hit.ts<8000)return hit.value;\n  const resolved=await mapLimited(symbols,4,async s=>{try{return{ok:true,map:await resolveKey(env,s)}}catch(e){return{ok:false,symbol:s,error:String(e.message||e)}}});\n  const maps=resolved.filter(x=>x.ok).map(x=>x.map),unresolved=resolved.filter(x=>!x.ok).map(x=>({symbol:x.symbol,error:x.error}));\n  if(!maps.length){const value={quotes:[],unresolved,resolved:0,requested:symbols.length};quoteCache.set(cacheKey,{ts:now(),value});return value}\n  const j=await up(env,`/v3/market-quote/quotes?instrument_key=${encodeURIComponent(maps.map(x=>x.key).join(','))}`);\n  const data=j.data||{},byKey=new Map(maps.map(x=>[x.key,x]));\n  const arr=Object.values(data).map(q=>{const m=byKey.get(q.instrument_token);if(!m)return null;const prev=+q.prev_close_price||0,price=+q.last_price||0;return{symbol:m.symbol,price,changePct:prev>0?(price-prev)/prev*100:null,open:+q.ohlc?.open||0,high:+q.ohlc?.high||0,low:+q.ohlc?.low||0,dayClose:+q.ohlc?.close||0,yearLow:+q.year_low||0,yearHigh:+q.year_high||0,volume:+q.volume||+q.ohlc?.volume||0,asOf:q.timestamp||new Date().toISOString(),instrumentKey:q.instrument_token,tradingSymbol:q.symbol||m.trading_symbol,source:'upstox-v3'};}).filter(x=>x?.symbol&&x.price>0);\n  const returned=new Set(arr.map(x=>norm(x.symbol)));for(const m of maps)if(!returned.has(norm(m.symbol)))unresolved.push({symbol:m.symbol,error:'Upstox quote response did not contain this resolved instrument'});\n  const value={quotes:arr,unresolved,resolved:maps.length,requested:symbols.length};quoteCache.set(cacheKey,{ts:now(),value});return value;\n}\nasync function history(env,symbol,from,to){\n  const ck=`${norm(symbol)}|${from}|${to}`,hit=histCache.get(ck);if(hit&&now()-hit.ts<15*60*1000)return hit.value;\n  const m=await resolveKey(env,symbol);const path=`/v3/historical-candle/${encodeURIComponent(m.key)}/days/1/${encodeURIComponent(to)}/${encodeURIComponent(from)}`;const j=await up(env,path);const c=j?.data?.candles||[];\n  const bars=c.map(x=>({date:String(x[0]).slice(0,10),open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]||0,oi:+x[6]||0})).filter(x=>x.date&&x.close>0).sort((a,b)=>a.date.localeCompare(b.date));\n  const value={mapping:m,bars};histCache.set(ck,{ts:now(),value});return value;\n}\nasync function googleProxy(env,u,origin){\n  if(!env.GOOGLE_BRIDGE_URL)return json({ok:false,error:'GOOGLE_BRIDGE_URL is not configured'},404,origin);\n  const target=new URL(env.GOOGLE_BRIDGE_URL);for(const [k,v] of u.searchParams)target.searchParams.set(k,v);\n  const r=await fetchTimeout(target.toString());const body=await r.text();return new Response(body,{status:r.status,headers:{'content-type':r.headers.get('content-type')||'application/json',...corsHeaders(origin)}})\n}\nexport default {async fetch(req,env){\n  const p=originPolicy(req,env);const deniedOrigin=p.origin||'';\n  if(!p.ok){if(req.method==='OPTIONS')return new Response(null,{status:403,headers:{...corsHeaders(deniedOrigin),'access-control-allow-methods':'GET,OPTIONS','access-control-allow-headers':'Content-Type'}});return json({ok:false,error:p.error,requestOrigin:p.origin||'(missing)',hint:p.origin==='null'?'Add the literal value null to ALLOWED_ORIGINS':''},403,deniedOrigin)}\n  const origin=p.origin;\n  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...corsHeaders(origin),'access-control-allow-methods':'GET,OPTIONS','access-control-allow-headers':'Content-Type','access-control-max-age':'86400'}});\n  if(req.method!=='GET')return json({ok:false,error:'Read-only GET API'},405,origin);\n  const u=new URL(req.url);\n  try{\n    if(u.pathname==='/health'){\n      let tokenValid=null,probeError='';\n      if(u.searchParams.get('probe')==='1'&&env.UPSTOX_ANALYTICS_TOKEN){try{await up(env,'/v2/instruments/search?query=NIFTY&exchanges=NSE&segments=INDEX&page_number=1&records=1');tokenValid=true}catch(e){tokenValid=false;probeError=String(e.message||e)}}\n      return json({ok:true,provider:'UPSTOX',mode:'read-only',version:'3.17.0',tokenConfigured:!!env.UPSTOX_ANALYTICS_TOKEN,tokenValid,probeError,googleBridgeConfigured:!!env.GOOGLE_BRIDGE_URL,requestOrigin:origin},200,origin);\n    }\n    if(!env.UPSTOX_ANALYTICS_TOKEN)return json({ok:false,error:'UPSTOX_ANALYTICS_TOKEN secret is not configured'},503,origin);\n    if(u.pathname==='/resolve'){const symbol=u.searchParams.get('symbol');if(!symbol)return json({ok:false,error:'symbol required'},400,origin);return json({ok:true,mapping:await resolveKey(env,symbol)},200,origin)}\n    if(u.pathname==='/quotes'){\n      const symbols=(u.searchParams.get('symbols')||'').split(',').map(x=>x.trim()).filter(Boolean).slice(0,500);if(!symbols.length)return json({ok:false,error:'symbols required'},400,origin);\n      const r=await quotes(env,symbols);return json({ok:true,source:'upstox-v3',asOf:new Date().toISOString(),...r},200,origin);\n    }\n    if(u.pathname==='/history'){\n      const symbol=u.searchParams.get('symbol'),from=u.searchParams.get('from'),to=u.searchParams.get('to');if(!symbol||!from||!to)return json({ok:false,error:'symbol, from, to required'},400,origin);\n      const r=await history(env,symbol,from,to);return json({ok:true,source:'upstox-v3',symbol,mapping:r.mapping,bars:r.bars},200,origin);\n    }\n    if(u.pathname==='/universe-history'&&env.GOOGLE_BRIDGE_URL){const target=new URL(env.GOOGLE_BRIDGE_URL);target.searchParams.set('action','universeHistory');for(const k of ['start','end']){const v=u.searchParams.get(k);if(v)target.searchParams.set(k,v)}const r=await fetchTimeout(target.toString());const body=await r.text();let rows=[];try{const j=JSON.parse(body);rows=Array.isArray(j)?j:(Array.isArray(j?.data)?j.data:[])}catch{}return json({ok:r.ok,source:'google-bridge',rows},r.ok?200:502,origin)}\n    if(u.pathname==='/reference')return googleProxy(env,u,origin);\n    return json({ok:false,error:'Not found'},404,origin);\n  }catch(e){return json({ok:false,error:String(e.message||e)},502,origin)}\n}};\n";
-function copyMarketBridgeWorker(){navigator.clipboard?.writeText(MARKET_BRIDGE_WORKER_V317).then(()=>toast('Market Bridge Worker code copied','ok')).catch(()=>{const ta=document.createElement('textarea');ta.value=MARKET_BRIDGE_WORKER_V317;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('Market Bridge Worker code copied','ok');});}
-function downloadMarketBridgeWorker(){const b=new Blob([MARKET_BRIDGE_WORKER_V317],{type:'text/javascript;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='AlphaDesk_V3_17_MarketBridge_worker.js';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+const MARKET_BRIDGE_WORKER_V322="/** AlphaDesk V3.22 Market Bridge \u2014 Cloudflare Worker\n * Required secret: UPSTOX_ANALYTICS_TOKEN\n * Required variable: ALLOWED_ORIGINS = comma-separated exact origins.\n *   Android/local HTML opened with content:// or file:// normally uses Origin: null,\n *   so include the literal word: null\n * Optional variable: GOOGLE_BRIDGE_URL = existing Google Apps Script web-app URL.\n * Read-only by design: no broker order endpoint exists in this Worker.\n */\nconst UP='https://api.upstox.com';\nconst keyCache=new Map();\nconst quoteCache=new Map();\nconst histCache=new Map();\nconst now=()=>Date.now();\nconst UPSTREAM_TIMEOUT_MS=12000;\nasync function fetchTimeout(url,opts={},ms=UPSTREAM_TIMEOUT_MS){\n  const ac=new AbortController();\n  const t=setTimeout(()=>ac.abort(),ms);\n  try{return await fetch(url,{...opts,signal:ac.signal});}\n  catch(e){if(e?.name==='AbortError')throw new Error(`Upstream timeout after ${ms}ms`);throw e;}\n  finally{clearTimeout(t);}\n}\nconst norm=v=>String(v||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,' ' ).replace(/\\s+/g,' ').trim();\nconst compact=v=>norm(v).replace(/\\s/g,'');\nfunction corsHeaders(origin=''){return origin?{'access-control-allow-origin':origin,'vary':'Origin'}:{}}\nfunction json(x,status=200,origin=''){return new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json;charset=UTF-8','cache-control':'no-store',...corsHeaders(origin)}})}\nfunction originPolicy(req,env){\n  const origin=req.headers.get('Origin')||'';\n  const list=String(env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);\n  if(!list.length)return{ok:false,origin,error:'ALLOWED_ORIGINS is not configured'};\n  if(!origin)return{ok:false,origin,error:'Request Origin header is missing'};\n  if(!list.includes(origin))return{ok:false,origin,error:`Origin not allowed: ${origin}`};\n  return{ok:true,origin};\n}\nasync function up(env,path){\n  if(!env.UPSTOX_ANALYTICS_TOKEN)throw new Error('UPSTOX_ANALYTICS_TOKEN secret is not configured');\n  const r=await fetchTimeout(UP+path,{headers:{Accept:'application/json','Content-Type':'application/json',Authorization:`Bearer ${env.UPSTOX_ANALYTICS_TOKEN}`}});\n  const t=await r.text();let body;try{body=JSON.parse(t)}catch{body={raw:t}}\n  if(!r.ok){const msg=body?.errors?.[0]?.message||body?.message||t.slice(0,180)||`HTTP ${r.status}`;throw new Error(`Upstox ${r.status}: ${msg}`)}\n  return body;\n}\nfunction scoreCandidate(q,x){\n  const n=norm(q),c=compact(q),ts=norm(x.trading_symbol),nm=norm(x.name),seg=String(x.segment||'').toUpperCase();\n  let s=0;\n  if(ts===n)s+=120;if(nm===n)s+=115;if(compact(ts)===c)s+=105;if(compact(nm)===c)s+=100;\n  if(ts.startsWith(n)||nm.startsWith(n))s+=35;if(ts.includes(n)||nm.includes(n))s+=20;\n  const looksIndex=/\\b(NIFTY|SENSEX|INDEX|BANK|MIDCAP|SMALLCAP|FIN SERVICE|FINANCIAL|AUTO|IT|FMCG|METAL|PHARMA|REALTY|ENERGY|PSU|MEDIA)\\b/.test(n)&&n.includes(' ');\n  if(looksIndex&&seg.includes('INDEX'))s+=30;\n  if(!looksIndex&&seg.includes('_EQ'))s+=20;\n  if(String(x.exchange||'').toUpperCase()==='NSE')s+=10;\n  return s;\n}\nasync function resolveKey(env,symbol,kind){\n  const raw=String(symbol||'').trim();if(!raw)throw new Error('Empty instrument symbol');\n  const ck=norm(raw)+'|'+(kind||'');if(keyCache.has(ck))return keyCache.get(ck);\n  const q=encodeURIComponent(raw);\n  const j=await up(env,`/v2/instruments/search?query=${q}&exchanges=NSE&segments=EQ,INDEX&page_number=1&records=30`);\n  const a=Array.isArray(j.data)?j.data:[];\n  if(!a.length)throw new Error(`No Upstox instrument mapping for ${raw}`);\n  const wantSeg=kind==='INDEX'?'NSE_INDEX':kind==='ETF'?'NSE_EQ':'';\n  const exact=a.filter(x=>x&&x.instrument_key&&String(x.exchange||'').toUpperCase()==='NSE'&&(x.segment==='NSE_EQ'?norm(x.trading_symbol)===norm(raw):x.segment==='NSE_INDEX'?norm(x.name)===norm(raw):false)&&(!wantSeg||x.segment===wantSeg));\n  if(!exact.length)throw new Error(`No exact Upstox mapping for ${raw}`);\n  if(new Set(exact.map(x=>x.instrument_key)).size>1)throw new Error(`Ambiguous Upstox mapping for ${raw}`);\n  const best={x:exact[0],score:1000};\n  const v={requested:raw,symbol:raw,key:best.x.instrument_key,trading_symbol:best.x.trading_symbol,name:best.x.name,segment:best.x.segment,exchange:best.x.exchange,score:best.score};\n  keyCache.set(ck,v);return v;\n}\nasync function mapLimited(items,limit,fn){const out=new Array(items.length);let next=0;async function w(){while(true){const i=next++;if(i>=items.length)return;out[i]=await fn(items[i],i)}}await Promise.all(Array.from({length:Math.min(limit,items.length)},w));return out}\nasync function quotes(env,symbols,indices){\n  const cacheKey=[...symbols].map(norm).sort().join(',');const hit=quoteCache.get(cacheKey);if(hit&&now()-hit.ts<8000)return hit.value;\n  const resolved=await mapLimited(symbols,4,async s=>{try{return{ok:true,map:await resolveKey(env,s,indices&&indices.has(norm(s))?'INDEX':undefined)}}catch(e){return{ok:false,symbol:s,error:String(e.message||e)}}});\n  const maps=resolved.filter(x=>x.ok).map(x=>x.map),unresolved=resolved.filter(x=>!x.ok).map(x=>({symbol:x.symbol,error:x.error}));\n  if(!maps.length){const value={quotes:[],unresolved,resolved:0,requested:symbols.length};quoteCache.set(cacheKey,{ts:now(),value});return value}\n  const j=await up(env,`/v3/market-quote/quotes?instrument_key=${encodeURIComponent(maps.map(x=>x.key).join(','))}`);\n  const data=j.data||{},byKey=new Map(maps.map(x=>[x.key,x]));\n  const arr=Object.values(data).map(q=>{const m=byKey.get(q.instrument_token);if(!m)return null;const prev=+q.prev_close_price||0,price=+q.last_price||0;return{symbol:m.symbol,price,changePct:prev>0?(price-prev)/prev*100:null,open:+q.ohlc?.open||0,high:+q.ohlc?.high||0,low:+q.ohlc?.low||0,dayClose:+q.ohlc?.close||0,yearLow:+q.year_low||0,yearHigh:+q.year_high||0,volume:+q.volume||+q.ohlc?.volume||0,asOf:q.timestamp||null,identity:{segment:m.segment,name:m.name,exchange:m.exchange},instrumentKey:q.instrument_token,tradingSymbol:q.symbol||m.trading_symbol,source:'upstox-v3'};}).filter(x=>x?.symbol&&x.price>0);\n  const returned=new Set(arr.map(x=>norm(x.symbol)));for(const m of maps)if(!returned.has(norm(m.symbol)))unresolved.push({symbol:m.symbol,error:'Upstox quote response did not contain this resolved instrument'});\n  const value={quotes:arr,unresolved,resolved:maps.length,requested:symbols.length};quoteCache.set(cacheKey,{ts:now(),value});return value;\n}\nasync function history(env,symbol,from,to){\n  const ck=`${norm(symbol)}|${from}|${to}`,hit=histCache.get(ck);if(hit&&now()-hit.ts<15*60*1000)return hit.value;\n  const m=await resolveKey(env,symbol);const path=`/v3/historical-candle/${encodeURIComponent(m.key)}/days/1/${encodeURIComponent(to)}/${encodeURIComponent(from)}`;const j=await up(env,path);const c=j?.data?.candles||[];\n  const bars=c.map(x=>({date:String(x[0]).slice(0,10),open:+x[1],high:+x[2],low:+x[3],close:+x[4],volume:+x[5]||0,oi:+x[6]||0})).filter(x=>x.date&&x.close>0).sort((a,b)=>a.date.localeCompare(b.date));\n  const value={mapping:m,bars};histCache.set(ck,{ts:now(),value});return value;\n}\nasync function googleProxy(env,u,origin){\n  if(!env.GOOGLE_BRIDGE_URL)return json({ok:false,error:'GOOGLE_BRIDGE_URL is not configured'},404,origin);\n  const target=new URL(env.GOOGLE_BRIDGE_URL);for(const [k,v] of u.searchParams)target.searchParams.set(k,v);\n  const r=await fetchTimeout(target.toString());const body=await r.text();return new Response(body,{status:r.status,headers:{'content-type':r.headers.get('content-type')||'application/json',...corsHeaders(origin)}})\n}\nexport default {async fetch(req,env){\n  const p=originPolicy(req,env);const deniedOrigin=p.origin||'';\n  if(!p.ok){if(req.method==='OPTIONS')return new Response(null,{status:403,headers:{...corsHeaders(deniedOrigin),'access-control-allow-methods':'GET,OPTIONS','access-control-allow-headers':'Content-Type'}});return json({ok:false,error:p.error,requestOrigin:p.origin||'(missing)',hint:p.origin==='null'?'Add the literal value null to ALLOWED_ORIGINS':''},403,deniedOrigin)}\n  const origin=p.origin;\n  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...corsHeaders(origin),'access-control-allow-methods':'GET,OPTIONS','access-control-allow-headers':'Content-Type','access-control-max-age':'86400'}});\n  if(req.method!=='GET')return json({ok:false,error:'Read-only GET API'},405,origin);\n  const u=new URL(req.url);\n  try{\n    if(u.pathname==='/health'){\n      let tokenValid=null,probeError='';\n      if(u.searchParams.get('probe')==='1'&&env.UPSTOX_ANALYTICS_TOKEN){try{await up(env,'/v2/instruments/search?query=NIFTY&exchanges=NSE&segments=INDEX&page_number=1&records=1');tokenValid=true}catch(e){tokenValid=false;probeError=String(e.message||e)}}\n      return json({ok:true,provider:'UPSTOX',mode:'read-only',version:'3.22.0',tokenConfigured:!!env.UPSTOX_ANALYTICS_TOKEN,tokenValid,probeError,googleBridgeConfigured:!!env.GOOGLE_BRIDGE_URL,requestOrigin:origin},200,origin);\n    }\n    if(!env.UPSTOX_ANALYTICS_TOKEN)return json({ok:false,error:'UPSTOX_ANALYTICS_TOKEN secret is not configured'},503,origin);\n    if(u.pathname==='/resolve'){const symbol=u.searchParams.get('symbol');if(!symbol)return json({ok:false,error:'symbol required'},400,origin);return json({ok:true,mapping:await resolveKey(env,symbol,u.searchParams.get('kind')||undefined)},200,origin)}\n    if(u.pathname==='/quotes'){\n      const symbols=(u.searchParams.get('symbols')||'').split(',').map(x=>x.trim()).filter(Boolean).slice(0,500);if(!symbols.length)return json({ok:false,error:'symbols required'},400,origin);\n      const idx=new Set((u.searchParams.get('indices')||'').split(',').map(norm).filter(Boolean));const r=await quotes(env,symbols,idx);return json({ok:true,source:'upstox-v3',asOf:new Date().toISOString(),...r},200,origin);\n    }\n    if(u.pathname==='/history'){\n      const symbol=u.searchParams.get('symbol'),from=u.searchParams.get('from'),to=u.searchParams.get('to');if(!symbol||!from||!to)return json({ok:false,error:'symbol, from, to required'},400,origin);\n      const r=await history(env,symbol,from,to);return json({ok:true,source:'upstox-v3',symbol,mapping:r.mapping,bars:r.bars},200,origin);\n    }\n    if(u.pathname==='/universe-history'&&env.GOOGLE_BRIDGE_URL){const target=new URL(env.GOOGLE_BRIDGE_URL);target.searchParams.set('action','universeHistory');for(const k of ['start','end']){const v=u.searchParams.get(k);if(v)target.searchParams.set(k,v)}const r=await fetchTimeout(target.toString());const body=await r.text();let rows=[];try{const j=JSON.parse(body);rows=Array.isArray(j)?j:(Array.isArray(j?.data)?j.data:[])}catch{}return json({ok:r.ok,source:'google-bridge',rows},r.ok?200:502,origin)}\n    if(u.pathname==='/reference')return googleProxy(env,u,origin);\n    return json({ok:false,error:'Not found'},404,origin);\n  }catch(e){return json({ok:false,error:String(e.message||e)},502,origin)}\n}};\n";
+function copyMarketBridgeWorker(){navigator.clipboard?.writeText(MARKET_BRIDGE_WORKER_V322).then(()=>toast('Market Bridge Worker code copied','ok')).catch(()=>{const ta=document.createElement('textarea');ta.value=MARKET_BRIDGE_WORKER_V322;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('Market Bridge Worker code copied','ok');});}
+function downloadMarketBridgeWorker(){const b=new Blob([MARKET_BRIDGE_WORKER_V322],{type:'text/javascript;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='AlphaDesk_V3_22_MarketBridge_worker.js';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
 function renderMarketDataHealth(){
   const el=document.getElementById('market-data-health'),originEl=document.getElementById('market-origin-hint');if(originEl)originEl.textContent=_marketOrigin();if(!el)return;
   const d=MARKET_DATA_DIAG,b=MARKET_BRIDGE_DIAG,h=b.health,src=Object.entries(d.sources||{}).filter(([,n])=>n>0).map(([k,n])=>`${k} ${n}`).join(' · ')||'none';
@@ -3805,7 +3822,29 @@ function fetchT(url,ms,opts){
 // from being queried and could end with the contradictory state: prices visible +
 // "all sources failed". This pass tracks fresh symbols independently.
 let _fetchPricesPromise=null;
-function priceFreshStatus(sym,maxAgeMs=Math.max(10,(S.config.refreshMins||3)*2+2)*60000){const p=PRICES[sym]||{},age=p._freshAt?Date.now()-p._freshAt:Infinity;return{ok:p.cmp>0&&age<=maxAgeMs,ageMs:age,source:String(p._src||'').toUpperCase(),asOf:p._asOf||null,price:+p.cmp||0};}
+// A2-1 (F01): a quote is fresh only if the PROVIDER's observation time says so. _fetchedAt = when we asked (ms);
+// _observedAt = provider timestamp (ms) or null; _src = source. Missing observation time is never invented (rule 6).
+function _istDate(ms){return new Date(ms+19800000).toISOString().slice(0,10);}
+function quoteObservedMs(p){
+  if(!p)return null;
+  if(Number.isFinite(p._observedAt))return p._observedAt;
+  if(typeof p._asOf==='string'){const t=Date.parse(p._asOf);if(Number.isFinite(t))return t;}   // legacy field name, provider time only
+  return null;
+}
+function quoteFreshness(p,nowMs,{maxAgeSec=900,sessionDate}={}){
+  const obs=quoteObservedMs(p);
+  if(obs==null)return{ok:false,code:'UNTIMESTAMPED',ageSec:null};
+  if(obs>nowMs+60000)return{ok:false,code:'FUTURE_TIMESTAMP',ageSec:(nowMs-obs)/1000};
+  const ageSec=Math.max(0,(nowMs-obs)/1000);
+  if(ageSec>maxAgeSec)return{ok:false,code:'STALE',ageSec};
+  if(sessionDate&&_istDate(obs)!==sessionDate)return{ok:false,code:'WRONG_SESSION',ageSec};
+  return{ok:true,code:'OK',ageSec};
+}
+function priceFreshStatus(sym,maxAgeMs=Math.max(10,(S.config.refreshMins||3)*2+2)*60000){
+  const p=PRICES[sym]||{},fetched=Number.isFinite(p._fetchedAt)?p._fetchedAt:p._freshAt,now=Date.now(),age=fetched?now-fetched:Infinity;
+  const qf=quoteFreshness(p,now,{maxAgeSec:Math.max(900,maxAgeMs/1000)});
+  return{ok:p.cmp>0&&age<=maxAgeMs&&qf.ok,ageMs:age,source:String(p._src||'').toUpperCase(),asOf:p._asOf||null,price:+p.cmp||0,code:qf.ok?(age<=maxAgeMs?'OK':'STALE'):qf.code};
+}
 async function fetchAllPrices(){
   if(_fetchPricesPromise){console.info('fetchAllPrices: joining existing refresh');return _fetchPricesPromise;}
   _fetchPricesPromise=_fetchAllPricesInner().finally(()=>{_fetchPricesPromise=null;});return _fetchPricesPromise;
@@ -3816,7 +3855,7 @@ async function _fetchAllPricesInner(){
   rebuildUniverses();
   const MASTER=S.universe.map(e=>({sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym}));(S.watchlist||[]).forEach(w=>{if(!MASTER.some(e=>e.sym===w.sym))MASTER.push({sym:w.sym,yf:w.yf||w.sym+'.NS',name:w.name||w.sym});});MASTER.forEach(e=>{if(!PRICES[e.sym])PRICES[e.sym]={cmp:0,chg:0,low52:0,high52:0,vol:0};});
   const fresh=new Set(),sourceCounts={},errors=[];let upstoxUnresolved=[];const stamp=Date.now();
-  const mark=(sym,src,asOf)=>{sym=String(sym||'').toUpperCase();if(!PRICES[sym])return;fresh.add(sym);sourceCounts[src]=(sourceCounts[src]||0)+1;PRICES[sym]._src=src;PRICES[sym]._asOf=asOf||new Date().toISOString();PRICES[sym]._freshAt=stamp;};
+  const mark=(sym,src,asOf)=>{sym=String(sym||'').toUpperCase();if(!PRICES[sym])return;fresh.add(sym);sourceCounts[src]=(sourceCounts[src]||0)+1;const obs=asOf?Date.parse(asOf):NaN;PRICES[sym]._src=src;PRICES[sym]._observedAt=Number.isFinite(obs)?obs:null;PRICES[sym]._asOf=Number.isFinite(obs)?new Date(obs).toISOString():null;PRICES[sym]._fetchedAt=stamp;PRICES[sym]._freshAt=stamp;};
   const missingFresh=()=>MASTER.filter(e=>!fresh.has(e.sym)).map(e=>e.sym);
   const applyArr=(arr,src,onlyMissing=true)=>{let n=0;for(const item of (arr||[])){const sym=String(item.symbol||item.sym||'').replace('NSE:','').trim().toUpperCase();if(!sym||!PRICES[sym]||(onlyMissing&&fresh.has(sym)))continue;const cmp=+(item.cmp??item.price??item.current??0);if(!(cmp>0))continue;const p=PRICES[sym];p.cmp=cmp;if(item.chg!=null||item.changePct!=null)p.chg=+(item.chg??item.changePct);if(item.low52!=null||item.yearLow!=null)p.low52=+(item.low52??item.yearLow);if(item.high52!=null||item.yearHigh!=null)p.high52=+(item.high52??item.yearHigh);if(item.vol!=null||item.volume!=null)p.vol=+(item.vol??item.volume);S.momPrices[sym]={current:p.cmp,exec:p.cmp};mark(sym,src,item.asOf||item.timestamp);n++;}return n;};
   const applyYahoo=quotes=>{let n=0;for(const q of quotes||[]){const etf=MASTER.find(e=>e.yf===q.symbol);if(!etf||fresh.has(etf.sym))continue;const p=PRICES[etf.sym],px=+q.regularMarketPrice||0;if(!(px>0))continue;p.cmp=px;if(q.fiftyTwoWeekLow)p.low52=+q.fiftyTwoWeekLow;if(q.fiftyTwoWeekHigh)p.high52=+q.fiftyTwoWeekHigh;if(q.regularMarketChangePercent!=null)p.chg=+q.regularMarketChangePercent;if(q.regularMarketVolume!=null)p.vol=+q.regularMarketVolume;S.momPrices[etf.sym]={current:px,exec:px};mark(etf.sym,'YAHOO',q.regularMarketTime?new Date(q.regularMarketTime*1000).toISOString():null);n++;}return n;};
@@ -7122,14 +7161,19 @@ async function computeDMSignal(){
   try{
     const etfs=getMomUniverse().filter(x=>x!=='NIFTYBEES'&&!(typeof DHC_EXCLUDED!=='undefined'&&DHC_EXCLUDED.has(x))),needed=[...etfs,'NIFTYBEES'];
     const now=Date.now()/1000,startTs=Math.floor(now-(lookback+250)*86400),endTs=Math.floor(now+86400),histMap={},failures=[];
-    const rows=await mapWithConcurrency(needed,2,async sym=>{prog.textContent=`Fetching ${sym}…`;try{const h=await fetchHistDaily(sym,resolveYf(sym),startTs,endTs);if(!h||!Object.keys(h).length)return{sym,error:'no historical bars'};return{sym,h};}catch(e){return{sym,error:e?.message||String(e)}}});
+    // A2-6: the signal reads ONE pinned snapshot handle (preview run); a data problem while opening it is a failed signal, never a partial one
+    let sctx=null,snapErr='';try{sctx=await EOD2Store.startRun('DM-SIGNAL',{mode:'preview'});}catch(e){snapErr=e?.message||String(e);}
+    const rows=await mapWithConcurrency(needed,2,async sym=>{if(!sctx)return{sym,error:snapErr||'snapshot unavailable'};prog.textContent=`Fetching ${sym}…`;try{const h=await fetchHistDaily(sym,resolveYf(sym),startTs,endTs,sctx);if(!h||!Object.keys(h).length)return{sym,error:'no historical bars'};return{sym,h};}catch(e){return{sym,error:e?.message||String(e)}}});
     rows.forEach(r=>{if(r.error)failures.push(r);else histMap[r.sym]=r.h;});
     const latest=Object.entries(histMap).map(([sym,h])=>({sym,date:Object.keys(h).sort().at(-1)||''})).filter(x=>x.date);
     const commonAsOf=latest.length===needed.length?latest.map(x=>x.date).sort()[0]:'';
     const ageDays=commonAsOf?Math.floor((new Date(localDate()+'T00:00:00Z')-new Date(commonAsOf+'T00:00:00Z'))/86400000):Infinity;
+    // A2-6: data is current only if the snapshot's latest completed session is the one the calendar says should be published now, and every series reaches it
+    let staleReason='';if(sctx){const exp=EOD2Store.expectedLatest(sctx.snapshot.manifest),lc=sctx.snapshot.latestCompleted;if(lc<exp.date)staleReason=`STALE_DATASET: snapshot latest completed session ${lc} < expected ${exp.date}`;else if(commonAsOf&&commonAsOf<lc)staleReason=`MISSING_EXPECTED_SESSION: common market date ${commonAsOf} < snapshot latest ${lc}`;}
+    if(sctx)EOD2Store.endRun(sctx);
     let decision=commonAsOf?computeDmDecisionFromHist(histMap,commonAsOf,{lookback,hurdle,slots,niftyOn,minVol,etfs}):{dataOk:false,niftyOk:false,niftyError:'common as-of date unavailable',ranked:[],qualified:[],topPicks:[],hurdlePct:(Math.pow(1+hurdle/100,lookback/365.25)-1)*100,slots,lookback,excluded:[]};
-    const dataQualityOk=failures.length===0&&decision.dataOk&&ageDays<=7;
-    const qualityReasons=[...failures.map(x=>`${x.sym}: ${x.error}`),...(decision.niftyError?[decision.niftyError]:[]),...(ageDays>7?[`common market date ${commonAsOf||'none'} is ${ageDays} days old`]:[])];
+    const dataQualityOk=failures.length===0&&decision.dataOk&&ageDays<=7&&!staleReason;
+    const qualityReasons=[...failures.map(x=>`${x.sym}: ${x.error}`),...(decision.niftyError?[decision.niftyError]:[]),...(staleReason?[staleReason]:[]),...(ageDays>7?[`common market date ${commonAsOf||'none'} is ${ageDays} days old`]:[])];
     dmSignalData={date:new Date().toISOString(),...decision,allLiquid:niftyOn&&!decision.niftyOk&&!decision.niftyError,dataQualityOk,dataQualityReasons:qualityReasons,commonAsOf};
     saveDmSignalCache();reportHistFetchFailuresIfAny('DM signal computation');renderDMSignal();renderMomAlerts();
     const sDateEl=document.getElementById('mom-signal-date');if(sDateEl)sDateEl.innerHTML=`Signal computed ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} · common data date <b>${escapeHtml(commonAsOf||'N/A')}</b> · Lookback <b>${getLookbackLabel(lookback)}</b> · Hurdle <b>${decision.hurdlePct.toFixed(2)}%</b> · ${dataQualityOk?'<b style="color:var(--go)">DATA CHECKS PASSED (preview-grade)</b>':'<b style="color:var(--stop)">ACTIONS BLOCKED</b>'}`;
@@ -7912,46 +7956,341 @@ function researchCashflowsFromDm(result){
 // Historical waterfall: validated IDB cache → Upstox Market Bridge → Yahoo fallback → Supabase persistence/fallback → Apps Script bridge.
 // The cache is a persistence layer; external fallbacks are never allowed to
 // silently replace a structurally valid, newer Yahoo bar.
-// ══ V3.21 EOD2 CERTIFIED DATA LAYER ═══════════════════════════════════════════
-// The certified EOD2 export (./data/manifest.json + ./data/{etf,index}/*.json) is
-// the ONLY historical source for every backtest and every history read. No Yahoo,
-// proxy, Supabase, Apps Script or Upstox history. Any defect BLOCKS with a reason.
-const EOD2_BASE='./data/';
-const EOD2_CUTOFF_MIN=20*60;                 // publish job 19:15 + pipeline -> 20:00 IST
+// ── EOD2 CLIENT v3 (vendored from market-data@0b81454, clients/eod2-client.js, unmodified) ──
+/* EOD2 data client v3 — classic script (no `export`), defines globalThis.EOD2Client. Vendored into AlphaDesk (A2-5). Contract "alphadesk-eod2/3".
+ *
+ *   const client = EOD2Client.create({ baseUrl, cache: 'memory' | 'indexeddb', dbName: 'eod2_v3', fetch });
+ *   const snap = await client.openSnapshot();          // {ok:false, code, detail} on any data problem, otherwise a frozen handle
+ *   snap.id; snap.manifest; snap.calendar;             // calendar sha256 checked against manifest.calendar.sha256
+ *   await snap.getSeries(sym [, {force}])              // {ok:true, bars, meta} | {ok:false, code, detail}
+ *   snap.checkCoverage(sym, {from, to, fields, warmupSessions, mode, execDates})   // synchronous; series must have been loaded
+ *   await snap.verifyAll({force, onProgress})
+ *   client.clearCache({datasetId, symbol})
+ *
+ * Rules: a handle never reloads the manifest and fetches only under its own snapshotBase; cache key eod2v3:<datasetId>:<symbol>:<sha256>,
+ * a cache hit must re-hash to the manifest sha256; `force` bypasses the cache and re-hashes the raw network bytes; every series is re-validated
+ * against section 4.5; data problems never throw; returned bars (array and every row) are frozen.
+ */
+(function (root) {
+  'use strict';
+  var CONTRACT = 'alphadesk-eod2/3';
+  var VERSION = '3.0.0';
+  var FIELDS = ['date', 'open', 'high', 'low', 'close', 'volume'];
+  var MIGRATED = 'migrated-v2-2026-09-11';
+  var OHLC_WARN = 0.0005;
+  var ETF_REQUIRED = ['open', 'high', 'low', 'close'];
+  var FIELD_INDEX = { open: 1, high: 2, low: 3, close: 4, volume: 5 };
+  var ELIGIBLE_WARN = { ISIN_MISSING: 1, SMALL_OHLC_DISCREPANCY: 1 };
+  var INFO_CODES = { NOT_YET_LISTED: 1, DELISTED_BEFORE_WINDOW: 1 };
+
+  function fail(code, detail) { return { ok: false, code: code, detail: detail == null ? '' : String(detail) }; }
+  function isDate(v) {
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    var d = new Date(v + 'T00:00:00Z');
+    return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+  }
+  function hex(buf) { var a = new Uint8Array(buf), s = ''; for (var i = 0; i < a.length; i++) s += ('0' + a[i].toString(16)).slice(-2); return s; }
+  async function sha256(bytes) { return hex(await root.crypto.subtle.digest('SHA-256', bytes)); }
+  function decode(bytes) { return new TextDecoder('utf-8').decode(bytes); }
+  function lowerBound(arr, key, sel) { var lo = 0, hi = arr.length; while (lo < hi) { var m = (lo + hi) >> 1; if (sel(arr[m]) < key) lo = m + 1; else hi = m; } return lo; }
+  function normKey(s) { return String(s).replace(/_/g, ' ').trim().toUpperCase(); }
+
+  /* ---------- caches ---------- */
+  function memoryCache() {
+    var m = new Map();
+    return {
+      kind: 'memory',
+      get: async function (k) { return m.has(k) ? m.get(k) : null; },
+      put: async function (k, bytes) { m.set(k, bytes); },
+      del: async function (pred) { var n = 0; Array.from(m.keys()).forEach(function (k) { if (pred(k)) { m.delete(k); n++; } }); return n; },
+      keys: async function () { return Array.from(m.keys()); }
+    };
+  }
+  function idbCache(dbName) {
+    var dbp = null;
+    function db() {
+      if (dbp) return dbp;
+      dbp = new Promise(function (res, rej) {
+        var rq = root.indexedDB.open(dbName, 1);
+        rq.onupgradeneeded = function () { if (!rq.result.objectStoreNames.contains('series')) rq.result.createObjectStore('series'); };
+        rq.onsuccess = function () { res(rq.result); };
+        rq.onerror = function () { rej(rq.error); };
+      });
+      return dbp;
+    }
+    function tx(mode, fn) { return db().then(function (d) { return new Promise(function (res, rej) { var r = fn(d.transaction('series', mode).objectStore('series')); r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }); }); }
+    return {
+      kind: 'indexeddb',
+      get: function (k) { return tx('readonly', function (s) { return s.get(k); }).then(function (v) { return v ? new Uint8Array(v) : null; }); },
+      put: function (k, bytes) { return tx('readwrite', function (s) { return s.put(bytes.slice().buffer, k); }); },
+      keys: function () { return tx('readonly', function (s) { return s.getAllKeys(); }); },
+      del: async function (pred) { var ks = await this.keys(), n = 0; for (var i = 0; i < ks.length; i++) if (pred(ks[i])) { await tx('readwrite', function (s) { return s.delete(ks[i]); }); n++; } return n; }
+    };
+  }
+
+  /* ---------- section 4.5 validation ---------- */
+  function ohlcViolation(r) {
+    var o = r[1], h = r[2], l = r[3], c = r[4], worst = 0, present;
+    present = [o, c, l].filter(function (x) { return x !== null; });
+    if (h !== null && present.length && h > 0) worst = Math.max(worst, (Math.max.apply(null, present) - h) / h);
+    present = [o, c, h].filter(function (x) { return x !== null; });
+    if (l !== null && present.length && l > 0) worst = Math.max(worst, (l - Math.min.apply(null, present)) / l);
+    return Math.max(0, worst);
+  }
+  function validateSeries(doc, entry) {
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return fail('SCHEMA_INVALID', 'series is not an object');
+    if (doc.contract !== CONTRACT || doc.provider !== 'EOD2') return fail('SCHEMA_INVALID', 'contract/provider');
+    if (doc.kind !== entry.kind || doc.id !== entry.id) return fail('WRONG_EXCHANGE_OR_KIND', 'series says ' + doc.kind + ' ' + doc.id + ', manifest says ' + entry.kind + ' ' + entry.id);
+    if (!Array.isArray(doc.fields) || doc.fields.join(',') !== FIELDS.join(',')) return fail('SCHEMA_INVALID', 'fields');
+    if (typeof doc.adjustment !== 'string' || !doc.adjustment) return fail('ADJUSTMENT_POLICY_UNKNOWN', 'adjustment');
+    if (!Array.isArray(doc.bars) || !doc.bars.length) return fail('SCHEMA_INVALID', 'no bars');
+    var etf = entry.kind === 'ETF', warn = 0, prev = null, i, j, r;
+    for (i = 0; i < doc.bars.length; i++) {
+      r = doc.bars[i];
+      if (!Array.isArray(r) || r.length !== 6) return fail('SCHEMA_INVALID', 'row ' + i + ' is not a 6-tuple');
+      if (!isDate(r[0])) return fail('INVALID_DATE', String(r[0]));
+      if (prev !== null && !(r[0] > prev)) return fail('SCHEMA_INVALID', 'dates not strictly ascending at ' + r[0]);
+      prev = r[0];
+      for (j = 1; j <= 5; j++) {
+        var v = r[j];
+        if (v === null) { if (etf && j <= 4) return fail('MISSING_REQUIRED_FIELD', FIELDS[j] + ' on ' + r[0]); continue; }
+        if (typeof v !== 'number' || !isFinite(v)) return fail('NONFINITE_VALUE', FIELDS[j] + ' on ' + r[0]);
+        if (j <= 4 && !(v > 0)) return fail('SCHEMA_INVALID', 'non-positive ' + FIELDS[j] + ' on ' + r[0]);
+        if (j === 5 && (v < 0 || Math.floor(v) !== v)) return fail('SCHEMA_INVALID', 'volume must be an integer >= 0 on ' + r[0]);
+      }
+      var viol = ohlcViolation(r);
+      if (viol > OHLC_WARN) return fail('OHLC_INCONSISTENT', r[0]);
+      if (viol > 0) warn++;
+    }
+    return { ok: true, smallOhlc: warn };
+  }
+
+  function freezeRows(bars) { for (var i = 0; i < bars.length; i++) Object.freeze(bars[i]); return Object.freeze(bars); }
+
+  /* ---------- client ---------- */
+  function create(opts) {
+    opts = opts || {};
+    var baseUrl = String(opts.baseUrl || './');
+    if (baseUrl.slice(-1) !== '/') baseUrl += '/';
+    var doFetch = opts.fetch || (root.fetch && root.fetch.bind(root));
+    var cache = opts.cache === 'indexeddb' && root.indexedDB ? idbCache(opts.dbName || 'eod2_v3') : (opts.cache && typeof opts.cache === 'object' ? opts.cache : memoryCache());
+
+    async function getBytes(url, noStore) {
+      try {
+        var r = await doFetch(url, noStore ? { cache: 'no-store' } : undefined);
+        if (!r || !r.ok) return { err: fail('SOURCE_UNAVAILABLE', 'HTTP ' + (r ? r.status : '?') + ' ' + url) };
+        return { bytes: new Uint8Array(await r.arrayBuffer()) };
+      } catch (e) { return { err: fail('SOURCE_UNAVAILABLE', (e && e.message) || e) }; }
+    }
+
+    async function openSnapshot() {
+      var got = await getBytes(baseUrl + 'data/manifest.json', true);
+      if (got.err) return got.err;
+      var m;
+      try { m = JSON.parse(decode(got.bytes)); } catch (e) { return fail('SCHEMA_INVALID', 'manifest is not JSON'); }
+      if (!m || m.contract !== CONTRACT) return fail('SCHEMA_INVALID', 'manifest contract');
+      if (m.publishStatus !== 'PUBLISHABLE') return fail('SOURCE_UNAVAILABLE', 'snapshot is ' + m.publishStatus);
+      if (typeof m.datasetId !== 'string' || typeof m.snapshotBase !== 'string' || !m.files || typeof m.files !== 'object' || !m.calendar || typeof m.calendar.path !== 'string' || !/^[0-9a-f]{64}$/.test(m.calendar.sha256 || '')) return fail('SCHEMA_INVALID', 'manifest fields');
+      var sbase = baseUrl + 'data/' + m.snapshotBase;
+      var cb = await getBytes(sbase + m.calendar.path, true);
+      if (cb.err) return cb.err;
+      if ((await sha256(cb.bytes)) !== m.calendar.sha256) return fail('CALENDAR_UNVERIFIED', 'calendar sha256 does not match the manifest');
+      var cal;
+      try { cal = JSON.parse(decode(cb.bytes)); } catch (e) { return fail('CALENDAR_UNVERIFIED', 'calendar is not JSON'); }
+      if (!cal || !Array.isArray(cal.sessions) || !cal.sessions.length || !isDate(cal.verifiedThrough)) return fail('CALENDAR_UNVERIFIED', 'calendar content');
+      return buildHandle(m, cal, sbase);
+    }
+
+    function buildHandle(m, cal, sbase) {
+      var loaded = {};                      // symbol -> {rows: [...], entry}
+      var sessions = cal.sessions.slice().sort();
+      var sessionSet = new Set(sessions);
+      function entryFor(sym) {
+        var k = normKey(sym), found = null;
+        Object.keys(m.files).forEach(function (n) { if (normKey(n) === k) found = n; });
+        if (found) return { key: found, entry: m.files[found] };
+        var q = null, x = null;
+        Object.keys(m.quarantined || {}).forEach(function (n) { if (normKey(n) === k) q = n; });
+        Object.keys(m.excluded || {}).forEach(function (n) { if (normKey(n) === k) x = n; });
+        if (q) return { blocked: fail(m.quarantined[q].code || 'EXPORT_FAILED', 'quarantined: ' + JSON.stringify(m.quarantined[q].events || [])) };
+        if (x) return { blocked: fail(m.excluded[x].code || 'EXPORT_FAILED', m.excluded[x].detail || '') };
+        return { blocked: fail('NOT_IN_EXPORT', String(sym)) };
+      }
+      async function getSeries(sym, o) {
+        var force = !!(o && o.force);
+        var e = entryFor(sym);
+        if (e.blocked) return e.blocked;
+        var key = e.key, entry = e.entry;
+        if (!force && loaded[key] && loaded[key].result) return loaded[key].result;
+        var ckey = 'eod2v3:' + m.datasetId + ':' + key + ':' + entry.sha256;
+        var bytes = null, fromCache = false, cacheStatus = 'MISS';
+        if (!force) {
+          var cached = await cache.get(ckey);
+          if (cached) {
+            if ((await sha256(cached)) === entry.sha256) { bytes = cached; fromCache = true; cacheStatus = 'HIT'; }
+            else { await cache.del(function (k) { return k === ckey; }); cacheStatus = 'REPAIRED'; }
+          }
+        } else cacheStatus = 'BYPASSED';
+        if (!bytes) {
+          var g = await getBytes(sbase + entry.path, true);
+          if (g.err) return g.err;
+          if ((await sha256(g.bytes)) !== entry.sha256) return fail('HASH_MISMATCH', key + ': file bytes do not match the manifest sha256');
+          bytes = g.bytes;
+        }
+        var doc;
+        try { doc = JSON.parse(decode(bytes)); } catch (err) { return fail('SCHEMA_INVALID', key + ' is not JSON'); }
+        var v = validateSeries(doc, entry);
+        if (!v.ok) return v;
+        if (!fromCache) await cache.put(ckey, bytes);
+        var reasons = (entry.reasons || []).map(function (r) { return Object.freeze(Object.assign({}, r)); });
+        var result = { ok: true, bars: freezeRows(doc.bars), meta: Object.freeze({ symbol: key, id: entry.id, kind: entry.kind, sha256: entry.sha256, first: doc.bars[0][0], last: doc.bars[doc.bars.length - 1][0], bars: doc.bars.length, status: entry.status, reasons: Object.freeze(reasons), noTradeDays: Object.freeze((entry.noTradeDays || []).slice()), smallOhlcDiscrepancies: v.smallOhlc, fromCache: fromCache, cacheStatus: cacheStatus }) };
+        Object.freeze(result);
+        loaded[key] = { result: result, entry: entry };
+        return result;
+      }
+
+      function checkCoverage(sym, o) {
+        o = o || {};
+        var mode = o.mode || 'certified', fields = o.fields || ['close'], warm = o.warmupSessions == null ? 0 : o.warmupSessions;
+        var from = o.from, to = o.to, execDates = o.execDates || [];
+        var out = function (code, extra) { return Object.assign({ ok: code === 'OK', code: code, reasons: [], missing: [], firstTradable: null }, extra || {}); };
+        if (!isDate(from) || !isDate(to) || from > to) return out('SCHEMA_INVALID', { detail: 'from/to must be real dates with from <= to' });
+        var e = entryFor(sym);
+        if (e.blocked) return out(e.blocked.code, { detail: e.blocked.detail });
+        var L = loaded[e.key];
+        if (!L || !L.result) return out('SOURCE_UNAVAILABLE', { detail: 'series not loaded: await getSeries first' });
+        var entry = e.entry, bars = L.result.bars, first = bars[0][0];
+        if (from > cal.verifiedThrough || to > cal.verifiedThrough) return out('CALENDAR_UNVERIFIED', { detail: 'beyond verifiedThrough ' + cal.verifiedThrough });
+        var latest = m.latestCompletedSession;
+        if (to > latest) return out('STALE_DATASET', { detail: 'snapshot ends ' + latest });
+        var repReasons = (entry.reasons || []).map(function (r) { return r.code; });
+        var listing = entry.listingDate || null, firstObs = entry.firstObservedDate || first;
+        var unverified = repReasons.indexOf('LISTING_DATE_UNVERIFIED') >= 0;
+        var rangeStart = from;
+        var infos = [];
+        if (listing) { if (listing > from) { rangeStart = listing; infos.push('NOT_YET_LISTED'); } }
+        else if (firstObs > from) rangeStart = firstObs;
+        var uniq = function (a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }).sort(); };
+        var reasons = uniq(repReasons.filter(function (c) { return c !== 'OK'; }).concat(infos));
+        var res = function (code, extra) { return out(code, Object.assign({ reasons: reasons }, extra || {})); };
+        if (mode === 'certified') {
+          for (var i = 0; i < entry.reasons.length; i++) {
+            var rc = entry.reasons[i].code;
+            if (ELIGIBLE_WARN[rc] || INFO_CODES[rc] || rc === 'OK') continue;
+            if (rc === 'LISTING_DATE_UNVERIFIED') { if (from < firstObs) return res('LISTING_DATE_UNVERIFIED', { detail: 'certified window starts before the first observed bar ' + firstObs }); continue; }
+            if (rc === 'APPROVAL_EVIDENCE_MISSING') { if (entry.reasons[i].provenance !== MIGRATED) return res('APPROVAL_EVIDENCE_MISSING', { detail: 'approval without evidence is not migrated-v2' }); continue; }
+            return res(rc, { detail: 'warning not eligible for a certified run' });
+          }
+        }
+        var have = new Set(bars.map(function (b) { return b[0]; })), noTrade = new Set(entry.noTradeDays || []);
+        var endD = to < latest ? to : latest, missing = [];
+        var a = lowerBound(sessions, rangeStart, function (x) { return x; });
+        for (var k = a; k < sessions.length && sessions[k] <= endD; k++) { var d = sessions[k]; if (!have.has(d) && !noTrade.has(d)) missing.push(d); }
+        if (missing.length) return res('MISSING_EXPECTED_SESSION', { missing: missing.slice(0, 10), detail: missing.length + ' session(s) missing' });
+        var need = fields.filter(function (f) { return FIELD_INDEX[f]; });
+        for (var b = 0; b < bars.length; b++) {
+          var row = bars[b];
+          if (row[0] < rangeStart || row[0] > endD) continue;
+          for (var f = 0; f < need.length; f++) if (row[FIELD_INDEX[need[f]]] === null) return res('MISSING_REQUIRED_FIELD', { detail: need[f] + ' is null on ' + row[0] });
+        }
+        for (var x = 0; x < execDates.length; x++) {
+          var idx = lowerBound(bars, execDates[x], function (r) { return r[0]; });
+          var rowx = bars[idx];
+          if (!rowx || rowx[0] !== execDates[x] || rowx[1] === null) return res('MISSING_EXECUTION_OPEN', { detail: 'no OPEN on ' + execDates[x] });
+        }
+        var firstTradable = null;
+        var s0 = lowerBound(sessions, rangeStart, function (v) { return v; });
+        for (var q = s0; q < sessions.length && sessions[q] <= endD; q++) {
+          var dq = sessions[q];
+          if (lowerBound(bars, dq, function (r) { return r[0]; }) >= warm) { firstTradable = dq; break; }
+        }
+        if (firstTradable === null) return res('INSUFFICIENT_WARMUP', { detail: 'fewer than ' + warm + ' bars precede any session in the window' });
+        return res('OK', { firstTradable: firstTradable });
+      }
+
+      async function verifyAll(o) {
+        o = o || {};
+        var keys = Object.keys(m.files), failures = [];
+        for (var i = 0; i < keys.length; i++) {
+          var r = await getSeries(keys[i], { force: !!o.force });
+          if (!r.ok) failures.push({ symbol: keys[i], code: r.code, detail: r.detail });
+          if (o.onProgress) o.onProgress(i + 1, keys.length);
+        }
+        return { ok: failures.length === 0, checked: keys.length, failures: failures };
+      }
+
+      return Object.freeze({ ok: true, id: m.datasetId, manifest: m, calendar: cal, getSeries: getSeries, checkCoverage: checkCoverage, verifyAll: verifyAll });
+    }
+
+    async function clearCache(o) {
+      o = o || {};
+      var pre = 'eod2v3:' + (o.datasetId || '');
+      return cache.del(function (k) {
+        var p = String(k).split(':');
+        return (!o.datasetId || p[1] === o.datasetId) && (!o.symbol || p[2] === o.symbol) && String(k).indexOf('eod2v3:') === 0 && pre.length >= 0;
+      });
+    }
+    var testHooks = {
+      corruptCache: async function (symbol) {
+        var ks = await cache.keys(), n = 0;
+        for (var i = 0; i < ks.length; i++) if (String(ks[i]).split(':')[2] === symbol) { var b = await cache.get(ks[i]); var c = new Uint8Array(b); c[c.length >> 1] = (c[c.length >> 1] + 1) & 255; await cache.put(ks[i], c); n++; }
+        return n;
+      },
+      cacheKeys: function () { return cache.keys(); }
+    };
+    return Object.freeze({ openSnapshot: openSnapshot, clearCache: clearCache, __test: testHooks, cacheKind: cache.kind });
+  }
+
+  root.EOD2Client = Object.freeze({ create: create, VERSION: VERSION, CONTRACT: CONTRACT });
+})(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
+// ── end of vendored EOD2 client ──
+
+// ══ EOD2 DATA LAYER (A2-5) ═══════════════════════════════════════════════════
+// Historical data comes ONLY from an immutable EOD2 snapshot (contract alphadesk-eod2/3) read through the vendored client above.
+// Any defect BLOCKS with a reason code. No Yahoo/proxy/Supabase/Apps Script/Upstox history.
+// Every run owns an explicit ctx {runId, snapshot, mode, provenance}; data functions never read a global "current run".
+const EOD2_BASE='./data/';                    // app-local legacy mirror (v2 layout) - fallback only, see EOD2Store.openMirror
+const EOD2_CUTOFF_MIN=20*60;                  // legacy default; the live value is eod2CutoffMinutes() = calendar cutoffIST + 45 min
 const EOD2_DB='alphadesk_eod2', EOD2_STORE='series';
+const EOD2_DEFAULT_BASE='https://amit-alphasetup.github.io/market-data/';
 class EOD2Block extends Error{
   constructor(sym,date,reason){
     super(`BACKTEST BLOCKED — ${sym||'DATASET'} · ${date||'—'} · ${reason}`);
     this.name='EOD2Block';this.sym=sym||'DATASET';this.date=date||null;this.reason=reason;
+    const m=/^[A-Z][A-Z0-9_]+/.exec(String(reason||''));this.code=m?m[0]:'BLOCKED';
   }
 }
+// loader-owned history maps (F11): only maps registered here by buildHistMapFromSnapshot are accepted by the engine wrappers
+const LOADER_MAPS=new WeakSet(), LOADER_META=new WeakMap();
 const EOD2Store=(()=>{
-  let man=null,manAt=0,manP=null,purgeP=null,pin=null,depth=0;
-  const mem=new Map(); let blocks=[];
+  let cli=null,cliKey='',ui=null,uiAt=0,uiP=null,purgeP=null,runSeq=0;
+  const runs=new Set();
   const istNow=()=>{const ps=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());const o={};ps.forEach(p=>o[p.type]=p.value);return{date:`${o.year}-${o.month}-${o.day}`,minutes:(+o.hour%24)*60+(+o.minute)};};
   const isoAdd=(d,n)=>{const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);};
-  const isSession=(d,hol)=>{const w=new Date(d+'T00:00:00Z').getUTCDay();return w!==0&&w!==6&&!hol.has(d);};
-  // Latest session that SHOULD be published now. Holidays come from the manifest
-  // (exporter copies EOD2 meta.json). Without them: weekday-only calendar, which
-  // can only false-BLOCK on a holiday evening, never false-PASS.
-  function expectedLatest(m,now=istNow()){
-    const has=Array.isArray(m&&m.holidays), hol=new Set(has?m.holidays:[]);
-    let d=now.date; if(!(isSession(d,hol)&&now.minutes>=EOD2_CUTOFF_MIN))d=isoAdd(d,-1);
-    let g=0; while(!isSession(d,hol)&&g++<20)d=isoAdd(d,-1);
-    return {date:d,calendar:has?'manifest':'weekday-only'};
+  const norm=s=>String(s||'').trim().toUpperCase();
+  const baseUrl=()=>{const b=String((S.config&&S.config.eod2BaseUrl)||EOD2_DEFAULT_BASE);return b.endsWith('/')?b:b+'/';};
+  const useMirror=()=>!(S.config&&S.config.eod2UseMirror===false);
+  // Offline support (§5.4 item 2): the manifest and calendar bytes of the last successful open are kept in localStorage and replayed when the
+  // network fetch of exactly those two files fails. Integrity is unchanged (the client still hashes everything against the manifest); the handle
+  // is marked offline:true and the freshness preflight decides whether that snapshot is still acceptable.
+  let offlineUsed=false;
+  const isMetaUrl=u=>/\/data\/manifest\.json(\?|$)/.test(u)||/\/calendar\.json(\?|$)/.test(u);
+  function metaFetch(url,opts){
+    const u=String(url),key='eod2_lastgood:'+u.split('?')[0],meta=isMetaUrl(u);
+    return fetch(url,opts).then(async r=>{
+      if(meta&&r.ok){try{const buf=await r.arrayBuffer();try{localStorage.setItem(key,new TextDecoder('utf-8',{fatal:true}).decode(buf));}catch(e){}return{ok:true,status:r.status,arrayBuffer:async()=>buf};}catch(e){return r;}}
+      return r;
+    },err=>{
+      if(meta){try{const t=localStorage.getItem(key);if(t!=null){offlineUsed=true;const b=new TextEncoder().encode(t);return{ok:true,status:200,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)};}}catch(e){}}
+      throw err;
+    });
   }
-  async function sha256Hex(text){
-    if(!(globalThis.crypto&&crypto.subtle))throw new Error('crypto.subtle unavailable (needs https)');
-    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
-    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  function client(){
+    const b=baseUrl(),idb=typeof indexedDB!=='undefined';
+    if(!cli||cliKey!==b){cli=EOD2Client.create({baseUrl:b,cache:idb?'indexeddb':'memory',dbName:'alphadesk_eod2_v3',fetch:metaFetch});cliKey=b;}
+    return cli;
   }
-  function db(){return new Promise((res,rej)=>{if(typeof indexedDB==='undefined')return rej(new Error('no IDB'));const r=indexedDB.open(EOD2_DB,1);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains(EOD2_STORE))d.createObjectStore(EOD2_STORE,{keyPath:'k'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
-  async function idbGet(k){try{const d=await db();return await new Promise(res=>{const q=d.transaction(EOD2_STORE).objectStore(EOD2_STORE).get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null);});}catch(e){return null;}}
-  async function idbPut(v){try{const d=await db();await new Promise(res=>{const tx=d.transaction(EOD2_STORE,'readwrite');tx.objectStore(EOD2_STORE).put(v);tx.oncomplete=res;tx.onerror=res;});}catch(e){}}
-  // Retention: current + previous dataset only.
-  async function idbRetain(keep){try{const d=await db();await new Promise(res=>{const tx=d.transaction(EOD2_STORE,'readwrite');const q=tx.objectStore(EOD2_STORE).openCursor();q.onsuccess=()=>{const c=q.result;if(!c)return;if(!keep.includes(String(c.key).split(':')[1]))c.delete();c.continue();};tx.oncomplete=res;tx.onerror=res;});}catch(e){}}
-  // One-time purge of mixed-provider history (Yahoo/Supabase/bridge/close-only
-  // bars and old TENET:* series). Pure cache: ledger, pairs, credentials untouched.
+  // One-time purge of mixed-provider history (Yahoo/Supabase/bridge/close-only bars, old TENET:* series) and of the v2 EOD2 cache.
   function purgeLegacy(){
     if(purgeP)return purgeP;
     purgeP=(async()=>{
@@ -7965,160 +8304,241 @@ const EOD2Store=(()=>{
     })();
     return purgeP;
   }
-  async function loadManifest(force=false){
-    if(!force&&man&&Date.now()-manAt<10*60*1000)return man;
-    if(manP)return manP;
-    manP=(async()=>{
-      await purgeLegacy();
-      let r;
-      try{r=await fetch(EOD2_BASE+'manifest.json?t='+Date.now(),{cache:'no-store'});}
-      catch(e){throw new EOD2Block('',null,'MANIFEST_UNREACHABLE: '+(e&&e.message||e));}
-      if(!r.ok)throw new EOD2Block('',null,'MANIFEST_HTTP_'+r.status);
-      let m;try{m=await r.json();}catch(e){throw new EOD2Block('',null,'MANIFEST_INVALID_JSON');}
-      const bad=[];
-      if(m.dataset!=='EOD2')bad.push('dataset≠EOD2');
-      if(!/^[0-9a-f]{16,}$/i.test(String(m.datasetHash||'')))bad.push('datasetHash missing');
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(m.latestSession||'')))bad.push('latestSession missing');
-      if(m.certification==='FAIL')bad.push('certification FAIL');
-      else if(!['PASS','PARTIAL'].includes(m.certification))bad.push('certification unknown');
-      if(m.providerMixing!==false)bad.push('providerMixing≠false');
-      if(m.fallbackUsed!==false)bad.push('fallbackUsed≠false');
-      if(!m.files||typeof m.files!=='object')bad.push('files missing');
-      if(bad.length)throw new EOD2Block('',m.latestSession||null,'MANIFEST_REJECTED: '+bad.join(', '));
-      try{
-        const cur=localStorage.getItem('eod2_cur_hash');
-        if(cur!==m.datasetHash){
-          if(cur)localStorage.setItem('eod2_prev_hash',cur);
-          localStorage.setItem('eod2_cur_hash',m.datasetHash);
-          mem.clear(); idbRetain([m.datasetHash,cur].filter(Boolean));
-        }
-      }catch(e){}
-      man=m;manAt=Date.now();return m;
-    })();
-    try{return await manP;}finally{manP=null;}
-  }
-  const norm=s=>String(s||'').trim().toUpperCase();
-  function entryFor(m,sym){const f=m.files;for(const k of [sym,sym.replace(/ /g,'_')])if(f[k])return{key:k,...f[k]};return null;}
-  function quarantineOf(m,sym){const q=m.quarantined||{};return q[sym]||q[sym.replace(/ /g,'_')]||null;}
-  const num=v=>v==null||v===''?null:+v;
-  async function getSeries(sym,kind,retried=false){
-    const m=await loadManifest(), S0=norm(sym);
-    const q=quarantineOf(m,S0);
-    if(q)throw new EOD2Block(S0,m.latestSession,'QUARANTINED: '+[].concat(q).join('; '));
-    const e=entryFor(m,S0);
-    if(!e)throw new EOD2Block(S0,m.latestSession,'NOT_IN_CERTIFIED_EXPORT');
-    const k=`eod2:${m.datasetHash}:${e.key}`;
-    if(mem.has(k))return mem.get(k);
-    const hit=await idbGet(k);
-    if(hit&&hit.sha256===e.sha256&&Array.isArray(hit.bars)){mem.set(k,hit);return hit;}
-    const isIdx=kind==='INDEX'||kind==='IDX'||e.kind==='INDEX';
-    const path=String(e.path||((isIdx?'index/':'etf/')+e.key+'.json')).replace(/\\/g,'/').replace(/^\.?\/?(data\/)?/,'');
-    let text;
-    try{const r=await fetch(EOD2_BASE+path+'?h='+m.datasetHash.slice(0,12),{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);text=await r.text();}
-    catch(err){throw new EOD2Block(S0,m.latestSession,'FILE_UNREACHABLE: '+(err&&err.message||err));}
-    let got;
-    try{got=await sha256Hex(text.replace(/\r\n/g,'\n'));}catch(err){throw new EOD2Block(S0,m.latestSession,'SHA_UNVERIFIABLE: '+err.message);}
-    if(String(e.sha256||'').toLowerCase()!==got){
-      if(!retried){const m2=await loadManifest(true);if(m2.datasetHash!==m.datasetHash)return getSeries(sym,kind,true);}
-      throw new EOD2Block(S0,m.latestSession,`SHA_MISMATCH (manifest ${String(e.sha256||'').slice(0,12)}…, file ${got.slice(0,12)}…)`);
+  const validDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
+  // ── app-local legacy mirror (./data/, v2 layout). Read-only fallback until the A6-6 cut-over; every handle it returns says source:'mirror'.
+  async function openMirror(){
+    let r;
+    try{r=await fetch(EOD2_BASE+'manifest.json?t='+Date.now(),{cache:'no-store'});}catch(e){return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'mirror unreachable: '+(e&&e.message||e)};}
+    if(!r.ok)return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'mirror manifest HTTP '+r.status};
+    let m;try{m=await r.json();}catch(e){return{ok:false,code:'SCHEMA_INVALID',detail:'mirror manifest is not JSON'};}
+    const bad=[];
+    if(!m||m.dataset!=='EOD2')bad.push('dataset≠EOD2');
+    if(!/^[0-9a-f]{16,}$/i.test(String(m&&m.datasetHash||'')))bad.push('datasetHash missing');
+    if(!validDate(String(m&&m.latestSession||'')))bad.push('latestSession missing');
+    if(!m||!['PASS','PARTIAL'].includes(m.certification))bad.push('certification not PASS/PARTIAL');
+    if(!m||m.providerMixing!==false)bad.push('providerMixing≠false');
+    if(!m||m.fallbackUsed!==false)bad.push('fallbackUsed≠false');
+    if(!m||!m.files||typeof m.files!=='object')bad.push('files missing');
+    if(bad.length)return{ok:false,code:'SCHEMA_INVALID',detail:'mirror manifest rejected: '+bad.join(', ')};
+    const mem=new Map();
+    async function series(sym,kind){
+      const S0=norm(sym),key=[S0,S0.replace(/ /g,'_')].find(k=>m.files[k]);
+      const q=(m.quarantined||{})[S0]||(m.quarantined||{})[S0.replace(/ /g,'_')];
+      if(q)return{ok:false,code:'QUARANTINED',detail:[].concat(q).join('; ')};
+      if(!key)return{ok:false,code:'NOT_IN_EXPORT',detail:S0};
+      const e=m.files[key],ck=key+':'+e.sha256;
+      if(mem.has(ck))return mem.get(ck);
+      const isIdx=kind==='INDEX'||kind==='IDX'||e.kind==='INDEX';
+      const path=String(e.path||((isIdx?'index/':'etf/')+key+'.json')).replace(/\\/g,'/').replace(/^\.?\/?(data\/)?/,'');
+      let text;
+      try{const rr=await fetch(EOD2_BASE+path+'?h='+m.datasetHash.slice(0,12),{cache:'no-store'});if(!rr.ok)throw new Error('HTTP '+rr.status);text=await rr.text();}
+      catch(err){return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'FILE_UNREACHABLE: '+(err&&err.message||err)};}
+      let got;try{got=await sha256HexText(text.replace(/\r\n/g,'\n'));}catch(err){return{ok:false,code:'HASH_MISMATCH',detail:'SHA_UNVERIFIABLE: '+err.message};}
+      if(String(e.sha256||'').toLowerCase()!==got)return{ok:false,code:'HASH_MISMATCH',detail:`manifest ${String(e.sha256||'').slice(0,12)}…, file ${got.slice(0,12)}…`};
+      let j;try{j=JSON.parse(text);}catch(err){return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_INVALID_JSON'};}
+      if(j.provider!=='EOD2'||!Array.isArray(j.bars)||!Array.isArray(j.fields))return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_CONTRACT: provider/fields/bars'};
+      const fi=n=>j.fields.indexOf(n),iD=fi('date'),iO=fi('open'),iH=fi('high'),iL=fi('low'),iC=fi('close'),iV=fi('volume');
+      if(iD<0||iC<0)return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_CONTRACT: date/close fields'};
+      const rows=[];
+      for(let i=0;i<j.bars.length;i++){
+        const b=j.bars[i];if(!Array.isArray(b))return{ok:false,code:'SCHEMA_INVALID',detail:'row '+i+' is not an array'};
+        const d=b[iD];if(!validDate(d))return{ok:false,code:'INVALID_DATE',detail:'row '+i+' date '+JSON.stringify(d)};
+        const row=[d];
+        for(const ix of [iO,iH,iL,iC,iV]){const v=ix<0?null:b[ix];if(v!==null&&!(typeof v==='number'&&Number.isFinite(v)))return{ok:false,code:'NONFINITE_VALUE',detail:'row '+i+' non-numeric value '+JSON.stringify(v)};row.push(v);}
+        if(i>0&&!(d>rows[i-1][0]))return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_UNSORTED_OR_DUPLICATE_DATE '+d};
+        rows.push(Object.freeze(row));
+      }
+      if(!rows.length)return{ok:false,code:'SCHEMA_INVALID',detail:'no bars'};
+      const res=Object.freeze({ok:true,bars:Object.freeze(rows),meta:Object.freeze({symbol:key,kind:j.kind||(isIdx?'INDEX':'ETF'),sha256:e.sha256,first:rows[0][0],last:rows[rows.length-1][0],bars:rows.length,status:'OK',reasons:Object.freeze([]),noTradeDays:Object.freeze([]),cacheStatus:'MISS',fromCache:false})});
+      mem.set(ck,res);return res;
     }
-    let j;try{j=JSON.parse(text);}catch(err){throw new EOD2Block(S0,m.latestSession,'FILE_INVALID_JSON');}
-    if(j.provider!=='EOD2'||!Array.isArray(j.bars)||!Array.isArray(j.fields))throw new EOD2Block(S0,m.latestSession,'FILE_CONTRACT: provider/fields/bars');
-    const fi=n=>j.fields.indexOf(n),iD=fi('date'),iO=fi('open'),iH=fi('high'),iL=fi('low'),iC=fi('close'),iV=fi('volume');
-    if(iD<0||iC<0)throw new EOD2Block(S0,m.latestSession,'FILE_CONTRACT: date/close fields');
-    const g=(b,i)=>i<0?null:num(b[i]);
-    const bars=j.bars.map(b=>[String(b[iD]),g(b,iO),g(b,iH),g(b,iL),g(b,iC),g(b,iV)]);
-    for(let i=1;i<bars.length;i++)if(!(bars[i][0]>bars[i-1][0]))throw new EOD2Block(S0,bars[i][0],'FILE_UNSORTED_OR_DUPLICATE_DATE');
-    const rec={k,sym:S0,kind:j.kind||(isIdx?'INDEX':'ETF'),sha256:e.sha256,first:bars[0]&&bars[0][0],last:bars.length?bars[bars.length-1][0]:null,bars};
-    mem.set(k,rec); idbPut(rec); return rec;
+    return{ok:true,source:'mirror',id:'mirror-'+m.datasetHash.slice(0,16),manifest:m,calendar:null,raw:null,series,keys:()=>Object.keys(m.files),latestCompleted:m.latestSession};
   }
-  // Returns the app's existing hist shape: {date:{open,high,low,close,adjClose,prev,vol,_src}}
-  async function getHist(sym,kind,from,to){
+  async function sha256HexText(text){
+    if(!(globalThis.crypto&&crypto.subtle))throw new Error('crypto.subtle unavailable (needs https)');
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  // a fresh, pinned handle (manifest fetched no-store, calendar sha-checked). Throws EOD2Block on any data problem.
+  async function openFresh(){
+    await purgeLegacy();
+    offlineUsed=false;
+    let raw=await client().openSnapshot(),h=null,primaryErr=null;
+    if(raw.ok){
+      h={ok:true,source:'snapshot',offline:offlineUsed,id:raw.id,manifest:raw.manifest,calendar:raw.calendar,raw,series:(s)=>raw.getSeries(s),keys:()=>Object.keys(raw.manifest.files),latestCompleted:raw.manifest.latestCompletedSession||raw.manifest.latestSession};
+    }else{
+      primaryErr=raw;
+      if(raw.code==='SOURCE_UNAVAILABLE'&&useMirror()){const mh=await openMirror();if(mh.ok)h=mh;else primaryErr={ok:false,code:raw.code,detail:raw.detail+' | mirror: '+mh.detail};}
+    }
+    if(!h)throw new EOD2Block('',null,`${primaryErr.code}: ${primaryErr.detail||'snapshot unavailable'}`);
+    Object.freeze(h);
+    await loadNseCalendar(h.raw||null);
     try{
-      const m=await loadManifest();
-      if(pin&&m.datasetHash!==pin)throw new EOD2Block(norm(sym),m.latestSession,'DATASET_CHANGED_MID_RUN');
-      const rec=await getSeries(sym,kind);
-      const end=to>m.latestSession?m.latestSession:to;
-      const out={};let prev=null;const bad=[];const isEtf=!(kind==='INDEX'||kind==='IDX'||rec.kind==='INDEX');
-      for(const b of rec.bars){
-        const [d,o,h,l,c,v]=b; if(d>end)break;
+      const cur=localStorage.getItem('eod2_cur_id');
+      if(cur!==h.id){if(cur)localStorage.setItem('eod2_prev_id',cur);localStorage.setItem('eod2_cur_id',h.id);}
+    }catch(e){}
+    return h;
+  }
+  async function loadHandle(force=false){
+    if(!force&&ui&&Date.now()-uiAt<10*60*1000)return ui;
+    if(uiP)return uiP;
+    uiP=(async()=>{const h=await openFresh();ui=h;uiAt=Date.now();return h;})();
+    try{return await uiP;}finally{uiP=null;}
+  }
+  const loadManifest=async(force=false)=>(await loadHandle(force)).manifest;
+  // Latest session that SHOULD be published now: calendar-verified when the snapshot calendar covers it, else weekday-only (can only false-BLOCK).
+  function expectedLatest(m,now=istNow()){
+    const cut=eod2CutoffMinutes(),cal=NSE_CAL.loaded&&now.date>=NSE_CAL.coverageFrom&&now.date<=NSE_CAL.verifiedThrough;
+    const hol=new Set(Array.isArray(m&&m.holidays)?m.holidays:[]);
+    const sess=d=>{if(cal)return NSE_CAL.regular.has(d);const w=new Date(d+'T00:00:00Z').getUTCDay();return w!==0&&w!==6&&!hol.has(d);};
+    let d=now.date;if(!(sess(d)&&now.minutes>=cut))d=isoAdd(d,-1);
+    let g=0;while(!sess(d)&&g++<20)d=isoAdd(d,-1);
+    return{date:d,calendar:cal?'snapshot':'weekday-only',verified:cal};
+  }
+  // safety net: a run that was never ended (exception path) must not block every later ctx-less read forever
+  function reap(){const cut=Date.now()-30*60*1000;for(const c of runs)if(c.startedAt<cut)runs.delete(c);}
+  // Returns the app's hist shape {date:{open,high,low,close,adjClose,prev,vol,_src}}. Inside an active run an explicit ctx is mandatory.
+  async function getHist(sym,kind,from,to,ctx){
+    const S0=norm(sym);let h=null;
+    try{
+      reap();
+      if(!ctx&&runs.size>0)throw new EOD2Block(S0,null,'RUN_CONTEXT_MISSING: data read while a run is active must pass the run ctx');
+      if(ctx&&!runs.has(ctx))throw new EOD2Block(S0,null,'RUN_CONTEXT_MISSING: the supplied run ctx is not active');
+      h=ctx?ctx.snapshot:await loadHandle();
+      const r=await h.series(S0,kind);
+      if(!r.ok)throw new EOD2Block(S0,h.latestCompleted,r.code+(r.detail?': '+r.detail:''));
+      const bars=r.bars,meta=r.meta;
+      const end=to>h.latestCompleted?h.latestCompleted:to;
+      const out={};let prev=null;const bad=[];const isEtf=!(kind==='INDEX'||kind==='IDX'||meta.kind==='INDEX');
+      for(const b of bars){
+        const [d,o,hi,l,c,v]=b;if(d>end)break;
         if(d>=from){
-          const bar={open:o,high:h,low:l,close:c,adjClose:c,prev,vol:v||0,_src:'eod2',src:'eod2'};
+          const bar={open:o,high:hi,low:l,close:c,adjClose:c,prev,vol:v||0,_src:'eod2',src:'eod2'};
           if(!validateBar(bar))bad.push(d);
-          else if(isEtf&&!(o>0&&h>0&&l>0))bad.push(d);
-          out[d]=bar;
+          else if(isEtf&&!(o>0&&hi>0&&l>0))bad.push(d);
+          out[d]=ctx?Object.freeze(bar):bar;
         }
         prev=c;
       }
-      if(bad.length)throw new EOD2Block(rec.sym,bad[0],`INVALID_OR_CLOSE_ONLY_BAR ×${bad.length}`);
-      if(!Object.keys(out).length)throw new EOD2Block(rec.sym,from,`NO_BARS_IN_RANGE (series ${rec.first}→${rec.last})`);
+      if(bad.length)throw new EOD2Block(meta.symbol,bad[0],`INVALID_OR_CLOSE_ONLY_BAR ×${bad.length}`);
+      if(!Object.keys(out).length)throw new EOD2Block(meta.symbol,from,`NO_BARS_IN_RANGE (series ${meta.first}→${meta.last})`);
       return out;
     }catch(e){
-      const b=e instanceof EOD2Block?e:new EOD2Block(norm(sym),null,'LOADER_ERROR: '+(e&&e.message||e));
-      if(depth>0&&!blocks.some(x=>x.message===b.message))blocks.push(b);
+      const b=e instanceof EOD2Block?e:new EOD2Block(S0,null,'LOADER_ERROR: '+(e&&e.message||e));
+      if(ctx&&ctx.blocks&&!ctx.blocks.some(x=>x.message===b.message))ctx.blocks.push(b);
       throw b;
     }
   }
-  function beginRun(hash){if(depth++===0){pin=hash;blocks=[];}}
-  function endRun(){if(--depth<=0){depth=0;pin=null;}}
-  function takeBlocks(){const b=blocks;if(depth===0)blocks=[];return b;}
-  function stamp(m){return{dataset:'EOD2',datasetHash:m.datasetHash,latestSession:m.latestSession,certification:m.certification,quarantined:Object.keys(m.quarantined||{}).length,fallbackUsed:'NO',exporter:m.exporter_version||''};}
-  // Diagnostic: fetch + SHA-verify every file in the manifest.
-  async function verifyAll(onProgress){
-    const m=await loadManifest(true),res=[];const keys=Object.keys(m.files);
-    for(let i=0;i<keys.length;i++){const k=keys[i];try{const r=await getSeries(k,m.files[k].kind);res.push({sym:k,ok:true,bars:r.bars.length,first:r.first,last:r.last});}catch(e){res.push({sym:k,ok:false,reason:e.reason||e.message});}if(onProgress)onProgress(i+1,keys.length);}
-    return {manifest:stamp(m),results:res};
+  async function getSeries(sym,kind,ctx){const h=ctx?ctx.snapshot:await loadHandle();const r=await h.series(norm(sym),kind);if(!r.ok)throw new EOD2Block(norm(sym),h.latestCompleted,r.code+(r.detail?': '+r.detail:''));return r;}
+  // run lifecycle: startRun pins a NEW snapshot handle for the whole run
+  async function startRun(label,{mode='research',handle=null}={}){
+    const h=handle||await openFresh();
+    reap();
+    const ctx=Object.freeze({runId:'run-'+(++runSeq)+'-'+Date.now().toString(36),label,mode,startedAt:Date.now(),snapshot:h,blocks:[],provenance:Object.freeze({datasetId:h.id,datasetHash:h.manifest.datasetHash,source:h.source})});
+    runs.add(ctx);return ctx;
   }
-  return {loadManifest,getSeries,getHist,expectedLatest,istNow,beginRun,endRun,takeBlocks,stamp,verifyAll,_mem:mem};
+  const beginRun=startRun;
+  function endRun(ctx){runs.delete(ctx);}
+  function takeBlocks(ctx){return ctx&&ctx.blocks?ctx.blocks.splice(0):[];}
+  function activeRuns(){return runs.size;}
+  function stamp(hOrM,extra={}){
+    const h=hOrM&&hOrM.manifest?hOrM:null,m=h?h.manifest:hOrM;
+    return{dataset:'EOD2',datasetId:h?h.id:(m.datasetId||''),datasetHash:m.datasetHash,latestSession:m.latestCompletedSession||m.latestSession,certification:m.certification||m.publishStatus||'',
+      quarantined:Object.keys(m.quarantined||{}).length,fallbackUsed:extra.fallbackUsed||'NO',exporter:m.exporterVersion||m.exporter_version||'',source:h?(h.offline?'snapshot-offline':h.source):'snapshot',
+      calendarId:NSE_CAL.loaded?NSE_CAL.id:null,specialSessionPolicy:NSE_CAL.specialSessionPolicy,stalenessCutoffMin:eod2CutoffMinutes(),appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256};
+  }
+  // Diagnostic: fetch + SHA-verify every file in a fresh snapshot.
+  async function verifyAll(onProgress){
+    const h=await loadHandle(true),res=[];
+    if(h.raw){
+      const r=await h.raw.verifyAll({force:true,onProgress});
+      const bad=new Map((r.failures||[]).map(f=>[f.symbol,f.code]));
+      for(const k of h.keys())res.push(bad.has(k)?{sym:k,ok:false,reason:bad.get(k)}:{sym:k,ok:true});
+    }else{
+      const keys=h.keys();
+      for(let i=0;i<keys.length;i++){const r=await h.series(keys[i],h.manifest.files[keys[i]].kind);res.push(r.ok?{sym:keys[i],ok:true,bars:r.bars.length,first:r.meta.first,last:r.meta.last}:{sym:keys[i],ok:false,reason:r.code});if(onProgress)onProgress(i+1,keys.length);}
+    }
+    return{manifest:stamp(h),results:res,source:h.source};
+  }
+  return{loadManifest,loadHandle,openFresh,getSeries,getHist,expectedLatest,istNow,startRun,beginRun,endRun,takeBlocks,activeRuns,stamp,verifyAll};
 })();
 
-// Pre-run gate: dataset validity, certified-window start, end vs latestSession,
-// zero-lag freshness for latest-mode. Returns an error string or null.
-async function eod2Preflight(from,to){
-  let m;try{m=await EOD2Store.loadManifest();}catch(e){return e.message;}
-  const now=EOD2Store.istNow(),today=now.date;
+// Loader-owned history for an engine run: frozen bars, frozen per-symbol maps, frozen map, registered in LOADER_MAPS/LOADER_META.
+async function buildHistMapFromSnapshot(ctx,syms,from,to,{withIndex=false}={}){
+  const map={},idx={},failures=[];
+  const rows=await mapWithConcurrency(syms,2,async sym=>{try{return{sym,h:await EOD2Store.getHist(sym,'ETF',from,to,ctx)};}catch(e){return{sym,err:e};}});
+  for(const r of rows){
+    if(r.err||!r.h||!Object.keys(r.h).length){failures.push({sym:r.sym,err:r.err});continue;}
+    Object.freeze(r.h);map[r.sym]=r.h;if(withIndex)idx[r.sym]=buildHistIndex(r.h);
+  }
+  Object.freeze(map);
+  LOADER_MAPS.add(map);LOADER_META.set(map,Object.freeze({runId:ctx.runId,datasetId:ctx.snapshot.id,snapshot:ctx.snapshot}));
+  return{map,index:withIndex?idx:null,failures};
+}
+// The wrappers hand the frozen cores a loader-owned map; a supplied map is accepted only if this loader built it for the same dataset.
+async function eod2PrepareCoreParams(p,ctx,{syms,from,to,withIndex}){
+  if(p.histMap){
+    const meta=LOADER_META.get(p.histMap);
+    if(!(LOADER_MAPS.has(p.histMap)&&meta&&meta.datasetId===ctx.snapshot.id))
+      return{error:'SNAPSHOT_PROVENANCE_MISSING: the supplied history map was not built by the EOD2 loader for this dataset. No backtest was run.',blocked:true};
+    return withIndex&&!p.histIndex?{...p,histIndex:Object.fromEntries(Object.keys(p.histMap).map(s=>[s,buildHistIndex(p.histMap[s])]))}:p;
+  }
+  const b=await buildHistMapFromSnapshot(ctx,syms,from,to,{withIndex});
+  if(b.failures.length)return{error:`Historical data failed for ${b.failures.map(x=>x.sym).join(', ')}. No backtest was run.`,blocked:true};
+  return{...p,histMap:b.map,...(withIndex?{histIndex:b.index}:{})};
+}
+
+// Pre-run gate: dataset validity, certified-window start, end vs latestSession, zero-lag freshness. Returns an error string or null.
+async function eod2Preflight(from,to,handle){
+  let h=handle;try{h=h||await EOD2Store.loadHandle();}catch(e){return e.message;}
+  const m=h.manifest,latest=h.latestCompleted,now=EOD2Store.istNow(),today=now.date;
   if(from&&m.windowStart&&from<m.windowStart)return new EOD2Block('DATASET',from,`START_BEFORE_CERTIFIED_WINDOW (${m.windowStart})`).message;
   if(!to||to>=today){
     const ex=EOD2Store.expectedLatest(m,now);
-    if(m.latestSession<ex.date)return new EOD2Block('DATASET',m.latestSession,`STALE: latestSession ${m.latestSession} < expected ${ex.date} (cutoff 20:00 IST, calendar ${ex.calendar})`).message;
-  }else if(to>m.latestSession)return new EOD2Block('DATASET',to,`END_BEYOND_LATEST_SESSION (${m.latestSession})`).message;
+    if(latest<ex.date)return new EOD2Block('DATASET',latest,`STALE_DATASET: latestSession ${latest} < expected ${ex.date} (cutoff ${Math.floor(eod2CutoffMinutes()/60)}:${String(eod2CutoffMinutes()%60).padStart(2,'0')} IST, calendar ${ex.calendar})`).message;
+  }else if(to>latest)return new EOD2Block('DATASET',to,`END_BEYOND_LATEST_SESSION (${latest})`).message;
   return null;
 }
-async function eod2GuardRun(label,from,to,fn){
-  const pre=await eod2Preflight(from,to);
-  if(pre)return{error:pre+' — No backtest was run.',blocked:true};
-  const m=await EOD2Store.loadManifest();
-  EOD2Store.beginRun(m.datasetHash);
-  let r;try{r=await fn();}finally{EOD2Store.endRun();}
-  const bl=EOD2Store.takeBlocks();
-  if(r&&r.error&&bl.length)r={...r,error:bl.map(b=>b.message).join(' | ')+' — No backtest was run.',blocked:true};
-  if(r&&!r.error){r.dataStamp=EOD2Store.stamp(m);try{window.EOD2_LAST_STAMP={...r.dataStamp,strategy:label,from,to};eod2ShowStamp(label);}catch(e){}}
-  return r;
+async function eod2GuardRun(label,from,to,fn,{handle=null}={}){
+  let ctx;
+  try{ctx=await EOD2Store.startRun(label,{mode:'research',handle});}
+  catch(e){return{error:e.message+' — No backtest was run.',blocked:true};}
+  try{
+    const pre=await eod2Preflight(from,to,ctx.snapshot);
+    if(pre)return{error:pre+' — No backtest was run.',blocked:true};
+    let r=await fn(ctx);
+    const bl=EOD2Store.takeBlocks(ctx);
+    if(r&&r.error&&bl.length)r={...r,error:bl.map(b=>b.message).join(' | ')+' — No backtest was run.',blocked:true};
+    if(r&&!r.error){
+      const rows=r.trades||r.tradeLog||[],fb=Array.isArray(rows)&&rows.some(t=>t&&t.executionFallback===true);
+      r.dataStamp=EOD2Store.stamp(ctx.snapshot,{fallbackUsed:fb?'YES':'NO'});r.runId=ctx.runId;
+      try{window.EOD2_LAST_STAMP={...r.dataStamp,strategy:label,from,to};eod2ShowStamp(label);}catch(e){}
+    }
+    return r;
+  }finally{EOD2Store.endRun(ctx);}
 }
-function eod2StampRow(){const s=(typeof window!=='undefined'&&window.EOD2_LAST_STAMP)||{};return['DataSource',s.dataset||'UNSTAMPED','DatasetHash',s.datasetHash||'','LatestSession',s.latestSession||'','Certification',s.certification||'','FallbackUsed',s.fallbackUsed||'','',''];}
-function eod2ShowStamp(label){try{const s=window.EOD2_LAST_STAMP;if(!s)return;const anchor=document.getElementById(label==='DM'?'dm-progress':'bt-progress-wrap');if(!anchor||!anchor.parentNode)return;const id='eod2-stamp-'+label;let el=document.getElementById(id);if(!el){el=document.createElement('div');el.id=id;el.style.cssText='font-size:10px;color:var(--fog);margin-top:6px;font-family:monospace';anchor.parentNode.insertBefore(el,anchor.nextSibling);}el.textContent=`Data: EOD2 · hash ${String(s.datasetHash).slice(0,12)} · latest ${s.latestSession} · cert ${s.certification} · Fallback used: NO`;}catch(e){}}
+function eod2StampRow(){const s=(typeof window!=='undefined'&&window.EOD2_LAST_STAMP)||{};return['DataSource',s.dataset||'UNSTAMPED','DatasetHash',s.datasetHash||'','LatestSession',s.latestSession||'','Certification',s.certification||'','FallbackUsed',s.fallbackUsed||'','Source',s.source||''];}
+function eod2ShowStamp(label){try{const s=window.EOD2_LAST_STAMP;if(!s)return;const anchor=document.getElementById(label==='DM'?'dm-progress':'bt-progress-wrap');if(!anchor||!anchor.parentNode)return;const id='eod2-stamp-'+label;let el=document.getElementById(id);if(!el){el=document.createElement('div');el.id=id;el.style.cssText='font-size:10px;color:var(--fog);margin-top:6px;font-family:monospace';anchor.parentNode.insertBefore(el,anchor.nextSibling);}el.textContent=`Data: EOD2 ${s.source||''} · dataset ${s.datasetId||''} · hash ${String(s.datasetHash).slice(0,12)} · latest ${s.latestSession} · cert ${s.certification} · Fallback used: ${s.fallbackUsed}`;}catch(e){}}
 async function eod2VerifyAllUI(){
-  toast('EOD2: verifying all certified files…','ok');
+  toast('EOD2: verifying all files…','ok');
   try{const r=await EOD2Store.verifyAll();const bad=r.results.filter(x=>!x.ok);
-    const msg=`EOD2 ${r.manifest.certification} · ${r.manifest.latestSession} · ${r.results.length-bad.length}/${r.results.length} verified`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'');
+    const msg=`EOD2 ${r.manifest.certification} · ${r.manifest.latestSession} · ${r.results.length-bad.length}/${r.results.length} verified (${r.source})`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'');
     console.log('[EOD2 verifyAll]',r);toast(msg,bad.length?'err':'ok');alert(msg);return r;}
   catch(e){toast(e.message,'err');alert(e.message);}
 }
 
-// V3.21: EOD2-only history. Signature and return shape unchanged, so every
-// caller (frozen LIFO/DM cores, validators, live 52WL, benchmark card) moves to
-// certified data without touching a frozen function. Throws EOD2Block on defect.
-async function fetchHistDaily(sym,yfSym,startTs,endTs){
+// EOD2-only history. Signature and return shape unchanged (plus optional ctx), so every caller moves to snapshot data. Throws EOD2Block on defect.
+async function fetchHistDaily(sym,yfSym,startTs,endTs,ctx){
   const startDate=fmt(new Date(startTs*1000)),endDate=fmt(new Date(endTs*1000));
   let out;
-  try{out=await EOD2Store.getHist(sym,'ETF',startDate,endDate);}
+  try{out=await EOD2Store.getHist(sym,'ETF',startDate,endDate,ctx);}
   catch(e){recordHistFetchFailure(sym);throw e;}
-  // Mirror certified bars into the live-reader cache (getLive52WL, bar-fill).
-  // Backtests never read this store.
+  // Mirror snapshot bars into the live-reader cache (getLive52WL, bar-fill). Backtests never read this store.
   await idbHistPutBars(sym,Object.entries(out).map(([date,v])=>({date,...v})));
   clearHistFetchFailure(sym);
   return out;
 }
+
 
 // Legacy Yahoo reader: no longer called by any history path (kept inert).
 async function fetchHistoricalData(yfSym,startTs,endTs,ck){
@@ -10384,6 +10804,28 @@ const TENET_NSE_HOLIDAYS_2026=[
   '2026-05-01','2026-05-28','2026-06-26','2026-08-26','2026-09-14','2026-10-02','2026-10-20','2026-11-10','2026-11-24','2026-12-25'
 ];
 function tenetDefaults(){return{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[],brokeragePerOrder:0};}
+// A2-3 (F03): transient scanner state. Never serialized, never part of S. Any pair/config/app-version change invalidates it.
+const TENET_RUNTIME={live:null,liveAt:0,fingerprint:'',metrics:{}};
+function tenetFingerprint(){const t=S.tenet||{};return JSON.stringify({pairs:t.pairs||[],config:t.config||{},v:APP_VERSION});}
+function tenetLiveRows(){
+  if(TENET_RUNTIME.live&&TENET_RUNTIME.fingerprint!==tenetFingerprint()){TENET_RUNTIME.live=null;TENET_RUNTIME.liveAt=0;TENET_RUNTIME.metrics={};}
+  return TENET_RUNTIME.live;
+}
+// Gate for ACTING ON A SCANNER SIGNAL (new buy / bid from a signal row). Recording an already-executed broker fill (A3-3) never uses this.
+function tenetScannerActionGate(underlying,etf,nowMs=Date.now()){
+  const rows=tenetLiveRows();
+  if(!rows)return{ok:false,reason:'no current scan (or pairs/config changed since it) — refresh scanner'};
+  if(TENET_RUNTIME.fingerprint!==tenetFingerprint())return{ok:false,reason:'scan fingerprint differs from current pairs/config'};
+  if(nowMs-TENET_RUNTIME.liveAt>600000)return{ok:false,reason:'scan is older than 10 minutes — refresh scanner'};
+  const row=rows.find(p=>p.underlying===underlying&&!p.error);
+  if(!row)return{ok:false,reason:'no verified scan row for this underlying'};
+  const gate=tenetLiveGate();
+  const qi=quoteFreshness({_observedAt:row.indexObservedMs},nowMs,{maxAgeSec:900,sessionDate:gate.date});
+  if(!qi.ok)return{ok:false,reason:'index quote not fresh: '+qi.code};
+  const qe=tenetPriceQuality(etf);
+  if(!qe.allowed)return{ok:false,reason:'ETF quote not fresh: '+qe.reason};
+  return{ok:true,reason:'',row};
+}
 function tenetState(){
   if(!S.tenet)S.tenet={};const t=S.tenet;
   // S0-2: legacy migration must read RAW stored config. It previously ran after
@@ -10396,7 +10838,7 @@ function tenetState(){
     if(Number.isFinite(legacy))_rawCfg.selectionDistancePct=Math.min(100,Math.max(0,legacy));
   }
   t.config={...tenetDefaults(),..._rawCfg};
-  t.capital=Array.isArray(t.capital)?t.capital:[];t.pairs=Array.isArray(t.pairs)?t.pairs:[];t.holdings=Array.isArray(t.holdings)?t.holdings:[];t.sold=Array.isArray(t.sold)?t.sold:[];t.bidWeeks=t.bidWeeks||{};t.universeHistory=Array.isArray(t.universeHistory)?t.universeHistory:[];t._indexMetrics=t._indexMetrics||{};
+  t.capital=Array.isArray(t.capital)?t.capital:[];t.pairs=Array.isArray(t.pairs)?t.pairs:[];t.holdings=Array.isArray(t.holdings)?t.holdings:[];t.sold=Array.isArray(t.sold)?t.sold:[];t.bidWeeks=t.bidWeeks||{};t.universeHistory=Array.isArray(t.universeHistory)?t.universeHistory:[];delete t._live;delete t._indexMetrics;
   return t;
 }
 function tenetTarget(n){const t=tenetState();return t.config.firstTargetPct+t.config.targetStepPct*(Math.max(1,n)-1);}
@@ -10404,8 +10846,38 @@ function tenetLatestLot(etf,hold=tenetState().holdings){const a=hold.filter(x=>x
 function tenetWeekKey(d){const x=new Date(d+'T00:00:00Z'),day=x.getUTCDay(),m=new Date(x);m.setUTCDate(x.getUTCDate()-(day===0?6:day-1));return m.toISOString().slice(0,10);}
 function tenetDaysBetween(a,b){return Math.round((new Date(b+'T00:00:00Z')-new Date(a+'T00:00:00Z'))/86400000);}
 function tenetISTNow(){const ps=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());const o=Object.fromEntries(ps.map(x=>[x.type,x.value]));return{date:`${o.year}-${o.month}-${o.day}`,minutes:(+o.hour%24)*60+(+o.minute),hour:+o.hour%24,minute:+o.minute};}
+// ── NSE CALENDAR ── (A2-4, F04) verified sessions come from the EOD2 snapshot calendar (sha-checked by the client).
+// The hard-coded 2026 holidays + extraHolidays are a FALLBACK only and always yield verified=false.
+const NSE_CAL={loaded:false,id:null,regular:null,special:new Set(),coverageFrom:null,verifiedThrough:null,cutoffIST:'19:15',specialSessionPolicy:'value-only-v1'};
+const _calOkDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&!Number.isNaN(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
+async function loadNseCalendar(snapshot){
+  const c=snapshot&&snapshot.calendar;
+  const bad=!c||!Array.isArray(c.sessions)||!c.sessions.length||!_calOkDate(c.verifiedThrough)||!_calOkDate(c.coverageFrom);
+  if(bad){Object.assign(NSE_CAL,{loaded:false,id:null,regular:null,special:new Set(),coverageFrom:null,verifiedThrough:null});return false;}
+  const special=new Set((Array.isArray(c.specialSessions)?c.specialSessions:[]).map(x=>typeof x==='string'?x:x&&x.date).filter(_calOkDate));
+  const regular=new Set(c.sessions.filter(_calOkDate).filter(d=>!special.has(d)));
+  Object.assign(NSE_CAL,{loaded:true,id:c.id||null,regular,special,coverageFrom:c.coverageFrom,verifiedThrough:c.verifiedThrough,cutoffIST:/^\d\d:\d\d$/.test(String(c.cutoffIST||''))?c.cutoffIST:'19:15'});
+  return true;
+}
+// true | false | null (unknown: no calendar, before coverage, or beyond verifiedThrough)
+function isSession(date){
+  if(!NSE_CAL.loaded||!_calOkDate(date))return null;
+  if(date<NSE_CAL.coverageFrom||date>NSE_CAL.verifiedThrough)return null;
+  return NSE_CAL.regular.has(date)||NSE_CAL.special.has(date);
+}
+function isSpecialSession(date){
+  if(NSE_CAL.loaded&&date>=NSE_CAL.coverageFrom&&date<=NSE_CAL.verifiedThrough)return NSE_CAL.special.has(date);
+  const w=_calOkDate(date)?new Date(date+'T00:00:00Z').getUTCDay():1;return w===0||w===6;      // no calendar: a weekend bar can only be a special session
+}
+function weekSessions(date){
+  const mon=tenetWeekKey(date),days=[];for(let i=0;i<5;i++){const d=new Date(mon+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+i);days.push(d.toISOString().slice(0,10));}
+  if(NSE_CAL.loaded&&days[0]>=NSE_CAL.coverageFrom&&days[4]<=NSE_CAL.verifiedThrough)return{sessions:days.filter(d=>NSE_CAL.regular.has(d)),verified:true};
+  const h=tenetHolidaySet();return{sessions:days.filter(d=>!h.has(d)),verified:false};
+}
+// End-of-day data staleness cutoff = calendar cutoffIST + 45 min (default 19:15 -> 20:00 IST)
+function eod2CutoffMinutes(){const m=/^(\d\d):(\d\d)$/.exec(NSE_CAL.cutoffIST||'19:15');return (m?(+m[1])*60+(+m[2]):19*60+15)+45;}
 function tenetHolidaySet(){const t=tenetState(),s=new Set(TENET_NSE_HOLIDAYS_2026);for(const d of (t.config.extraHolidays||[]))if(/^\d{4}-\d{2}-\d{2}$/.test(d))s.add(d);return s;}
-function tenetWeekCalendar(date){const mon=tenetWeekKey(date),h=tenetHolidaySet(),sessions=[];for(let i=0;i<5;i++){const d=new Date(mon+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+i);const k=d.toISOString().slice(0,10);if(!h.has(k))sessions.push(k);}return{weekKey:mon,first:sessions[0]||null,last:sessions.at(-1)||null,sessions};}
+function tenetWeekCalendar(date){const mon=tenetWeekKey(date),ws=weekSessions(date),sessions=ws.sessions;return{weekKey:mon,first:sessions[0]||null,last:sessions.at(-1)||null,sessions,verified:ws.verified};}
 function tenetLiveGate(){
   // S0-3: the gate opened after 15:00 with NO upper bound, so it stayed
   // "actionable" all evening and all night on the final session's date — long
@@ -10417,14 +10889,14 @@ function tenetLiveGate(){
   const closeMin=Number.isFinite(cfg.sessionCloseMinutes)?cfg.sessionCloseMinutes:(15*60+30);
   const isFinal=now.date===cal.last;
   const after3=now.minutes>=cfg.signalAfterMinutes;
-  const beforeClose=now.minutes<=closeMin;
-  const calYear=+String(now.date).slice(0,4);
-  const calendarStale=calYear>TENET_HOLIDAY_CALENDAR_YEAR&&!(cfg.extraHolidays||[]).some(d=>String(d).startsWith(calYear+'-'));
+  const beforeClose=now.minutes<closeMin;                 // strict: at/after the close the prices are no longer live
+  const calendarStale=!cal.verified;                      // F04: only a snapshot calendar can verify a week; extraHolidays never unlock it
   let blockedReason='';
-  if(!isFinal)blockedReason=`Not the final NSE session of this week (final: ${cal.last||'unknown'})`;
+  if(calendarStale)blockedReason=`CALENDAR_UNVERIFIED: no verified NSE calendar covers the week of ${cal.weekKey} — load the EOD2 snapshot (Data Center) before acting`;
+  else if(!isFinal)blockedReason=`Not the final NSE session of this week (final: ${cal.last||'unknown'})`;
   else if(!after3)blockedReason=`Action window opens at ${String(Math.floor(cfg.signalAfterMinutes/60)).padStart(2,'0')}:${String(cfg.signalAfterMinutes%60).padStart(2,'0')} IST`;
   else if(!beforeClose)blockedReason=`Session closed at ${String(Math.floor(closeMin/60)).padStart(2,'0')}:${String(closeMin%60).padStart(2,'0')} IST — prices are no longer live`;
-  else if(calendarStale)blockedReason=`No verified NSE holiday calendar for ${calYear} — add ${calYear} holidays in Tenet settings before acting`;
+  else if(calendarStale)blockedReason=`CALENDAR_UNVERIFIED: no verified NSE calendar covers the week of ${cal.weekKey} — load the EOD2 snapshot (Data Center) before acting`;
   return{...now,...cal,isFinal,after3,beforeClose,calendarStale,blockedReason,
     actionable:!!(isFinal&&after3&&beforeClose&&!calendarStale)};}
 function tenetAllocatedCapital(){return Math.max(0,tenetState().capital.reduce((a,x)=>a+(+x.amount||0),0));}
@@ -10469,7 +10941,7 @@ function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.un
 function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanIndexName(index))?.yf||'';}
 async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}e.linkedIndex=clean;e.linkedIndexYf=yf;saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
 function tenetRenderPairList(){const host=document.getElementById('tenet-pair-list'),msg=document.getElementById('tenet-pair-validation');if(!host)return;const t=tenetState(),errs=tenetValidatePairs(),conflicts=tenetIndexRegistry().filter(x=>x.conflict),activeEtfs=tenetActiveEtfs(),per=tenetPerBuy();if(msg){msg.style.color=errs.length||conflicts.length?'var(--bad)':'var(--go)';msg.textContent=errs.length?`⚠ ${errs.join(' · ')}`:conflicts.length?`⚠ Conflicting Yahoo index tickers: ${conflicts.map(x=>x.name).join(', ')}`:`✓ ${t.pairs.length}/${t.config.maxGreen} GREEN slots · ${activeEtfs.length} actual ETFs · per-buy ${fmtINR(per)}.`;}
-  host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=t._indexMetrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
+  host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=TENET_RUNTIME.metrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
 function tenetSaveConfigFromUI(){const t=tenetState();
   // S0-1: `+el.value || fallback` silently rewrote an explicit 0 back to the
   // default — the same defect class already fixed twice in the LIFO engine. A
@@ -10632,13 +11104,14 @@ async function tenetRunCoverageProbe(){
   if(btn){btn.disabled=false;btn.textContent='◎ Run Coverage Probe';}
 }
 
-async function tenetFetchHistory(kind,key,providerSymbol,yahooSymbol,startDate,endDate){
+async function tenetFetchHistory(kind,key,providerSymbol,yahooSymbol,startDate,endDate,ctx){
   // V3.21: EOD2 certified export only. Upstox/Yahoo history removed.
   const isIdx=kind==='IDX'||kind==='INDEX';
-  return EOD2Store.getHist(isIdx?sanIndexName(key):sanSym(key),isIdx?'INDEX':'ETF',startDate,endDate);
+  return EOD2Store.getHist(isIdx?sanIndexName(key):sanSym(key),isIdx?'INDEX':'ETF',startDate,endDate,ctx);
 }
-async function tenetYahooQuote(yf){if(!yf)return null;try{const u=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yf)}`,j=await yahooProxyFetch(u,8000,'Tenet index '+yf),q=j?.quoteResponse?.result?.[0];if(!q)return null;return{price:+q.regularMarketPrice||0,open:+q.regularMarketOpen||0,high:+q.regularMarketDayHigh||0,low:+q.regularMarketDayLow||0,asOf:q.regularMarketTime?new Date(q.regularMarketTime*1000).toISOString():new Date().toISOString(),source:'yahoo'};}catch(e){return null;}}
-async function tenetBridgeQuote(symbol){if(!S.config.marketBridgeUrl||!symbol)return null;const j=await marketBridgeFetch('/quotes',{symbols:symbol},10000),q=Array.isArray(j?.quotes)?j.quotes[0]:null;if(!q||!(+q.price>0))return null;
+async function tenetYahooQuote(yf){if(!yf)return null;try{const u=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yf)}`,j=await yahooProxyFetch(u,8000,'Tenet index '+yf),q=j?.quoteResponse?.result?.[0];if(!q)return null;return{price:+q.regularMarketPrice||0,open:+q.regularMarketOpen||0,high:+q.regularMarketDayHigh||0,low:+q.regularMarketDayLow||0,asOf:q.regularMarketTime?new Date(q.regularMarketTime*1000).toISOString():null,fetchedAt:Date.now(),source:'yahoo'};}catch(e){return null;}}
+async function tenetBridgeQuote(symbol,kind){if(!S.config.marketBridgeUrl||!symbol)return null;const j=await marketBridgeFetch('/quotes',{symbols:symbol,...(kind==='INDEX'?{indices:symbol}:{})},10000),q=Array.isArray(j?.quotes)?j.quotes[0]:null;if(!q||!(+q.price>0))return null;
+  if(!bridgeQuoteIdentityOk(q,symbol))return null;     // A2-2: wrong instrument is no quote
   // S0-5: `asOf: q.asOf || new Date()` stamped MISSING provider timestamps with
   // the current time, so an arbitrarily stale quote presented as fresh and
   // passed every downstream freshness check. The Worker itself fabricates a
@@ -10647,13 +11120,15 @@ async function tenetBridgeQuote(symbol){if(!S.config.marketBridgeUrl||!symbol)re
   const stamped=typeof q.asOf==='string'&&!Number.isNaN(Date.parse(q.asOf));
   const ageSec=stamped?Math.max(0,(Date.now()-Date.parse(q.asOf))/1000):null;
   return{price:+q.price,open:+q.open||0,high:+q.high||0,low:+q.low||0,
-    asOf:stamped?q.asOf:null,timestamped:stamped,ageSec,
+    asOf:stamped?q.asOf:null,timestamped:stamped,ageSec,fetchedAt:Date.now(),
     stale:stamped?ageSec>900:true,
     source:'upstox',
     quality:stamped?(ageSec>900?'stale':'fresh'):'untimestamped'};}
-function tenetBarsInWeek(h,date){const wk=tenetWeekKey(date);return Object.keys(h||{}).filter(d=>tenetWeekKey(d)===wk&&d<=date&&h[d]?.close>0).sort();}
-async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){quote=await tenetBridgeQuote(index);if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+h[firstDate].open:0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
-  const yearDates=Object.keys(h).filter(d=>d<=date&&d>=histStart).sort().slice(-260),highs=yearDates.map(d=>(+h[d].high||0)||0).filter(v=>v>0);if(todayQuote?.high>0)highs.push(todayQuote.high);const high52=highs.length?Math.max(...highs):0,distance=high52>0&&close>0?(high52-close)/high52*100:null,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';return{index,yf,h,weekStart:firstDate,weekEnd:lastDate,open,close,direction,high52,distance,source:todayQuote?.source||(lastDate?h[lastDate]?._src:null),quote:todayQuote,liveFresh:!!todayQuote,verifiedLive:todayQuote?.source==='upstox'};}
+function tenetBarsInWeek(h,date){const wk=tenetWeekKey(date);return Object.keys(h||{}).filter(d=>tenetWeekKey(d)===wk&&d<=date&&h[d]?.close>0&&!isSpecialSession(d)).sort();}
+async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){quote=await tenetBridgeQuote(index,'INDEX');if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+h[firstDate].open:0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
+  const yearDates=Object.keys(h).filter(d=>d<=date&&d>=histStart).sort().slice(-260),highs=yearDates.map(d=>(+h[d].high||0)||0).filter(v=>v>0);if(todayQuote?.high>0)highs.push(todayQuote.high);const high52=highs.length?Math.max(...highs):0,distance=high52>0&&close>0?(high52-close)/high52*100:null,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';return{index,yf,h,weekStart:firstDate,weekEnd:lastDate,open,close,direction,high52,distance,source:todayQuote?.source||(lastDate?h[lastDate]?._src:null),quote:todayQuote,quoteFreshness:todayQuote?_tenetQuoteFreshness(todayQuote,date):null,liveFresh:!!todayQuote&&_tenetQuoteFreshness(todayQuote,date).ok,verifiedLive:!!todayQuote&&_tenetQuoteFreshness(todayQuote,date).ok&&todayQuote.source==='upstox'};}
+// A2-1: freshness of a scanner quote object ({asOf,fetchedAt,...}) against the session date it is used for
+function _tenetQuoteFreshness(q,sessionDate){return quoteFreshness({_observedAt:q&&q.asOf?Date.parse(q.asOf):null,_fetchedAt:q&&q.fetchedAt},Date.now(),{maxAgeSec:900,sessionDate});}
 // S1-2: turnoverCtx makes the tie-break point-in-time. Passing null keeps the
 // live behaviour (read PRICES); a backtest passes that session's turnover map.
 function tenetCandidateSort(a,b,turnoverCtx=null){const ta=a.team==='GREEN'?0:1,tb=b.team==='GREEN'?0:1;if(ta!==tb)return ta-tb;return (Number.isFinite(b.distance)?b.distance:-999)-(Number.isFinite(a.distance)?a.distance:-999)||tenetEtfTurnover(b.etf,turnoverCtx)-tenetEtfTurnover(a.etf,turnoverCtx)||a.etf.localeCompare(b.etf);}
@@ -10661,11 +11136,11 @@ function tenetPriceQuality(sym){const t=tenetState(),f=priceFreshStatus(sym),ver
 function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=tenetState().holdings,weekKey=null,requireLiveQuality=false,turnoverCtx=null}={}){const t=tenetState(),buys=[],bids=[],diag=[];for(const p of pairs){if(p.error){diag.push({underlying:p.underlying,status:'DATA ERROR',reason:p.error,indexSource:p.indexSource||''});continue;}for(const side of ['green','red']){const etf=p[side],team=side==='green'?'GREEN':'RED';if(!etf)continue;const candleOk=(team==='GREEN'&&p.direction==='BULLISH')||(team==='RED'&&p.direction==='BEARISH');if(!candleOk){diag.push({underlying:p.underlying,etf,team,status:'NO',reason:`${p.direction||'NO'} index candle`,indexSource:p.indexSource||''});continue;}const price=+(priceMap[etf]?.cmp||priceMap[etf]?.close||0);if(!(price>0)){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:'ETF price unavailable',indexSource:p.indexSource||''});continue;}if(requireLiveQuality&&priceMap===PRICES){const q=tenetPriceQuality(etf);if(!q.allowed){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:q.reason,priceSource:q.source,indexSource:p.indexSource||''});continue;}}const lots=holdings.filter(x=>x.etf===etf),base={etf,team,price,underlying:p.underlying,distance:p.distance,direction:p.direction,indexSource:p.indexSource||'',priceSource:priceMap===PRICES?String(PRICES[etf]?._src||''):''};if(!lots.length){buys.push(base);diag.push({...base,status:actionable?'BUY':'PREVIEW',reason:'team candle matched · not currently held'});}else{const last=tenetLatestLot(etf,holdings),fall=(last.buyPrice-price)/last.buyPrice*100;if(fall>=t.config.avgTriggerPct){bids.push({...base,fall,last});diag.push({...base,status:actionable?'BID ELIGIBLE':'PREVIEW BID',reason:`down ${fall.toFixed(2)}% from latest lot`});}else diag.push({...base,status:'NO',reason:`holding exists · fall ${fall.toFixed(2)}% < ${t.config.avgTriggerPct.toFixed(2)}%`});}}}
   const _tc=turnoverCtx||null;
   buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
-async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}t._indexMetrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive};}catch(e){return{...p,error:e?.message||String(e)}}});t._live=rows;const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
+async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}TENET_RUNTIME.metrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive,indexObservedMs:snap.quote&&snap.quote.asOf?Date.parse(snap.quote.asOf):null};}catch(e){return{...p,error:e?.message||String(e)}}});TENET_RUNTIME.live=rows;TENET_RUNTIME.liveAt=Date.now();TENET_RUNTIME.fingerprint=tenetFingerprint();const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
 async function tenetTestIndexMappings(){const t=tenetState(),msg=document.getElementById('tenet-pair-validation');if(!S.config.marketBridgeUrl)return toast('Configure Market Bridge first','warn');if(!t.pairs.length)return toast('Add Tenet scanner pairs first','warn');if(msg)msg.textContent='Testing Upstox index mappings…';const rows=await mapWithConcurrency(t.pairs,2,async p=>{const j=await marketBridgeFetch('/resolve',{symbol:p.underlying},10000);return{u:p.underlying,ok:!!j?.mapping,key:j?.mapping?.key||'',name:j?.mapping?.name||'',err:j?.error||''};});const bad=rows.filter(x=>!x.ok);if(msg){msg.style.color=bad.length?'var(--bad)':'var(--go)';msg.textContent=bad.length?`⚠ Mapping failed: ${bad.map(x=>x.u+' — '+(x.err||'no mapping')).join(' · ')}`:`✓ Upstox mappings verified: ${rows.map(x=>x.u+' → '+x.key).join(' · ')}`;}toast(bad.length?`${bad.length} Tenet index mapping(s) failed`:'All Tenet index mappings verified',bad.length?'warn':'ok');}
-function tenetRecordBuy(etf,team,price,underlying,isBid=false){const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const pair=(t._live||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(t._live,{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
+function tenetRecordBuy(etf,team,price,underlying,isBid=false){const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
 function tenetRecordSell(id,price){const t=tenetState(),i=t.holdings.findIndex(x=>x.id===id);if(i<0)return;const h=t.holdings[i],last=tenetLatestLot(h.etf);if(last?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');if(+price<h.targetPrice)return toast('Target not reached','warn');t.holdings.splice(i,1);const sellDate=tenetISTNow().date;t.sold.push({...h,sellDate,sellPrice:+price,profit:(+price-h.buyPrice)*h.qty,holdingDays:Math.max(0,tenetDaysBetween(h.buyDate,sellDate)),sellPriceSource:q.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet SELL recorded: ${h.etf}`,'ok');}
-function tenetRenderSignals(){const t=tenetState(),host=document.getElementById('tenet-signal-list');if(!host)return;const gate=tenetLiveGate(),live=t._live||[];if(!live.length){host.innerHTML='<div class="card"><span style="color:var(--fog)">Tap <b>Refresh Tenet scanner</b> to load index candles and ETF prices. No trade action is shown until data is validated.</span></div>';return;}const sig=tenetSignalsFromPairs(live,{actionable:gate.actionable,weekKey:gate.weekKey,requireLiveQuality:gate.actionable}),sells=[],blockedSells=[];for(const h of t.holdings){const last=tenetLatestLot(h.etf),price=+PRICES[h.etf]?.cmp||0;if(last?.id!==h.id||!(price>0)||price<h.targetPrice)continue;const q=tenetPriceQuality(h.etf);if(q.allowed)sells.push({h,price,q});else blockedSells.push({h,price,q});}
+function tenetRenderSignals(){const t=tenetState(),host=document.getElementById('tenet-signal-list');if(!host)return;const gate=tenetLiveGate(),live=tenetLiveRows()||[];if(!live.length){host.innerHTML='<div class="card"><span style="color:var(--fog)">Tap <b>Refresh Tenet scanner</b> to load index candles and ETF prices. No trade action is shown until data is validated.</span></div>';return;}const sig=tenetSignalsFromPairs(live,{actionable:gate.actionable,weekKey:gate.weekKey,requireLiveQuality:gate.actionable}),sells=[],blockedSells=[];for(const h of t.holdings){const last=tenetLatestLot(h.etf),price=+PRICES[h.etf]?.cmp||0;if(last?.id!==h.id||!(price>0)||price<h.targetPrice)continue;const q=tenetPriceQuality(h.etf);if(q.allowed)sells.push({h,price,q});else blockedSells.push({h,price,q});}
   const rows=[...sells.map(x=>`<div style="margin:6px 0"><b>SELL</b> ${escapeHtml(x.h.etf)} · LIFO lot ${x.h.buySeq} · ${fmtINR(x.price)} ≥ target ${fmtINR(x.h.targetPrice)} · ${escapeHtml(x.q.source)} <button class="action-btn sm" onclick="tenetRecordSell(${htmlJsArg(x.h.id)},${x.price})">Record sell</button></div>`),...sig.buys.map(x=>`<div style="margin:6px 0"><b>BUY</b> ${escapeHtml(x.etf)} · ${escapeHtml(x.team)} · ${escapeHtml(x.underlying)} · index ${escapeHtml(x.direction)} (${escapeHtml(x.indexSource||'')}) · 52W distance ${Number.isFinite(x.distance)?x.distance.toFixed(2)+'%':'—'} · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},false)">Record buy</button></div>`),...sig.selectedBid.map(x=>`<div style="margin:6px 0"><b>BID</b> ${escapeHtml(x.etf)} · largest eligible fall ${x.fall.toFixed(2)}% · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},true)">Record BID</button></div>` )];
   if(blockedSells.length)rows.push(`<div style="margin:6px 0;color:var(--gold)">⚠ ${blockedSells.length} target-hit SELL candidate(s) hidden because current price data is not verified/fresh. Refresh market data before acting.</div>`);const preview=!gate.actionable&&sig.previewBuys.length?`<div style="font-size:10px;color:var(--fog);margin-top:8px"><b>Directional preview only — NOT an order signal:</b> ${sig.previewBuys.map(x=>`${escapeHtml(x.etf)} ${x.team}`).join(' · ')}</div>`:'';const bidNote=sig.bidUsed?' · BID already used this week':'';const diag=`<details open style="margin-top:10px"><summary style="cursor:pointer;color:var(--fog);font-size:10px">Scanner diagnostics</summary><div class="tbl-wrap"><table><thead><tr><th>Index</th><th>ETF</th><th>Team</th><th>Status</th><th>Index src</th><th>Price src</th><th>Reason</th></tr></thead><tbody>${sig.diag.map(x=>`<tr><td>${escapeHtml(x.underlying||'')}</td><td>${escapeHtml(x.etf||'—')}</td><td>${escapeHtml(x.team||'—')}</td><td>${escapeHtml(x.status||'')}</td><td>${escapeHtml(x.indexSource||'—')}</td><td>${escapeHtml(x.priceSource||String(PRICES[x.etf]?._src||'—'))}</td><td>${escapeHtml(x.reason||'')}</td></tr>`).join('')}</tbody></table></div></details>`;
   const safety=t.config.requireVerifiedLive===false?'Fallback data allowed':'Verified Upstox required';host.innerHTML=`<div class="card"><div style="font-size:10px;color:var(--fog);margin-bottom:7px">Data safety: <b>${safety}</b> · BUY/BID gate: <b>${gate.actionable?'OPEN':'CLOSED'}</b></div><b>New buys:</b> ${sig.buys.length} · <b>Eligible BIDs:</b> ${sig.bids.length} · <b>Selected BID:</b> ${sig.selectedBid.length}${bidNote} · <b>Sells:</b> ${sells.length}<div style="margin-top:8px">${rows.join('')||'<span style="color:var(--fog)">No actionable Tenet order right now.</span>'}</div>${preview}${diag}</div>`;}
@@ -10713,8 +11188,8 @@ async function tenetRunHistoricalScanner(){
 async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.config.marketBridgeUrl){t.universeHistory=[];return[];}const j=await marketBridgeFetch('/universe-history',{start:from,end:to},15000),rows=Array.isArray(j?.rows)?j.rows:[];t.universeHistory=rows.map(r=>({effectiveDate:String(r.effectiveDate||r.date||r.effective_date||'').slice(0,10),underlying:sanIndexName(r.underlying||r.index||r.underlyingAsset||''),indexYf:sanIndexTicker(r.indexYf||r.indexYahoo||r.yahoo||''),etf:sanSym(r.etf||r.symbol||''),team:String(r.team||r.side||'GREEN').toUpperCase(),counterETF:sanSym(r.counterETF||r.red||''),turnover:Number.isFinite(+(r.turnover??r.turnoverValue))?+(r.turnover??r.turnoverValue):null,distance52w:Number.isFinite(+(r.distance52w??r.distance??r.distanceFrom52WHigh))?+(r.distance52w??r.distance??r.distanceFrom52WHigh):null})).filter(r=>r.effectiveDate&&r.underlying&&r.etf);return t.universeHistory;}
 function tenetPairsForDate(date){const t=tenetState(),hist=t.universeHistory||[];if(!hist.length)return t.pairs.map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
 function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>(+h[d].high||0)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
-function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to)){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
-function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
+function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to&&!isSpecialSession(d))){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
+function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0&&!isSpecialSession(d)).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
 function tenetExactBar(h,date){return h?.[date]?.close>0?h[date]:null;}
 // ── TENET COST MODEL ─────────────────────────────────────────────────────────
 // S1-3: the Tenet engine modelled ZERO friction. Delivery ETF trades on NSE pay
@@ -10854,15 +11329,17 @@ async function runTenetBacktestV3(){
         return{kind:'ETF',key:sym,provider:sym,yf:e?.yf||sym+'.NS'};
       })
     ];
-    {const _g=await eod2Preflight(from,to);if(_g){if(st)st.textContent=_g+' Backtest not run.';return;}}
+    let tctx=null;try{tctx=await EOD2Store.startRun('TENET',{mode:'research'});}catch(e){if(st)st.textContent=e.message+' Backtest not run.';return;}   // A2-5: one pinned snapshot for the whole Tenet run
+    {const _g=await eod2Preflight(from,to,tctx.snapshot);if(_g){EOD2Store.endRun(tctx);if(st)st.textContent=_g+' Backtest not run.';return;}}
     const rows=await mapWithConcurrency(jobs,2,async j=>{
       try{
-        const h=await tenetFetchHistory(j.kind,j.key,j.provider,j.yf,warmStart,historyTo);
+        const h=await tenetFetchHistory(j.kind,j.key,j.provider,j.yf,warmStart,historyTo,tctx);
         return{...j,h,err:Object.keys(h).length?'':'no bars'};
       }catch(e){
         return{...j,h:null,err:e?.message||String(e)};
       }
     });
+    EOD2Store.endRun(tctx);
     const failed=rows.filter(x=>x.err||!x.h||!Object.keys(x.h).length);
     if(failed.length){
       if(st)st.textContent='Tenet history failed: '+failed.map(x=>`${x.key} (${x.err||'no bars'})`).join(', ')+'. Backtest not run.';
@@ -10892,7 +11369,7 @@ async function runTenetBacktestV3(){
       // Selling is NOT weekly-gated. GTT/target exits can happen on any session.
       // S1-1: credit the proceeds. This line is the entire cash-recycling fix —
       // without it, sold capital was destroyed and could never be redeployed.
-      cash+=tenetSellDailyLifo(hold,trades,data,d,{conservative:conservativeExits});
+      if(!isSpecialSession(d))cash+=tenetSellDailyLifo(hold,trades,data,d,{conservative:conservativeExits});   // AD11: no execution on a special session; the bar still marks the book below
 
       const w=decisionByDate.get(d);
       if(w){
@@ -12605,8 +13082,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-19-v3.22-A1';
-const APP_SOURCE_SHA256='a285e39b3efe30066508b6630b9d6af2460e0388568ac177b8820158aa751787';
+const APP_BUILD='2026-09-20-v3.22-A2';
+const APP_SOURCE_SHA256='cdb8960dacf32e3eec280c0c3bd5d59222bb969ce8073fa7293cc16d4684f378';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -12747,8 +13224,22 @@ function _reportInitFailures(){
 
 // V3.21 EOD2 run guards. Frozen cores are wrapped, never edited: their source
 // (and MD5) is unchanged; the originals remain reachable via .__frozen.
-runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};return eod2GuardRun('LIFO',p.startDate,p.endDate,()=>core(p));};w.__frozen=core;return w;})(runLifoBacktestCore);
-runDMBacktestCore=(function(core){const w=async function(p){p=p||{};return eod2GuardRun('DM',p.fromDate,p.toDate,()=>core(p));};w.__frozen=core;return w;})(runDMBacktestCore);
+runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};
+  const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
+  return eod2GuardRun('LIFO',p.startDate,p.endDate,async ctx=>{
+    const startTs=Math.floor(new Date(p.startDate).getTime()/1000)-365*86400,endTs=Math.floor(new Date(p.endDate).getTime()/1000)+86400;
+    const q=await eod2PrepareCoreParams(p,ctx,{syms:LIFO_ETF_UNIVERSE.map(e=>e.sym),from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:true});
+    return q.error?q:core(q);
+  },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runLifoBacktestCore);
+runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
+  const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
+  return eod2GuardRun('DM',p.fromDate,p.toDate,async ctx=>{
+    const lookback=finiteParam(p.lookback,182,{min:1,integer:true});
+    const etfs=[...(p.etfs||getMomUniverse().filter(sy=>!DHC_EXCLUDED.has(sy)))];if(!etfs.includes('NIFTYBEES'))etfs.push('NIFTYBEES');
+    const endTs=Math.floor(new Date(p.toDate).getTime()/1000)+86400,startTs=Math.floor(new Date(p.fromDate).getTime()/1000)-(lookback+220)*86400;
+    const q=await eod2PrepareCoreParams(p,ctx,{syms:etfs,from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:false});
+    return q.error?q:core(q);
+  },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runDMBacktestCore);
 
 // PWA — deployable same-origin service worker. A real ./sw.js file is required; downloadPwaFiles() exports the matching assets.
 // Caches the app shell so it loads offline after first visit.
@@ -13139,22 +13630,18 @@ async function runLifoParamSweep() {
 
   rebuildUniverses();
   const etfs = LIFO_ETF_UNIVERSE.filter(e => !DHC_EXCLUDED.has(e.sym));
-  const histMap   = {};
-  const histIndex = {};
+  let histMap   = {};
+  let histIndex = {};
 
   progBar.style.width='35%';
   progLabel.textContent=`Fetching ${etfs.length} ETFs (parallel)…`;
-  const _swFetchRows=await mapWithConcurrency(etfs,2,async e=>{
-    if(SWEEP_CANCEL) return {sym:e.sym,cancelled:true};
-    try{const h=await fetchHistDaily(e.sym,e.yf,startTs,endTs);return {sym:e.sym,h};}
-    catch(err){return {sym:e.sym,err};}
-  });
-  const _swFailed=_swFetchRows.filter(x=>x&&!x.cancelled&&(x.err||!x.h||!Object.keys(x.h).length));
-  if(_swFailed.length){
-    _sweepDone(runBtn,cancelBtn,statusEl,progWrap,`Historical data failed for ${_swFailed.map(x=>x.sym).join(', ')}. Sweep aborted; no partial dataset used.`);
+  let _swCtx=null;try{_swCtx=await EOD2Store.startRun('SWEEP',{mode:'research'});}catch(e){_sweepDone(runBtn,cancelBtn,statusEl,progWrap,e.message+' Sweep aborted; no partial dataset used.');return;}
+  let _swB;try{_swB=await buildHistMapFromSnapshot(_swCtx,etfs.map(e=>e.sym),fmt(new Date(startTs*1000)),fmt(new Date(endTs*1000)),{withIndex:true});}finally{EOD2Store.endRun(_swCtx);}
+  if(_swB.failures.length){
+    _sweepDone(runBtn,cancelBtn,statusEl,progWrap,`Historical data failed for ${_swB.failures.map(x=>x.sym).join(', ')}. Sweep aborted; no partial dataset used.`);
     return;
   }
-  _swFetchRows.filter(x=>x?.h).forEach(x=>{histMap[x.sym]=x.h;histIndex[x.sym]=buildHistIndex(x.h);});
+  histMap=_swB.map;histIndex=_swB.index;      // loader-owned (frozen, registered) - the engine wrappers accept nothing else
 
   if (SWEEP_CANCEL) {
     _sweepDone(runBtn, cancelBtn, statusEl, progWrap, 'Cancelled during data fetch.');
@@ -13495,22 +13982,16 @@ async function runDmParamSweep() {
   const etfs = getMomUniverse().filter(s => !DHC_EXCLUDED.has(s));
   if (!etfs.includes('NIFTYBEES')) etfs.push('NIFTYBEES');
 
-  const histMap = {};
+  let histMap = {};
   progBar.style.width='35%';
   progLabel.textContent=`Fetching ${etfs.length} ETFs (parallel)…`;
-  const _dmSwFetchRows=await mapWithConcurrency(etfs,2,async sym=>{
-    if(DM_SWEEP_CANCEL) return {sym,cancelled:true};
-    const uEntry=S.universe.find(e=>e.sym===sym);
-    const yfSym=(uEntry&&uEntry.yf)?uEntry.yf:sym+'.NS';
-    try{const h=await fetchHistDaily(sym,yfSym,startTs,endTs);return {sym,h};}
-    catch(err){return {sym,err};}
-  });
-  const _dmSwFailed=_dmSwFetchRows.filter(x=>x&&!x.cancelled&&(x.err||!x.h||!Object.keys(x.h).length));
-  if(_dmSwFailed.length){
-    _dmSweepDone(runBtn,cancelBtn,statusEl,progWrap,`Historical data failed for ${_dmSwFailed.map(x=>x.sym).join(', ')}. Sweep aborted; no partial dataset used.`);
+  let _dmSwCtx=null;try{_dmSwCtx=await EOD2Store.startRun('SWEEP',{mode:'research'});}catch(e){_dmSweepDone(runBtn,cancelBtn,statusEl,progWrap,e.message+' Sweep aborted; no partial dataset used.');return;}
+  let _dmSwB;try{_dmSwB=await buildHistMapFromSnapshot(_dmSwCtx,etfs,fmt(new Date(startTs*1000)),fmt(new Date(endTs*1000)));}finally{EOD2Store.endRun(_dmSwCtx);}
+  if(_dmSwB.failures.length){
+    _dmSweepDone(runBtn,cancelBtn,statusEl,progWrap,`Historical data failed for ${_dmSwB.failures.map(x=>x.sym).join(', ')}. Sweep aborted; no partial dataset used.`);
     return;
   }
-  _dmSwFetchRows.filter(x=>x?.h).forEach(x=>{histMap[x.sym]=x.h;});
+  histMap=_dmSwB.map;      // loader-owned (frozen, registered)
 
   if (DM_SWEEP_CANCEL) {
     _dmSweepDone(runBtn, cancelBtn, statusEl, progWrap, 'Cancelled during data fetch.');
