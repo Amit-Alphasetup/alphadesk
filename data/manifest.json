@@ -1,7 +1,7 @@
 {
   "dataset": "EOD2",
   "exporter_version": "2.0.0",
-  "exportedAt": "2026-09-18T13:45:22+00:00",
+  "exportedAt": "2026-09-19T13:45:13+00:00",
   "eod2_data_version": 3.4,
   "eod2_last_update": "2026-09-18T00:00:00+05:30",
   "windowStart": "2019-01-14",
@@ -16,6 +16,41 @@
       "unexplained +19.8% on 2026-09-16 (ratio 0.83)",
       "unexplained +20.0% on 2026-09-17 (ratio 0.83)",
       "unexplained +20.0% on 2026-09-18 (ratio 0.83)"
+    ],
+    "MOM100": [
+      "1 unexplained session gap(s): ['2022-05-11']"
+    ],
+    "ALPHA": [
+      "1 unexplained session gap(s): ['2022-05-11']"
+    ],
+    "TNIDETF": [
+      "1 unexplained session gap(s): ['2022-05-11']"
+    ],
+    "HDFCSILVER": [
+      "unexplained -16.4% on 2026-01-30 (ratio 1.20)",
+      "unexplained +15.4% on 2026-02-03 (ratio 0.87)"
+    ],
+    "SILVERIETF": [
+      "1 unexplained session gap(s): ['2022-05-11']",
+      "unexplained -20.1% on 2026-01-30 (ratio 1.25)"
+    ],
+    "GOLDIETF": [
+      "1 unexplained session gap(s): ['2022-05-11']"
+    ],
+    "HDFCGOLD": [
+      "1 unexplained session gap(s): ['2022-05-11']",
+      "unexplained -99.0% on 2021-02-17 (ratio 101.48)"
+    ],
+    "SBISILVER": [
+      "unexplained -20.5% on 2026-01-30 (ratio 1.26)"
+    ],
+    "SILVER": [
+      "1 unexplained session gap(s): ['2022-05-11']",
+      "unexplained -18.5% on 2026-01-30 (ratio 1.23)"
+    ],
+    "GOLD1": [
+      "1 unexplained session gap(s): ['2022-05-11']",
+      "unexplained -90.0% on 2021-07-22 (ratio 10.04)"
     ]
   },
   "splits": [
@@ -115,7 +150,7 @@
   "benchmark": {
     "NIFTY50_TRI": "NOT_INCLUDED (separate provider; blocks S3 edge only)"
   },
-  "datasetHash": "a57952fda594103fa50a297624c6b6d38381d8c884dc1d2b4355662cc6c55cb2",
+  "datasetHash": "9ed9948f988bb86022f62064430968bf62771e9b0b32f2d0fa257dec8d8305e6",
   "files": {
     "NIFTYBEES": {
       "path": "data/etf/NIFTYBEES.json",
@@ -428,6 +463,54 @@
       "first": "2021-11-12",
       "last": "2026-09-18",
       "bars": 1204
+    },
+    "MIDSMALL": {
+      "path": "data/etf/MIDSMALL.json",
+      "kind": "ETF",
+      "sha256": "6b6f950061f04a493a3601b8cf6466196f55891959a2b6888f1c229660c02589",
+      "first": "2024-05-28",
+      "last": "2026-09-18",
+      "bars": 575
+    },
+    "MOREALTY": {
+      "path": "data/etf/MOREALTY.json",
+      "kind": "ETF",
+      "sha256": "92f91f969437af20c9f67c08d71a13de22b375c57f25c7aec8e415c0841f88e6",
+      "first": "2024-03-21",
+      "last": "2026-09-18",
+      "bars": 618
+    },
+    "EVINDIA": {
+      "path": "data/etf/EVINDIA.json",
+      "kind": "ETF",
+      "sha256": "87a55a8892b18c9b0ba6f01c78338a8f5287149ba6b22c4198d42774a7a34df7",
+      "first": "2024-07-16",
+      "last": "2026-09-18",
+      "bars": 541
+    },
+    "MOENERGY": {
+      "path": "data/etf/MOENERGY.json",
+      "kind": "ETF",
+      "sha256": "277f975604692b0c16b1685a267f717a38426628de093f6a35374dab1fee9241",
+      "first": "2025-10-16",
+      "last": "2026-09-18",
+      "bars": 229
+    },
+    "TATAGOLD": {
+      "path": "data/etf/TATAGOLD.json",
+      "kind": "ETF",
+      "sha256": "71d2f3e57742df6021ce56265c51ce23a571e10c69f13e10a2dc4f3da1835499",
+      "first": "2024-01-17",
+      "last": "2026-09-18",
+      "bars": 663
+    },
+    "GROWWPOWER": {
+      "path": "data/etf/GROWWPOWER.json",
+      "kind": "ETF",
+      "sha256": "d844560c299d97e2b358da57532ab3a6af1d8bb438f9b569a83c279c7257058b",
+      "first": "2025-08-07",
+      "last": "2026-09-18",
+      "bars": 276
     },
     "NIFTY 50": {
       "path": "data/index/NIFTY_50.json",
