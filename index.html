@@ -13298,8 +13298,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A2';
-const APP_SOURCE_SHA256='44b48963d815709d522bd6f247500e1fbf8c5a6e91c92bf934f25f57a004ec90';
+const APP_BUILD='2026-09-20-v3.22-A2b';
+const APP_SOURCE_SHA256='4269a7857b49494f8cd9e31c59fdd8c5a6eaf79750f754d24d20a2ceedfd8e16';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
