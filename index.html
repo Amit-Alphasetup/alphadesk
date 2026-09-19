@@ -1774,11 +1774,33 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <!-- ── DATA CENTER TAB ─────────────────────────────────────────────────── -->
 <div class="tab-pane" id="mom-datacenter">
+<div class="card" id="eod2v3-card">
+<div class="card-head"><div>
+<div class="card-title">🛰️ EOD2 v3 — the data backtests use</div>
+<div style="font-size:11px;color:var(--fog);margin-top:3px">Immutable, hash-checked dataset snapshots from the market-data repo. Every read is verified against the manifest; nothing here is a backtest input unless it is listed here.</div>
+</div></div>
+<div id="eod2v3-summary" style="font-size:11px;margin:8px 0"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+<button class="action-btn sm" id="eod2v3-refresh" onclick="eod2v3Render()">↻ Refresh</button>
+<button class="action-btn sm" id="eod2v3-verify" onclick="eod2v3ForceVerify()">✔ Force verify all</button>
+<button class="icon-btn" id="eod2v3-clear-dataset" onclick="eod2v3Clear('dataset')" style="padding:7px 12px;font-size:11px">🗑️ Clear this dataset's cache</button>
+<button class="icon-btn" id="eod2v3-clear-all" onclick="eod2v3Clear('all')" style="padding:7px 12px;font-size:11px">🗑️ Clear ALL EOD2 cache</button>
+</div>
+<div id="eod2v3-status" style="font-size:11px;margin:6px 0"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">
+<label class="form-label" style="margin:0">market-data token</label>
+<input class="form-input" id="md-token-input" type="password" autocomplete="off" spellcheck="false" placeholder="GitHub token: Contents write on Amit-Alphasetup/market-data" style="flex:1;min-width:180px"/>
+<button class="action-btn sm" id="md-token-save" onclick="mdSaveTokenUI()">Save</button>
+<button class="icon-btn" id="md-token-forget" onclick="mdForgetTokenUI()">Forget</button>
+<span id="md-token-state" style="font-size:10.5px"></span>
+</div>
+<div id="eod2v3-table" style="max-height:320px;overflow:auto"></div>
+</div>
 <div class="card">
 <div class="card-head">
 <div>
-<div class="card-title">💾 Bulk Historical Data Sync</div>
-<div style="font-size:11px;color:var(--fog);margin-top:3px">Pre-loads OHLC data for every ETF into localStorage + Supabase. Backtests run from cache — no live network calls.</div>
+<div class="card-title">💾 Legacy cache (not used by backtests)</div>
+<div style="font-size:11px;color:var(--fog);margin-top:3px">Old bulk-sync store (localStorage + Supabase). Kept for the live signal views only — backtests and the 52-week low read EOD2 v3 above, never this cache.</div>
 </div>
 </div>
 <div style="background:var(--ink3);border-radius:var(--r6);padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--fog);line-height:1.6">
@@ -2139,6 +2161,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
     <div id="tenet-probe-out" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
     <div class="form-row" style="align-items:center"><label style="display:flex;align-items:center;gap:6px;font-size:11px"><input type="checkbox" id="tenet-bt-conservative" checked> Conservative exits — at most one lot per ETF per session (a single daily HIGH cannot prove several stacked targets filled in sequence)</label></div>
     <div id="tenet-bt-evidence" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
+    <div class="form-row"><button class="action-btn sm" id="tenet-bt-export" onclick="exportTenetBtCSV()">⬇ Export CSV</button></div>
     <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
   </div>
   <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
@@ -2829,6 +2852,7 @@ let S = {
     momCapital:300000, dmSlots:3, dmSkim:25, dmHurdle:6, dmLookback:182,
     dmFriction:0.12, dmNiftyFilter:true, liquid:0.06,
     slippage:0.05,
+    requireVerified:true,   // A5-3: LIFO ranking uses only the verified EOD2 52-week low (a quote/Yahoo fallback is excluded)
     refreshMins:3, gistUrl:'', sheetUrl:'', marketBridgeUrl:'', sbUrl:'', sbKey:'',
     ghRepo:'dashsuperbazar-del/Momentum_2040', ghWf:'signal.yml',
     minVol:50000, maxLots:3,
@@ -5611,7 +5635,7 @@ function renderLifoSignals(openLots,targetPct){
     const p=PRICES[e.sym];
     const l=getLive52WLSync(e.sym);
     if(!p?.cmp) noPriceSyms.push(e.sym);
-    else if(!l.low52) no52wlSyms.push(e.sym);
+    else if(!live52Usable(l)) no52wlSyms.push(e.sym);
   });
   const noDataSyms=[...noPriceSyms,...no52wlSyms];
   // Auto-repair: fetch the missing year of bars for 52WL-less symbols, then
@@ -5640,7 +5664,7 @@ function renderLifoSignals(openLots,targetPct){
       if(typeof DHC_EXCLUDED!=='undefined'&&DHC_EXCLUDED.has(e.sym))return false;
       const p=PRICES[e.sym];
       const l=getLive52WLSync(e.sym);
-      if(!p?.cmp||!l.low52)return false;
+      if(!p?.cmp||!live52Usable(l))return false;                       // A5-3: a fallback (Yahoo) low is not ranked while requireVerified
       if(minVol>0&&p.vol>0&&p.vol<minVol)return false;
       return true;
     })
@@ -5804,7 +5828,7 @@ function renderLifoSignals(openLots,targetPct){
     if(noPriceSyms.length)
       parts.push(`<div><b>${noPriceSyms.length} excluded — no live price:</b> ${escapeHtml(noPriceSyms.slice(0,8).join(', '))}${noPriceSyms.length>8?` +${noPriceSyms.length-8} more`:''}. Not returned by any price source.<br><button class="icon-btn" style="margin-top:6px;font-size:10px" onclick='runBannerDiagnostic(${escapeHtml(JSON.stringify(noPriceSyms.slice(0,5)).replace(/</g,'\u003c'))},"lifo-diag-noprice")'>🔍 Diagnose</button><div id="lifo-diag-noprice" style="display:none"></div></div>`);
     if(no52wlSyms.length)
-      parts.push(`<div style="margin-top:${noPriceSyms.length?'4px':'0'}"><b>${no52wlSyms.length} excluded — no 52-week low:</b> ${escapeHtml(no52wlSyms.slice(0,8).join(', '))}${no52wlSyms.length>8?` +${no52wlSyms.length-8} more`:''}. Price is live, but the ranking needs a year of history.<br><button class="icon-btn" style="margin-top:6px;font-size:10px" onclick='runBannerDiagnostic(${escapeHtml(JSON.stringify(no52wlSyms.slice(0,5)).replace(/</g,'\u003c'))},"lifo-diag-no52wl")'>🔍 Diagnose</button><div id="lifo-diag-no52wl" style="display:none"></div></div>`);
+      parts.push(`<div style="margin-top:${noPriceSyms.length?'4px':'0'}"><b>${no52wlSyms.length} excluded — no verified 52-week low (a Yahoo/quote fallback is not ranked):</b> ${escapeHtml(no52wlSyms.slice(0,8).join(', '))}${no52wlSyms.length>8?` +${no52wlSyms.length-8} more`:''}. Price is live, but the ranking needs a year of history.<br><button class="icon-btn" style="margin-top:6px;font-size:10px" onclick='runBannerDiagnostic(${escapeHtml(JSON.stringify(no52wlSyms.slice(0,5)).replace(/</g,'\u003c'))},"lifo-diag-no52wl")'>🔍 Diagnose</button><div id="lifo-diag-no52wl" style="display:none"></div></div>`);
     banner.innerHTML=`⚠️ ${parts.join('')}`;
     actEl.parentElement?.insertBefore(banner,actEl);
   }
@@ -8096,7 +8120,7 @@ async function runDMBacktest(){
   renderDmRebalanceLog();
   // Store result for DM Deep Analytics tab
   _dmBtResult=result;
-  result.provenance=appProvenance();
+  result.provenance=eod2FinalizeProvenance(result,{engine:'DM',pf:_gate.pf,mode:_gate.mode,params:p,universeMode:'fixed',firstTradableDate:PREFLIGHT_LAST.DM&&PREFLIGHT_LAST.DM.contract.firstTradableDate,exclusions:_gate.exclusions});
   // Capture the exact params object this run used. Reconstructing it field by
   // field would drift from `p` the moment a parameter is added — and seven of
   // those names are not even in this scope.
@@ -8533,7 +8557,7 @@ class EOD2Block extends Error{
   }
 }
 // loader-owned history maps (F11): only maps registered here by buildHistMapFromSnapshot are accepted by the engine wrappers
-const LOADER_MAPS=new WeakSet(), LOADER_META=new WeakMap();
+const LOADER_MAPS=new WeakSet(), LOADER_META=new WeakMap(), RUN_SYMS=new WeakMap();   // A5-2: RUN_SYMS ctx -> symbols the run loaded (for result.provenance.files)
 const EOD2Store=(()=>{
   let cli=null,cliKey='',ui=null,uiAt=0,uiP=null,purgeP=null,runSeq=0;
   const runs=new Set();
@@ -8557,9 +8581,53 @@ const EOD2Store=(()=>{
       throw err;
     });
   }
+  // A5-3: the app-owned byte cache handed to the client (same IndexedDB name/store as before, so existing entries stay valid; memory when IndexedDB is absent)
+  let appCacheObj=null;
+  function appCache(){
+    if(appCacheObj)return appCacheObj;
+    if(typeof indexedDB==='undefined'){
+      const m=new Map();
+      return appCacheObj={kind:'memory',get:async k=>m.has(k)?m.get(k):null,put:async(k,b)=>{m.set(k,b);},keys:async()=>[...m.keys()],del:async pred=>{let n=0;for(const k of [...m.keys()])if(pred(k)){m.delete(k);n++;}return n;}};
+    }
+    let dbp=null;
+    const db=()=>dbp||(dbp=new Promise((res,rej)=>{const rq=indexedDB.open('alphadesk_eod2_v3',1);rq.onupgradeneeded=()=>{if(!rq.result.objectStoreNames.contains('series'))rq.result.createObjectStore('series');};rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);}));
+    const tx=(mode,fn)=>db().then(d=>new Promise((res,rej)=>{const r=fn(d.transaction('series',mode).objectStore('series'));r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);}));
+    return appCacheObj={kind:'indexeddb',
+      get:k=>tx('readonly',st=>st.get(k)).then(v=>v?new Uint8Array(v):null),
+      put:(k,b)=>tx('readwrite',st=>st.put(b.slice().buffer,k)),
+      keys:()=>tx('readonly',st=>st.getAllKeys()),
+      del:async function(pred){const ks=await this.keys();let n=0;for(const k of ks)if(pred(k)){await tx('readwrite',st=>st.delete(k));n++;}return n;}};
+  }
+  const ckeyOf=(id,key,sha)=>'eod2v3:'+id+':'+key+':'+sha;
+  async function sha256Bytes(b){if(!(globalThis.crypto&&crypto.subtle))throw new Error('crypto.subtle unavailable (needs https)');return [...new Uint8Array(await crypto.subtle.digest('SHA-256',b))].map(x=>x.toString(16).padStart(2,'0')).join('');}
+  // per-symbol cache status of the CURRENT dataset (+ how many entries belong to other datasets)
+  async function cacheStatus(){
+    const h=await loadHandle(),m=h.manifest,cache=appCache(),keys=new Set(await cache.keys()),id=m.datasetId||h.id;
+    const rows=Object.entries(m.files||{}).map(([k,e])=>({symbol:k,kind:e.kind||'',sha256:e.sha256||'',cached:h.source==='snapshot'&&keys.has(ckeyOf(id,k,e.sha256))}));
+    const other=[...keys].filter(k=>String(k).startsWith('eod2v3:')&&String(k).split(':')[1]!==id).length;
+    return{datasetId:h.id,source:h.source,offline:!!h.offline,latestSession:h.latestCompleted,rows,otherDatasetEntries:other,cacheKind:cache.kind};
+  }
+  // every cached entry of the current dataset is re-hashed against the manifest; the ones that no longer match are TAMPERED/CORRUPT
+  async function auditCache(h){
+    const cache=appCache(),m=h.manifest,id=m.datasetId||h.id,bad=[];
+    for(const [k,e] of Object.entries(m.files||{})){
+      const b=await cache.get(ckeyOf(id,k,e.sha256));if(!b)continue;
+      if(await sha256Bytes(b)!==String(e.sha256||'').toLowerCase())bad.push(k);
+    }
+    return bad;
+  }
+  // scope: 'all' (every EOD2 v3 entry) | 'dataset' (the current dataset) | 'symbol' (one symbol of the current dataset). Returns the number of entries removed.
+  async function clearCache({scope='all',symbol=null}={}){
+    if(scope==='symbol'&&!symbol)throw new Error('clearCache: symbol required');
+    let n;
+    if(scope==='all')n=await client().clearCache({});
+    else{const h=await loadHandle(),id=h.manifest.datasetId||h.id;n=await client().clearCache(scope==='symbol'?{datasetId:id,symbol}:{datasetId:id});}
+    ui=null;uiAt=0;                               // the next read opens a fresh handle
+    return n;
+  }
   function client(){
     const b=baseUrl(),idb=typeof indexedDB!=='undefined';
-    if(!cli||cliKey!==b){cli=EOD2Client.create({baseUrl:b,cache:idb?'indexeddb':'memory',dbName:'alphadesk_eod2_v3',fetch:metaFetch});cliKey=b;}
+    if(!cli||cliKey!==b){cli=EOD2Client.create({baseUrl:b,cache:appCache(),fetch:metaFetch});cliKey=b;}
     return cli;
   }
   // One-time purge of mixed-provider history (Yahoo/Supabase/bridge/close-only bars, old TENET:* series) and of the v2 EOD2 cache.
@@ -8721,18 +8789,19 @@ const EOD2Store=(()=>{
   }
   // Diagnostic: fetch + SHA-verify every file in a fresh snapshot.
   async function verifyAll(onProgress){
-    const h=await loadHandle(true),res=[];
+    const h=await loadHandle(true),res=[];let tampered=[];
     if(h.raw){
+      tampered=await auditCache(h);                                             // A5-3: what the cache holds now vs the manifest hashes
       const r=await h.raw.verifyAll({force:true,onProgress});
       const bad=new Map((r.failures||[]).map(f=>[f.symbol,f.code]));
-      for(const k of h.keys())res.push(bad.has(k)?{sym:k,ok:false,reason:bad.get(k)}:{sym:k,ok:true});
+      for(const k of h.keys())res.push(bad.has(k)?{sym:k,ok:false,reason:bad.get(k)}:{sym:k,ok:true,...(tampered.includes(k)?{cacheTampered:true}:{})});
     }else{
       const keys=h.keys();
       for(let i=0;i<keys.length;i++){const r=await h.series(keys[i],h.manifest.files[keys[i]].kind);res.push(r.ok?{sym:keys[i],ok:true,bars:r.bars.length,first:r.meta.first,last:r.meta.last}:{sym:keys[i],ok:false,reason:r.code});if(onProgress)onProgress(i+1,keys.length);}
     }
-    return{manifest:stamp(h),results:res,source:h.source};
+    return{manifest:stamp(h),results:res,source:h.source,tampered};
   }
-  return{loadManifest,loadHandle,openFresh,getSeries,getHist,expectedLatest,istNow,startRun,beginRun,endRun,takeBlocks,activeRuns,stamp,verifyAll};
+  return{cacheStatus,clearCache,auditCache,appCache,loadManifest,loadHandle,openFresh,getSeries,getHist,expectedLatest,istNow,startRun,beginRun,endRun,takeBlocks,activeRuns,stamp,verifyAll};
 })();
 
 // Loader-owned history for an engine run: frozen bars, frozen per-symbol maps, frozen map, registered in LOADER_MAPS/LOADER_META.
@@ -8753,9 +8822,11 @@ async function eod2PrepareCoreParams(p,ctx,{syms,from,to,withIndex}){
     const meta=LOADER_META.get(p.histMap);
     if(!(LOADER_MAPS.has(p.histMap)&&meta&&meta.datasetId===ctx.snapshot.id))
       return{error:'SNAPSHOT_PROVENANCE_MISSING: the supplied history map was not built by the EOD2 loader for this dataset. No backtest was run.',blocked:true};
+    RUN_SYMS.set(ctx,Object.keys(p.histMap));
     return withIndex&&!p.histIndex?{...p,histIndex:Object.fromEntries(Object.keys(p.histMap).map(s=>[s,buildHistIndex(p.histMap[s])]))}:p;
   }
   const b=await buildHistMapFromSnapshot(ctx,syms,from,to,{withIndex});
+  RUN_SYMS.set(ctx,Object.keys(b.map));
   if(b.failures.length)return{error:`Historical data failed for ${b.failures.map(x=>x.sym).join(', ')}. No backtest was run.`,blocked:true};
   return{...p,histMap:b.map,...(withIndex?{histIndex:b.index}:{})};
 }
@@ -8771,7 +8842,7 @@ async function eod2Preflight(from,to,handle){
   }else if(to>latest)return new EOD2Block('DATASET',to,`END_BEYOND_LATEST_SESSION (${latest})`).message;
   return null;
 }
-async function eod2GuardRun(label,from,to,fn,{handle=null}={}){
+async function eod2GuardRun(label,from,to,fn,{handle=null,params=null}={}){
   let ctx;
   try{ctx=await EOD2Store.startRun(label,{mode:'research',handle});}
   catch(e){return{error:e.message+' — No backtest was run.',blocked:true};}
@@ -8784,17 +8855,58 @@ async function eod2GuardRun(label,from,to,fn,{handle=null}={}){
     if(r&&!r.error){
       const rows=r.trades||r.tradeLog||[],fb=Array.isArray(rows)&&rows.some(t=>t&&t.executionFallback===true);
       r.dataStamp=EOD2Store.stamp(ctx.snapshot,{fallbackUsed:fb?'YES':'NO'});r.runId=ctx.runId;
+      r.provenance=eod2BuildProvenance(label,ctx,{from,to,params,result:r,fallbackUsed:fb?'YES':'NO'});   // A5-2: the result owns its provenance
       try{window.EOD2_LAST_STAMP={...r.dataStamp,strategy:label,from,to};eod2ShowStamp(label);}catch(e){}
     }
     return r;
   }finally{EOD2Store.endRun(ctx);}
 }
-function eod2StampRow(){const s=(typeof window!=='undefined'&&window.EOD2_LAST_STAMP)||{};return['DataSource',s.dataset||'UNSTAMPED','DatasetHash',s.datasetHash||'','LatestSession',s.latestSession||'','Certification',s.certification||'','FallbackUsed',s.fallbackUsed||'','Source',s.source||''];}
+// ── A5-2 RESULT-OWNED PROVENANCE (F26) ──────────────────────────────────────────────────────────────
+// A result carries its own provenance object; every export reads result.provenance. window.EOD2_LAST_STAMP is display-only (eod2ShowStamp) and no export touches it.
+const _PROV_DROP=new Set(['histMap','histIndex','configSnapshot','universeSnapshot','lifoUniverseSnapshot','terminalState','statusCb','progressCb']);
+function _provClean(o){try{return o==null?null:JSON.parse(JSON.stringify(o,(k,v)=>typeof v==='function'||_PROV_DROP.has(k)?undefined:v));}catch(e){return null;}}
+function _provFreeze(o){if(o&&typeof o==='object'&&!Object.isFrozen(o)){Object.freeze(o);Object.values(o).forEach(_provFreeze);}return o;}
+function eod2BuildProvenance(engine,ctx,{from=null,to=null,params=null,result=null,fallbackUsed='NO'}={}){
+  const h=ctx.snapshot,m=h.manifest||{},fm=m.files||{},files={},r=result||{};
+  for(const sy of (RUN_SYMS.get(ctx)||[])){const e=fm[sy]||fm[String(sy).replace(/ /g,'_')];if(e&&e.sha256)files[sy]=e.sha256;}
+  const cm=eod2CutoffMinutes();
+  return _provFreeze({appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256,engine:String(engine).toUpperCase(),mode:ctx.mode||'research',label:'',
+    dataset:'EOD2',datasetId:h.id||m.datasetId||'',datasetHash:m.datasetHash||'',policyHash:m.policyHash||null,calendarId:NSE_CAL.loaded?NSE_CAL.id:null,
+    cutoffIST:Math.floor(cm/60)+':'+String(cm%60).padStart(2,'0'),source:h.offline?'snapshot-offline':h.source,certification:m.certification||m.publishStatus||'',fallbackUsed,
+    files,warnings:[],exclusions:[],reportStart:from||null,reportEnd:to||null,firstTradableDate:r.firstTradableDate||null,lastSession:h.latestCompleted||m.latestCompletedSession||m.latestSession||null,
+    executionModel:r.executionModel||null,feePolicyVersion:FEE_POLICY_VERSION,universeMode:null,config:_provClean(params),assumptions:_provClean(r.assumptions),
+    executionGaps:_provClean(r.executionGaps)||[],valuationGaps:_provClean(r.valuationGaps)||[]});   // no runId here: provenance is deterministic for identical inputs (result.runId carries the per-run id)
+}
+// completes the provenance with what only the caller knows (preflight verdict, exclusions, mode, universe mode, first tradable date, final label)
+function eod2FinalizeProvenance(result,{engine,pf=null,mode='research',params=null,universeMode=null,firstTradableDate=null,exclusions=null,assumptions=null}={}){
+  const base=(result&&result.provenance)||{},eng=String(engine||base.engine||'').toUpperCase();
+  const rows=(pf&&pf.rows)||[];
+  const warnings=rows.filter(x=>x.code&&x.code!=='OK'&&x.action!=='EXCLUDED').map(x=>({sym:x.symbol,code:x.code}));
+  const ex=(exclusions||(pf&&pf.exclusions)||[]).map(x=>({sym:x.symbol||x.sym,code:x.code||'',detail:x.detail||''}));
+  const eg=(result&&result.executionGaps)||base.executionGaps||[],vg=(result&&result.valuationGaps)||base.valuationGaps||[];
+  return _provFreeze({...base,engine:eng,mode,label:resultLabel(eng,pf,{mode,executionGaps:eg,valuationGaps:vg}),warnings,exclusions:ex,
+    firstTradableDate:firstTradableDate||base.firstTradableDate||null,universeMode:universeMode||base.universeMode||'fixed',
+    config:params?_provClean(params):(base.config||null),assumptions:assumptions?_provClean(assumptions):(base.assumptions||null),
+    executionGaps:_provClean(eg)||[],valuationGaps:_provClean(vg)||[]});
+}
+// first row keeps the legacy shape (DataSource … Source); the rest states the full provenance. A missing provenance is UNSTAMPED, never borrowed from another run.
+function eod2ProvenanceRows(p){
+  if(!p||typeof p!=='object')return[['DataSource','UNSTAMPED','DatasetHash','','LatestSession','','Certification','','FallbackUsed','','Source','']];
+  const fl=Object.keys(p.files||{}).length;
+  return[
+    ['DataSource',p.dataset||'EOD2','DatasetHash',p.datasetHash||'','LatestSession',p.lastSession||'','Certification',p.certification||'','FallbackUsed',p.fallbackUsed||'','Source',p.source||''],
+    ['Provenance','Engine',p.engine||'','Mode',p.mode||'','Label',p.label||'','DatasetId',p.datasetId||'','PolicyHash',p.policyHash||'','CalendarId',p.calendarId||'','CutoffIST',p.cutoffIST||''],
+    ['Provenance','ReportStart',p.reportStart||'','ReportEnd',p.reportEnd||'','FirstTradable',p.firstTradableDate||'','ExecutionModel',p.executionModel||'','FeePolicy',p.feePolicyVersion||'','UniverseMode',p.universeMode||''],
+    ['Provenance','Files',fl,'Warnings',(p.warnings||[]).map(w=>w.sym+':'+w.code).join(' '),'Exclusions',(p.exclusions||[]).map(w=>w.sym+':'+w.code).join(' '),'ExecutionGaps',(p.executionGaps||[]).length,'ValuationGaps',(p.valuationGaps||[]).length],
+    ['# ProvenanceJSON',JSON.stringify(p)]
+  ];
+}
+function eod2StampRow(p){return eod2ProvenanceRows(p)[0];}
 function eod2ShowStamp(label){try{const s=window.EOD2_LAST_STAMP;if(!s)return;const anchor=document.getElementById(label==='DM'?'dm-progress':'bt-progress-wrap');if(!anchor||!anchor.parentNode)return;const id='eod2-stamp-'+label;let el=document.getElementById(id);if(!el){el=document.createElement('div');el.id=id;el.style.cssText='font-size:10px;color:var(--fog);margin-top:6px;font-family:monospace';anchor.parentNode.insertBefore(el,anchor.nextSibling);}el.textContent=`Data: EOD2 ${s.source||''} · dataset ${s.datasetId||''} · hash ${String(s.datasetHash).slice(0,12)} · latest ${s.latestSession} · cert ${s.certification} · Fallback used: ${s.fallbackUsed}`;}catch(e){}}
 async function eod2VerifyAllUI(){
   toast('EOD2: verifying all files…','ok');
   try{const r=await EOD2Store.verifyAll();const bad=r.results.filter(x=>!x.ok);
-    const msg=`EOD2 ${r.manifest.certification} · ${r.manifest.latestSession} · ${r.results.length-bad.length}/${r.results.length} verified (${r.source})`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'');
+    const msg=`EOD2 ${r.manifest.certification} · ${r.manifest.latestSession} · ${r.results.length-bad.length}/${r.results.length} verified (${r.source})`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'')+((r.tampered||[]).length?' · CACHE TAMPERED (repaired from network): '+r.tampered.join(', '):'');
     console.log('[EOD2 verifyAll]',r);toast(msg,bad.length?'err':'ok');alert(msg);return r;}
   catch(e){toast(e.message,'err');alert(e.message);}
 }
@@ -8820,6 +8932,7 @@ async function fetchHistDaily(sym,yfSym,startTs,endTs,ctx){
 const ENGINE_CERTIFIABLE=Object.freeze({LIFO:true,DM:true,TENET:true});
 const RUN_ROLES=Object.freeze(['CORE_REFERENCE','EXECUTION_REQUIRED','HELD_POSITION','LIQUID_SLEEVE','RANKING_CANDIDATE','BENCHMARK','OPTIONAL_DISPLAY']);
 const RUN_MODE={LIFO:'research',DM:'research',TENET:'research'};             // what the existing "Run" buttons do (certified is disabled until an engine is certifiable)
+let TENET_LAST_RESULT=null;                                                    // A5-2: the last Tenet run's result (provenance + trades + metrics); exports read it, nothing else
 const RUN_PREVIEW={active:false,until:0};                                    // set while a preview is shown (10 min): money-write handlers refuse
 function setPreviewMode(on){try{document.body.classList.toggle('preview-mode',!!on);}catch(e){}}
 function previewRecordBlocked(){if(RUN_PREVIEW.active&&Date.now()<RUN_PREVIEW.until){try{toast('Preview only — not actionable. Run the preflight and a real signal first.','warn');}catch(e){}return true;}RUN_PREVIEW.active=false;setPreviewMode(false);return false;}
@@ -8981,8 +9094,151 @@ function renderPreflightPanel(containerId,pf,{refusal=null}={}){
       ${btn('research',`Run Research ${c.candidatesRetained||0}/${c.candidates||0}`,!!pf.canResearch,'research')}
       ${btn('preview','Show Preview',!!pf.canPreview,'preview')}
     </div>
-    <div style="font-size:10px;color:var(--fog);margin-top:6px">${certifiable?'':'Certified runs are disabled: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending).':'the data does not meet the certified requirements.')}</div></div>`;
+    <div style="font-size:10px;color:var(--fog);margin-top:6px">${certifiable?'':'Certified runs are disabled: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending).':'the data does not meet the certified requirements.')}</div>${bad.length||c.blocking?mdRepairHtml(pf):''}</div>`;
+  if(bad.length||c.blocking){mdRenderStatus();if(mdToken())mdPollStart();}
 }
+
+// ══ MARKET-DATA REQUESTS (A5-1) ═════════════════════════════════════════════════════════════════
+// Repair / Rebuild missing / Diagnose = request files written to Amit-Alphasetup/market-data through the GitHub contents API (same API and
+// request format as the market-data panel, D3). The PC picks them up (poll task) and answers in data/control/history/. The token lives in the vault slot 'marketdata'.
+const MD_OWNER='Amit-Alphasetup',MD_REPO='market-data',MD_BRANCH='main',MD_API='https://api.github.com',MD_POLL_MS=60000,MD_SENT_LS='ad_md_sent';
+const MD_SPEC={diagnose:{symbol:[true,'symbol'],from:[false,'date'],to:[false,'date']},repair:{symbol:[true,'symbol'],from:[false,'date'],to:[false,'date']},rebuild_missing:{}};   // mirror of market-data src/dataops/requests_spec.py (the types AlphaDesk may send)
+const MD_STATE={sent:[],history:[],status:null,statusErr:'',historyErr:'',lastPoll:0,timer:null,ms:MD_POLL_MS};
+const mdSymOk=v=>typeof v==='string'&&/^[A-Z0-9&-]{2,20}$/.test(v);
+const mdDateOk=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+function mdUuid4(){
+  if(globalThis.crypto&&crypto.randomUUID)return crypto.randomUUID();
+  const b=crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;
+  const h=[...b].map(x=>('0'+x.toString(16)).slice(-2)).join('');return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+}
+// createdBy must stay 'panel': the server-side validator accepts nothing else (recorded deviation, HANDOFF_A5)
+function mdNewRequest(type,args,now,id){return{id:id||mdUuid4(),type,createdAt:(now||new Date()).toISOString().replace(/\.\d{3}Z$/,'Z'),createdBy:'panel',args:args||{}};}
+function mdValidateRequest(req){
+  const errs=[];
+  if(!req||typeof req!=='object'||Array.isArray(req))return['request must be a JSON object'];
+  const allowed=['id','type','createdAt','createdBy','args'];
+  Object.keys(req).forEach(k=>{if(!allowed.includes(k))errs.push("unexpected key '"+k+"'");});
+  allowed.forEach(k=>{if(!(k in req))errs.push("missing key '"+k+"'");});
+  if(errs.length)return errs;
+  if(typeof req.id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(req.id))errs.push('id must be a lowercase uuid4');
+  if(!Object.prototype.hasOwnProperty.call(MD_SPEC,req.type))errs.push('type '+JSON.stringify(req.type)+' is not sendable from AlphaDesk');
+  if(req.createdBy!=='panel')errs.push("createdBy must be 'panel'");
+  if(typeof req.createdAt!=='string'||isNaN(Date.parse(req.createdAt)))errs.push('createdAt must be an ISO datetime');
+  const a=req.args;if(!a||typeof a!=='object'||Array.isArray(a)){errs.push('args must be an object');return errs;}
+  const spec=MD_SPEC[req.type];
+  if(spec){
+    Object.keys(a).forEach(k=>{if(!(k in spec))errs.push("unknown arg '"+k+"' for type "+req.type);});
+    Object.keys(spec).forEach(k=>{
+      if(!(k in a)){if(spec[k][0])errs.push("missing arg '"+k+"'");return;}
+      if(spec[k][1]==='symbol'&&!mdSymOk(a[k]))errs.push('symbol must match ^[A-Z0-9&-]{2,20}$');
+      if(spec[k][1]==='date'&&!mdDateOk(a[k]))errs.push(k+': date must be a real YYYY-MM-DD date');
+    });
+    if(a.from&&a.to&&mdDateOk(a.from)&&mdDateOk(a.to)&&a.from>a.to)errs.push('from must not be after to');
+  }
+  return errs;
+}
+function mdRequestFileName(req){return new Date(req.createdAt).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z')+'-'+req.type+'-'+req.id.slice(0,8)+'.json';}
+const mdToken=()=>_tokCache.marketdata||'';
+const mdB64=str=>{const b=new TextEncoder().encode(str);let t='';for(let i=0;i<b.length;i++)t+=String.fromCharCode(b[i]);return btoa(t);};
+const mdUnB64=b64=>{const t=atob(String(b64).replace(/\s/g,'')),a=new Uint8Array(t.length);for(let i=0;i<t.length;i++)a[i]=t.charCodeAt(i);return new TextDecoder().decode(a);};
+const mdHeaders=tok=>{const h={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};if(tok)h['Authorization']='Bearer '+tok;return h;};
+const mdContentsUrl=p=>MD_API+'/repos/'+MD_OWNER+'/'+MD_REPO+'/contents/'+p;
+async function mdPutRequest(req){
+  const errs=mdValidateRequest(req);if(errs.length)throw new Error('invalid request: '+errs.join('; '));
+  const tok=mdToken();if(!tok)throw new Error('no market-data token: save one in Data Center → EOD2 v3 first');
+  const name=mdRequestFileName(req),headers={...mdHeaders(tok),'Content-Type':'application/json'};
+  const r=await fetch(mdContentsUrl('data/control/requests/'+name),{method:'PUT',headers,body:JSON.stringify({message:'panel: '+req.type+(req.args&&req.args.symbol?' '+req.args.symbol:''),content:mdB64(JSON.stringify(req,null,2)+'\n'),branch:MD_BRANCH})});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===200||r.status===201)return{name,sha:j.content&&j.content.sha};
+  const why=r.status===401?'token rejected (expired or wrong)':r.status===403?'forbidden (token lacks Contents write, or rate limited)':r.status===404?'repository or path not found (token cannot see it)':r.status===422?'GitHub refused the file (already exists?)':'HTTP '+r.status;
+  throw new Error(why+(j.message?' — '+j.message:''));
+}
+function mdSentLoad(){try{const a=JSON.parse(localStorage.getItem(MD_SENT_LS)||'[]');return Array.isArray(a)?a.slice(-20):[];}catch(e){return[];}}
+function mdSentSave(){try{localStorage.setItem(MD_SENT_LS,JSON.stringify(MD_STATE.sent.slice(-20)));}catch(e){}}
+async function mdSend(type,args){
+  const req=mdNewRequest(type,args||{});
+  const put=await mdPutRequest(req);
+  MD_STATE.sent.push({id:req.id,type,symbol:(args&&args.symbol)||'',name:put.name,sentAt:req.createdAt});mdSentSave();
+  mdRenderStatus();mdPollStart();
+  return{req,name:put.name};
+}
+async function mdListHistory(){
+  const tok=mdToken();
+  const r=await fetch(mdContentsUrl('data/control/history?ref='+MD_BRANCH),{headers:mdHeaders(tok),cache:'no-store'});
+  if(r.status===404)return[];
+  if(!r.ok)throw new Error('history: HTTP '+r.status);
+  const list=await r.json();
+  const names=(Array.isArray(list)?list:[]).filter(e=>e.type==='file'&&/\.json$/.test(e.name)&&e.name!=='processed_ids.json').map(e=>e.name).sort().slice(-15).reverse();
+  const items=[];
+  for(const n of names){
+    try{const rr=await fetch(mdContentsUrl('data/control/history/'+encodeURIComponent(n)+'?ref='+MD_BRANCH),{headers:mdHeaders(tok),cache:'no-store'});
+      if(!rr.ok)throw new Error('HTTP '+rr.status);const jj=await rr.json();items.push({name:n,data:JSON.parse(mdUnB64(jj.content))});}
+    catch(e){items.push({name:n,data:null,error:String(e&&e.message||e)});}
+  }
+  return items;
+}
+async function mdFetchStatus(){
+  const b=(typeof EOD2Store!=='undefined'&&S.config&&S.config.eod2BaseUrl)||EOD2_DEFAULT_BASE,base=String(b).endsWith('/')?b:b+'/';
+  const r=await fetch(base+'data/control/status.json?t='+Date.now(),{cache:'no-store'});
+  if(!r.ok)throw new Error('status.json HTTP '+r.status);
+  return r.json();
+}
+// one poll: status.json (public) + history (token). Errors are shown, never thrown into the UI.
+async function mdPollTick(){
+  MD_STATE.lastPoll=Date.now();
+  try{MD_STATE.status=await mdFetchStatus();MD_STATE.statusErr='';}catch(e){MD_STATE.statusErr=String(e&&e.message||e);}
+  if(mdToken()){try{MD_STATE.history=await mdListHistory();MD_STATE.historyErr='';}catch(e){MD_STATE.historyErr=String(e&&e.message||e);}}
+  mdRenderStatus();
+  return{status:MD_STATE.status,history:MD_STATE.history};
+}
+// the timer only lives while the repair panel is open in the page
+const mdPanelOpen=()=>{try{const el=document.getElementById('md-repair-status');return !!(el&&el.isConnected!==false&&!document.hidden);}catch(e){return false;}};
+function mdPollStart(){
+  if(MD_STATE.timer)return;
+  MD_STATE.timer=setInterval(()=>{if(!mdPanelOpen()){mdPollStop();return;}mdPollTick();},MD_POLL_MS);
+  mdPollTick();
+}
+function mdPollStop(){if(MD_STATE.timer){clearInterval(MD_STATE.timer);MD_STATE.timer=null;}}
+function mdRenderStatus(){
+  const el=document.getElementById('md-repair-status');if(!el)return;
+  const st=MD_STATE.status,hist=MD_STATE.history||[];
+  if(!MD_STATE.sent.length)MD_STATE.sent=mdSentLoad();
+  const lines=[];
+  lines.push(`<div style="font-size:10.5px;color:var(--fog)">market-data status: ${st?_pfEsc((st.result||'?')+' · last run '+(st.lastRun||'—')+(st.message?' · '+st.message:'')):_pfEsc(MD_STATE.statusErr||'not fetched yet')}</div>`);
+  for(const q of MD_STATE.sent.slice(-6).reverse()){
+    const h=hist.find(x=>x.name===q.name||(x.data&&x.data.id===q.id)),res=h&&h.data&&typeof h.data.result==='string'?h.data.result:null;
+    const cls=res==='OK'?'var(--gain)':res==='ERROR'?'var(--loss)':'var(--fog)';
+    lines.push(`<div class="md-req" data-name="${_pfEsc(q.name)}" style="font-size:10.5px;margin:2px 0"><b>${_pfEsc(q.type)}${q.symbol?' '+_pfEsc(q.symbol):''}</b> · <span style="color:${cls}">${_pfEsc(res||'sent — waiting for the PC')}</span>${h&&h.data&&h.data.message?' — '+_pfEsc(h.data.message):''}</div>`);
+  }
+  if(MD_STATE.historyErr)lines.push(`<div style="font-size:10.5px;color:var(--loss)">history: ${_pfEsc(MD_STATE.historyErr)}</div>`);
+  el.innerHTML=lines.join('');
+}
+// HTML block appended to the preflight panel: repair / diagnose buttons per problem symbol + one Rebuild-missing.
+function mdRepairHtml(pf){
+  const bad=[...new Set((pf&&pf.rows||[]).filter(r=>r.action==='EXCLUDED'||r.action==='BLOCKS_RESEARCH'||r.action==='BENCHMARK_UNAVAILABLE').map(r=>r.symbol))].filter(x=>x!=='DATASET'&&x!=='CANDIDATES');
+  const tok=!!mdToken(),dis=tok?'':' disabled style="opacity:.45;cursor:not-allowed"';
+  const btns=bad.slice(0,8).map(sy=>mdSymOk(sy)
+    ?`<button class="icon-btn md-repair" data-sym="${_pfEsc(sy)}"${dis} onclick="mdRepairClick('repair',this.dataset.sym)">Repair ${_pfEsc(sy)}</button><button class="icon-btn md-diagnose" data-sym="${_pfEsc(sy)}"${dis} onclick="mdRepairClick('diagnose',this.dataset.sym)">Diagnose ${_pfEsc(sy)}</button>`
+    :`<span style="font-size:10px;color:var(--fog)">${_pfEsc(sy)}: not a repairable ETF symbol</span>`).join(' ');
+  return `<div id="md-repair-box" style="margin-top:8px;padding-top:6px;border-top:1px solid var(--wire)">
+    <div style="font-size:10.5px;font-weight:700;margin-bottom:4px">Data repair (market-data requests)</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${btns}<button class="icon-btn md-rebuild" id="md-rebuild"${dis} onclick="mdRepairClick('rebuild_missing')">Rebuild missing</button></div>
+    ${tok?'':'<div style="font-size:10px;color:var(--gold);margin-top:4px">No market-data token: save a GitHub token (Contents: write on Amit-Alphasetup/market-data) in Data Center → EOD2 v3 to enable these buttons.</div>'}
+    <div id="md-repair-status" style="margin-top:6px"></div></div>`;
+}
+async function mdRepairClick(type,symbol){
+  const st=document.getElementById('md-repair-status');
+  try{await mdSend(type,type==='rebuild_missing'?{}:{symbol});toast('Request sent to market-data: '+type+(symbol?' '+symbol:''),'ok');}
+  catch(e){toast('Request not sent: '+(e&&e.message||e),'err');if(st)st.innerHTML='<div style="font-size:10.5px;color:var(--loss)">'+_pfEsc(e&&e.message||e)+'</div>';}
+}
+async function mdSaveTokenUI(){
+  const inp=document.getElementById('md-token-input'),v=(inp&&inp.value||'').trim();
+  if(!v){toast('Paste the GitHub token first','warn');return;}
+  try{await vaultSetToken('marketdata',v);if(inp)inp.value='';toast('market-data token saved (encrypted, no expiry)','ok');mdTokenStateUI();}
+  catch(e){toast('Token not saved: '+(e&&e.message||e),'err');}
+}
+async function mdForgetTokenUI(){try{await vaultSetToken('marketdata','');mdPollStop();toast('market-data token removed','warn');mdTokenStateUI();}catch(e){toast(String(e&&e.message||e),'err');}}
+function mdTokenStateUI(){const el=document.getElementById('md-token-state');if(el){el.textContent=mdToken()?'token stored (encrypted, no expiry)':'no token';el.style.color=mdToken()?'var(--gain)':'var(--fog)';}}
 const PREFLIGHT_LAST={};   // engine -> {contract, pf}
 function preflightAction(engine,mode){
   const eng=String(engine).toUpperCase();
@@ -9075,6 +9331,8 @@ let _live52WLCacheTs=0;
 // symbol with no upstream data from re-fetching on every render.
 const _live52WLFetchTried=new Set();
 
+// A5-3: the 52-week low comes from the pinned EOD2 v3 handle (hash-checked series). The live quote's low52 (Yahoo/sheet) is only a LABELLED fallback:
+// verified:false, and LIFO ranking ignores it while config.requireVerified is on (default true).
 async function getLive52WL(sym){
   // Invalidate in-memory cache on price refresh (tied to lastPriceTs)
   if(_live52WLCacheTs!==lastPriceTs){
@@ -9086,62 +9344,38 @@ async function getLive52WL(sym){
   const now=Date.now();
   const oneYearAgo=new Date(now-366*86400000).toISOString().slice(0,10);
   const today=new Date(now).toISOString().slice(0,10);
+  _live52WLFetchTried.add(sym);                     // once per session: a symbol without data must not loop the renderer
 
-  // Helper: compute a spike-filtered 52WL from a bar map, or 0 if not enough data
-  const computeFrom=hist=>{
-    const keys=Object.keys(hist||{});
-    if(keys.length<50) return 0;             // too few bars to be meaningful
-    try{ return compute52WL(buildHistIndex(hist),now)||0; }catch(e){ return 0; }   // D4
-  };
-
-  // 1) Try cached daily bars in IndexedDB
+  // 1) verified: the v3 snapshot series (no run context needed for a read-only live view)
   try{
-    const low52=computeFrom(await idbHistGetRange(sym,oneYearAgo,today));
-    if(low52>0){
-      const result={low52,src:'idb'};
-      _live52WLCache[sym]=result;
-      return result;
+    const r=await EOD2Store.getSeries(sym,'ETF');
+    const hist={};let prev=null;
+    for(const b of r.bars){
+      if(b[0]>=oneYearAgo&&b[0]<=today)hist[b[0]]={open:b[1],high:b[2],low:b[3],close:b[4],adjClose:b[4],prev,vol:b[5]||0};
+      prev=b[4];
     }
-  }catch(e){/* fall through */}
-
-  // 2) FIX: fetch the missing history once, then recompute.
-  //    Previously this step didn't exist — getLive52WL only ever READ IndexedDB.
-  //    A symbol whose price source supplies cmp but not low52 (Google Sheet does
-  //    exactly this) and which had no cached bars could therefore NEVER obtain a
-  //    52-week low: it was excluded from ranking on every render, permanently,
-  //    and prefetch52WL "repair" just re-read the same empty cache.
-  //    Guarded so a symbol that genuinely has no upstream data is attempted once
-  //    per session rather than on every re-render.
-  if(!_live52WLFetchTried.has(sym)){
-    _live52WLFetchTried.add(sym);
-    try{
-      const entry=(S.universe||[]).find(e=>e.sym===sym);
-      const yf=entry?.yf||sym+'.NS';
-      const startTs=Math.floor((now-370*86400000)/1000);
-      const endTs=Math.floor(now/1000);
-      await fetchHistDaily(sym,yf,startTs,endTs);          // writes bars into IDB
-      const low52=computeFrom(await idbHistGetRange(sym,oneYearAgo,today));
+    if(Object.keys(hist).length>=50){
+      const low52=compute52WL(buildHistIndex(hist),now)||0;      // D4: same spike-filtered definition as the backtest
       if(low52>0){
-        const result={low52,src:'fetched'};
+        const result={low52,src:'eod2v3',verified:true,sha256:r.meta.sha256,lastBar:r.meta.last};
         _live52WLCache[sym]=result;
         return result;
       }
-      console.warn(`getLive52WL: fetched history for ${sym} but still cannot derive a 52-week low`);
-    }catch(e){
-      console.warn(`getLive52WL: history fetch failed for ${sym}:`,e?.message||e);
     }
-  }
+  }catch(e){/* fall through to the labelled fallback */}
 
-  // 3) Last resort: whatever the live quote gave us (spike-inclusive), labelled.
+  // 2) fallback: whatever the live quote gave us (spike-inclusive) — labelled, NOT verified
   const yahooLow=PRICES[sym]?.low52||0;
-  const result={low52:yahooLow,src:yahooLow>0?'yahoo':'none'};
+  const result={low52:yahooLow,src:yahooLow>0?'yahoo':'none',verified:false};
   _live52WLCache[sym]=result;
   return result;
 }
+// may this 52WL take part in LIFO ranking? A fallback low is used only when the user turned requireVerified off.
+function live52Usable(l){return !!(l&&l.low52>0&&(l.verified===true||S.config.requireVerified===false));}
 
 // Synchronous version for rendering (uses cache only — call after async prefetch)
 function getLive52WLSync(sym){
-  return _live52WLCache[sym]||{low52:PRICES[sym]?.low52||0,src:'yahoo'};
+  return _live52WLCache[sym]||{low52:PRICES[sym]?.low52||0,src:'yahoo',verified:false};
 }
 
 // Prefetch 52WL for all LIFO universe symbols from IDB before rendering signals
@@ -10005,7 +10239,8 @@ async function runLifoBacktest(){
   const rm=result.metrics||{};
   const rbox=document.getElementById('lifo-bt-research-metrics');
   if(rbox)rbox.innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap"><span class="metric-chip">CAGR <b>${rm.cagr!=null?rm.cagr.toFixed(2)+'%':'—'}</b></span><span class="metric-chip">XIRR <b>${rm.xirr!=null?rm.xirr.toFixed(2)+'%':'—'}</b></span><span class="metric-chip">Avg Deployed <b>₹${Math.round(rm.avgDeployed||0).toLocaleString('en-IN')}</b></span><span class="metric-chip">Peak Deployed <b>₹${Math.round(rm.peakDeployed||0).toLocaleString('en-IN')}</b></span><span class="metric-chip">Avg Util. <b>${rm.avgUtilization!=null?rm.avgUtilization.toFixed(1)+'%':'—'}</b></span></div>`;
-  BT.metrics=result.metrics;BT.tax=result.tax;BT.bench=result.bench;BT.provenance=appProvenance();
+  BT.metrics=result.metrics;BT.tax=result.tax;BT.bench=result.bench;
+  BT.provenance=result.provenance=eod2FinalizeProvenance(result,{engine:'LIFO',pf:_gate.pf,mode:_gate.mode,params:_lp,universeMode:'fixed',firstTradableDate:PREFLIGHT_LAST.LIFO&&PREFLIGHT_LAST.LIFO.contract.firstTradableDate,exclusions:_gate.exclusions});
   BT.capitalSkipLog=result.capitalSkipLog||[];
   BT.trailingLog=result.trailingLog||[];
   BT.inventoryLog=result.inventoryLog||[];
@@ -10211,7 +10446,7 @@ function exportBtCSV(){
     ['Buy Date','ETF','Buy Price','Qty','Invested','Sell Date','Sell Price','Hold Days','Avg Count','Net P&L','P&L%','Exit'],
   ];
   BT.trades.forEach(t=>rows.push([t.buyDate,t.sym,t.buyPrice.toFixed(2),t.qty,t.invested.toFixed(0),t.sellDate,t.sellPrice.toFixed(2),t.holdDays,t.avgCount,t.netPnl.toFixed(0),t.pnlPct.toFixed(2),t.exitReason]));
-  rows.splice(2,0,eod2StampRow());
+  rows.splice(2,0,...eod2ProvenanceRows(BT.provenance));
   dlCSV(rows,'lifo_backtest');
 }
 function renderBtInventoryCard(){
@@ -10268,6 +10503,7 @@ function exportBtInventoryCSV(){
     r.dailyChg!=null?r.dailyChg.toFixed(2):'',
     r.status,r.avgEligible?'YES':'NO'
   ]));
+  rows.push([],...eod2ProvenanceRows(BT.provenance));
   dlCSV(rows,'lifo_bt_inventory_log');
 }
 
@@ -11627,24 +11863,34 @@ function tenetFillConfigUI(){const t=tenetState(),set=(id,v)=>{const e=document.
 const TENET_PROBE_FROM='2010-01-01';
 const TENET_TRI_CANDIDATES=['NIFTY 50 TRI','NIFTY 50 TOTAL RETURN','NIFTY TOTAL RETURN INDEX','NIFTY 50'];
 
+// A5-4 (F27): coverage comes from the EOD2 dataset manifest (firstObservedDate / listingDate / last / bars). No Bridge, no other source.
 async function tenetProbeInstrument(label,kind,providerSymbol){
-  const to=tenetISTNow().date;
-  const rec={label,kind,symbol:providerSymbol||'',firstBar:null,lastBar:null,bars:0,error:''};
+  const rec={label,kind,symbol:providerSymbol||'',firstBar:null,lastBar:null,bars:0,listingDate:null,status:'',error:''};
   if(!providerSymbol){rec.error='no symbol configured';return rec;}
   try{
-    const map=await marketBridgeHistory(providerSymbol,TENET_PROBE_FROM,to);
-    const dates=Object.keys(map||{}).filter(d=>+map[d]?.close>0).sort();
-    if(!dates.length){rec.error='bridge returned no usable bars';return rec;}
-    rec.firstBar=dates[0]; rec.lastBar=dates[dates.length-1]; rec.bars=dates.length;
-  }catch(e){rec.error=String(e?.message||e);}
+    const m=(await EOD2Store.loadHandle()).manifest,files=m.files||{};
+    const e=files[providerSymbol]||files[String(providerSymbol).replace(/ /g,'_')];
+    if(!e){const q=(m.quarantined||{})[providerSymbol]||(m.excluded||{})[providerSymbol];rec.error=q?('not exported: '+(q.code||'QUARANTINED')):'NOT_IN_DATASET';return rec;}
+    rec.firstBar=e.firstObservedDate||e.first||null;rec.lastBar=e.last||null;rec.bars=+e.bars||0;rec.listingDate=e.listingDate||null;rec.status=e.status||'';
+    if(!(rec.bars>0))rec.error='dataset lists no bars';
+  }catch(err){rec.error=String(err?.message||err);}
   return rec;
+}
+// TRI = an index in the dataset whose name contains "TOTAL RETURN" or "TRI" (word). Absent -> a plain message, never a Bridge fallback.
+async function tenetFindTriInDataset(){
+  try{
+    const m=(await EOD2Store.loadHandle()).manifest;
+    for(const [k,e] of Object.entries(m.files||{})){
+      if(e&&e.kind==='INDEX'&&/(\bTRI\b|TOTAL[ _]RETURN)/i.test(k.replace(/_/g,' ')))return{found:true,symbol:k.replace(/_/g,' '),firstBar:e.firstObservedDate||e.first||null,error:''};
+    }
+  }catch(err){return{found:false,symbol:'',firstBar:null,error:String(err?.message||err)};}
+  return{found:false,symbol:'',firstBar:null,error:'TRI not in dataset — add in market-data'};
 }
 
 async function tenetRunCoverageProbe(){
   const btn=document.getElementById('tenet-probe-btn');
   const out=document.getElementById('tenet-probe-out');
   const write=h=>{if(out){out.style.display='block';out.innerHTML=h;}};
-  if(!S.config.marketBridgeUrl){write('<div style="font-size:11px;color:var(--loss)">Market Bridge is not configured. The probe needs it to read history.</div>');return;}
   const t=tenetState();
   if(!t.pairs.length){write('<div style="font-size:11px;color:var(--loss)">Configure the Tenet pair universe first — there is nothing to probe.</div>');return;}
   if(btn){btn.disabled=true;btn.textContent='⏳ Probing coverage…';}
@@ -11655,7 +11901,7 @@ async function tenetRunCoverageProbe(){
   t.pairs.forEach(p=>{
     if(p.green)jobs.push({label:p.green,kind:'GREEN ETF',sym:p.green,pair:p.underlying});
     if(p.red)  jobs.push({label:p.red,  kind:'RED ETF',  sym:p.red,  pair:p.underlying});
-    jobs.push({label:p.underlying,kind:'underlying',sym:tenetIndexYf(p.underlying)||p.underlying,pair:p.underlying});
+    jobs.push({label:p.underlying,kind:'underlying',sym:p.underlying,pair:p.underlying});
   });
 
   let recs=[];
@@ -11671,13 +11917,8 @@ async function tenetRunCoverageProbe(){
     return;
   }
 
-  // Benchmark probe — try each TRI candidate until one resolves.
-  let tri={found:false,symbol:'',firstBar:null,error:''};
-  for(const c of TENET_TRI_CANDIDATES){
-    const r=await tenetProbeInstrument(c,'benchmark',c);
-    if(r.bars>0){tri={found:true,symbol:c,firstBar:r.firstBar,error:''};break;}
-    tri.error=r.error;
-  }
+  // Benchmark: a total-return index that is IN the dataset (no Bridge lookup)
+  const tri=await tenetFindTriInDataset();
 
   const ok=recs.filter(r=>r.bars>0), bad=recs.filter(r=>!r.bars);
   const today=tenetISTNow().date;
@@ -11715,6 +11956,8 @@ async function tenetRunCoverageProbe(){
       <td style="text-align:left;padding:4px">${escapeHtml(r.label)}</td>
       <td style="text-align:left;padding:4px;color:var(--fog)">${escapeHtml(r.kind)}</td>
       <td class="mono" style="padding:4px;color:${r.bars?'var(--fg)':'var(--loss)'}">${r.firstBar||'—'}</td>
+      <td class="mono" style="padding:4px">${r.listingDate||'—'}</td>
+      <td class="mono" style="padding:4px">${r.lastBar||'—'}</td>
       <td class="mono" style="padding:4px">${r.bars?yrs(r.firstBar,today).toFixed(1)+'y':'—'}</td>
       <td class="mono" style="padding:4px">${r.bars||0}</td>
       <td style="text-align:left;padding:4px;color:var(--loss);font-size:9px">${escapeHtml(r.error||'')}</td></tr>`).join('');
@@ -11723,7 +11966,7 @@ async function tenetRunCoverageProbe(){
   <div style="font-size:11px">
     <div style="font-weight:600;margin-bottom:3px">🔍 Tenet Data Coverage Probe</div>
     <div style="color:var(--fog);font-size:10px;margin-bottom:8px">
-      Probed ${recs.length} instruments as of ${today}. The S3/S4 edge gate needs ≥5 years certified
+      Probed ${recs.length} instruments as of ${today}, from the EOD2 dataset manifest (no other source). The S3/S4 edge gate needs ≥5 years certified
       coverage with a ≥2-year holdout. This checks whether that gate is reachable before any engine work.
     </div>
     <div style="padding:7px 9px;border-radius:5px;margin-bottom:6px;background:${bg(vStrict.cls)};color:${col(vStrict.cls)};font-weight:600">
@@ -11734,8 +11977,8 @@ async function tenetRunCoverageProbe(){
     </div>
     <div style="padding:7px 9px;border-radius:5px;margin-bottom:9px;background:${tri.found?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)'};color:${tri.found?'var(--gain)':'var(--loss)'}">
       Primary benchmark (NIFTY 50 Total Return): ${tri.found
-        ? `resolved as “${escapeHtml(tri.symbol)}” from ${tri.firstBar}`
-        : `NOT REACHABLE through the bridge. ${escapeHtml(tri.error||'')} — the plan rules unadjusted NIFTYBEES close insufficient for the primary verdict, so this must be sourced before S3.`}
+        ? `found in the dataset as “${escapeHtml(tri.symbol)}” from ${tri.firstBar}`
+        : `${escapeHtml(tri.error||'TRI not in dataset — add in market-data')} — unadjusted NIFTYBEES close is insufficient for the primary verdict, so the TRI must be added to the dataset before S3.`}
     </div>
     <div style="color:var(--fog);font-size:10px;margin-bottom:4px">Per-pair earliest usable start:</div>
     <div style="margin-bottom:9px;font-size:10px">${Object.entries(pairStarts).sort((a,b)=>String(b[1]).localeCompare(String(a[1])))
@@ -11743,7 +11986,7 @@ async function tenetRunCoverageProbe(){
     <table style="width:100%;border-collapse:collapse;font-size:10px">
       <tr style="color:var(--fog);text-align:right">
         <th style="text-align:left;padding:4px">Instrument</th><th style="text-align:left;padding:4px">Role</th>
-        <th style="padding:4px">First bar</th><th style="padding:4px">Span</th><th style="padding:4px">Bars</th>
+        <th style="padding:4px">First bar</th><th style="padding:4px">Listed</th><th style="padding:4px">Last bar</th><th style="padding:4px">Span</th><th style="padding:4px">Bars</th>
         <th style="text-align:left;padding:4px">Error</th></tr>
       ${rows}
     </table>
@@ -12225,6 +12468,14 @@ async function runTenetBacktestV3(inputsArg){
     const negCash=cash<-1e-6;
     const certified=identityOk&&equityIdentityOk&&!negCash&&staleValuationDays===0&&!t._universeHistoryStale;
 
+    {const _pfT=PREFLIGHT_LAST.TENET&&PREFLIGHT_LAST.TENET.pf,_tmode=RUN_MODE.TENET||'research';
+     RUN_SYMS.set(tctx,[...indexNames,...etfSymbols.filter(x=>!_tenetEx.has(x))]);
+     const _tprov=eod2FinalizeProvenance({provenance:eod2BuildProvenance('TENET',tctx,{from,to,result:{executionGaps:[],valuationGaps}}),executionGaps:[],valuationGaps},
+       {engine:'TENET',pf:_pfT,mode:_tmode,params:{from,to,initial,conservative:conservativeExits,pairs:(TENET_RUN_PAIRS||_in.pairs)},universeMode:t.config.universeMode==='historical'?'historical':'fixed',
+        firstTradableDate,exclusions:[..._tenetEx].map(x=>({symbol:x,code:'EXCLUDED_BY_PREFLIGHT'})),
+        assumptions:{entry:'weekly final-session close',exit:'daily HIGH ('+(conservativeExits?'conservative':'canonical')+')',slippage:'none',feePolicyVersion:FEE_POLICY_VERSION}});
+     TENET_LAST_RESULT={provenance:_tprov,trades:trades.map(x=>({...x})),equity:eq.map(x=>({...x})),skips:skips.map(x=>({...x})),
+       metrics:{initial,finalValue,cagr,xirr:xi,maxDD:dd,realized,maxInvested,avgHoldDays:avgDays,cash,openMV:hold.reduce((a,h)=>a+(lastMark[h.etf]?lastMark[h.etf].px:h.buyPrice)*h.qty,0)}};}
     const _pfE=PREFLIGHT_LAST.TENET&&PREFLIGHT_LAST.TENET.pf,_cE=_pfE&&_pfE.counts;
     const _dataLine=_pfE?('dataset '+(_pfE.datasetId||'—')+' ('+(_pfE.source||'')+') · candidates '+_cE.candidatesRetained+'/'+_cE.candidates+' · excluded '+_cE.excluded+' · '+resultLabel('TENET',_pfE,{mode:RUN_MODE.TENET||'research',executionGaps:[],valuationGaps})):'preflight not run';
     const evBox=document.getElementById('tenet-bt-evidence');
@@ -12470,7 +12721,7 @@ function switchTab(strategy,tabId,btn,silent=false){
     if(tabId==='mom-deepanalytics')renderDmDeepAnalytics();
     if(tabId==='mom-universe')renderUniverse();
     if(tabId==='mom-rebalance')renderRebalanceTab();
-    if(tabId==='mom-datacenter')dcUpdateCacheSummary();
+    if(tabId==='mom-datacenter')dcUpdateCacheSummary();      // also renders the EOD2 v3 section (A5-3)
     if(tabId==='tenet-signal')tenetRenderSignals();
     if(tabId==='tenet-holdings')tenetRenderHoldings();
     if(tabId==='tenet-backtest')tenetInitBacktestDates();
@@ -12496,7 +12747,7 @@ function renderBuyLogicTab(){
   const ranked=LIFO_ETF_UNIVERSE.filter(e=>{
     const p=PRICES[e.sym];
     const l=getLive52WLSync(e.sym);
-    return p?.cmp>0&&l.low52>0&&!(minVol>0&&p.vol>0&&p.vol<minVol);
+    return p?.cmp>0&&live52Usable(l)&&!(minVol>0&&p.vol>0&&p.vol<minVol);
   }).map(e=>{
     const p=PRICES[e.sym];
     // P12 FIX 15: spike-filtered 52WL, same definition as backtest
@@ -12912,8 +13163,9 @@ function renderDmDeepAnalytics(){
 // more common extension/backup/sync leak) no longer yields live credentials, and
 // tokens now expire on their own. Real isolation needs a server-side session layer,
 // which a static PWA cannot provide.
+const MD_TOKEN_LS='ad_marketdata_pat_enc';
 const TOKEN_TTL_MS = 24*60*60*1000;   // brokers expire access tokens every 24h
-const _tokCache = { lifo:'', dm:'' }; // plaintext, memory only, never persisted
+const _tokCache = { lifo:'', dm:'', marketdata:'' }; // plaintext, memory only, never persisted
 let _vaultKey = null;
 let _vaultReady = false;
 // Resolves once initTokenVault() has finished. brokerAutoSync() runs from the
@@ -12949,12 +13201,12 @@ async function _vaultGetKey(){
 const _b64e=buf=>btoa(String.fromCharCode(...new Uint8Array(buf)));
 const _b64d=str=>Uint8Array.from(atob(str),c=>c.charCodeAt(0));
 
-async function vaultEncrypt(plain){
+async function vaultEncrypt(plain,{persist=false}={}){   // A5-1: persist:true = no 24 h expiry (the market-data GitHub token)
   if(!plain) return '';
   const key=await _vaultGetKey();
   const iv=crypto.getRandomValues(new Uint8Array(12));
   const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(plain));
-  return JSON.stringify({v:1,iv:_b64e(iv),ct:_b64e(ct),ts:Date.now()});
+  return JSON.stringify({v:1,iv:_b64e(iv),ct:_b64e(ct),ts:Date.now(),...(persist?{persist:true}:{})});
 }
 async function vaultDecrypt(blob){
   if(!blob) return '';
@@ -12962,7 +13214,7 @@ async function vaultDecrypt(blob){
   if(!o||!o.iv||!o.ct) return '';
   // Self-expiring: a token older than the broker's own 24h window is dead weight
   // and is purged rather than decrypted, so a stale credential cannot linger.
-  if(o.ts && Date.now()-o.ts > TOKEN_TTL_MS) return '__EXPIRED__';
+  if(o.ts && !o.persist && Date.now()-o.ts > TOKEN_TTL_MS) return '__EXPIRED__';
   try{
     const key=await _vaultGetKey();
     const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:_b64d(o.iv)},key,_b64d(o.ct));
@@ -12998,12 +13250,19 @@ async function initTokenVault(){
       }catch(e){ console.warn('Token vault migration failed for '+slot+':',e); _tokCache[slot]=legacy; }
     }
   }
+  try{const mdEnc=localStorage.getItem(MD_TOKEN_LS);if(mdEnc){const pt=await vaultDecrypt(mdEnc);_tokCache.marketdata=pt==='__EXPIRED__'?'':pt;}}catch(e){console.warn('market-data token load',e);}
   _vaultReady=true;
   if(_vaultResolve) _vaultResolve();
   try{ syncBrokerSettingsUI(); }catch(e){}
 }
 
 async function vaultSetToken(slot,plain){
+  if(slot==='marketdata'){                                   // A5-1: own key, never expires, never part of a backup
+    if(!plain){localStorage.removeItem(MD_TOKEN_LS);_tokCache.marketdata='';return;}
+    const blob=await vaultEncrypt(plain,{persist:true});
+    if(!safeLsSet(MD_TOKEN_LS,blob))throw new Error('Encrypted token could not be persisted');
+    _tokCache.marketdata=plain;return;
+  }
   const lsKey = slot==='lifo' ? 'ad_broker_lifo_token' : 'ad_broker_dm_token';
   const encKey= lsKey+'_enc';
   if(!plain){ localStorage.removeItem(encKey); localStorage.removeItem(lsKey); _tokCache[slot]=''; return; }
@@ -13413,6 +13672,16 @@ function renderDmRebalanceLog(){
 }
 
 // ── DM BACKTEST EXPORT ────────────────────────────────────────────────────────
+function exportTenetBtCSV(){
+  const r=TENET_LAST_RESULT;
+  if(!r||!r.trades){toast('Run the Tenet backtest first','err');return;}
+  const m=r.metrics||{},pc=v=>v!=null&&isFinite(v)?(v*100).toFixed(2)+'%':'—';
+  const rows=[['AlphaDesk — Tenet Backtest Export'],['Exported',new Date().toLocaleString('en-IN')],...eod2ProvenanceRows(r.provenance),[],
+    ['RESULTS'],['CAGR',pc(m.cagr),'XIRR',pc(m.xirr),'MaxDD',pc(m.maxDD),'Realised',m.realized!=null?m.realized:'','Terminal cash',m.cash!=null?m.cash:'','Open MV',m.openMV!=null?m.openMV:''],[],
+    ['Date','Action','ETF','Team','Price','Qty','Lot','Target%','Profit']];
+  r.trades.forEach(x=>rows.push([x.date,x.action,x.etf,x.team||'',x.price!=null?x.price:'',x.qty,x.buySeq||'',x.targetPct!=null?x.targetPct:'',x.profit!=null?x.profit:'']));
+  dlCSV(rows,'tenet_backtest');
+}
 function exportDmBtCSV(){
   if(!_dmBtResult?.tradeLog?.length){toast('Run DM Backtest first','err');return;}
   const cap=S.config.momCapital||100000;
@@ -13493,7 +13762,7 @@ function exportDmBtCSV(){
     rows.push([],['SKIPPED BUYS — INSUFFICIENT CASH'],['Date','ETF','Needed ₹','Available ₹','Deficit ₹']);
     _dmBtResult.shortfallLog.forEach(s=>rows.push([s.date,s.sym,s.neededCash,s.availCash,s.deficit]));
   }
-  rows.push([],eod2StampRow());
+  rows.push([],...eod2ProvenanceRows(_dmBtResult.provenance));
   dlCSV(rows,'dm_backtest_full');
   toast('DM Backtest full export downloaded','ok');
 }
@@ -13809,8 +14078,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A4';
-const APP_SOURCE_SHA256='e40808acc6f6faadd908f64fe69fdda075766c87e724d8698d557f1f648229ca';
+const APP_BUILD='2026-09-20-v3.22-A5';
+const APP_SOURCE_SHA256='52611f454d9a831b2a40e69edb81f4fe95cad6e852da084ed1d1494694bfde9c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -13963,7 +14232,7 @@ runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};
     // the core rebuilds LIFO_ETF_UNIVERSE itself, but honours DHC_EXCLUDED: add the excluded symbols for the duration of this run only
     const added=[...excl].filter(sy=>!DHC_EXCLUDED.has(sy));added.forEach(sy=>DHC_EXCLUDED.add(sy));
     try{return await core(q);}finally{added.forEach(sy=>DHC_EXCLUDED.delete(sy));}
-  },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runLifoBacktestCore);
+  },{handle:own?own.snapshot:null,params:p});};w.__frozen=core;return w;})(runLifoBacktestCore);
 runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
   p={...p,configSnapshot:p.configSnapshot||JSON.parse(JSON.stringify(S.config)),universeSnapshot:p.universeSnapshot||JSON.parse(JSON.stringify(S.universe))};   // A4-7
   const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
@@ -13973,27 +14242,29 @@ runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
     const endTs=Math.floor(new Date(p.toDate).getTime()/1000)+86400,startTs=Math.floor(new Date(p.fromDate).getTime()/1000)-(lookback+220)*86400;
     const q=await eod2PrepareCoreParams(p,ctx,{syms:etfs,from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:false});
     return q.error?q:core(q);
-  },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runDMBacktestCore);
+  },{handle:own?own.snapshot:null,params:p});};w.__frozen=core;return w;})(runDMBacktestCore);
 
 // PWA — deployable same-origin service worker. A real ./sw.js file is required; downloadPwaFiles() exports the matching assets.
 // Caches the app shell so it loads offline after first visit.
 let swCode='';
 if('serviceWorker' in navigator){
   swCode=`
-const CACHE='alphadesk-v321';
+const CACHE='alphadesk-v322';   // A5-5
 const SHELL=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));
   self.skipWaiting();
 });
 self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
+  // A5-5: only OUR caches are managed: every older alphadesk-* cache goes, foreign caches are left alone
+  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('alphadesk-')&&k!==CACHE).map(k=>caches.delete(k)))));
   self.clients.claim();
 });
 self.addEventListener('fetch',e=>{
   // Network-first for API/data calls, cache-first for the app shell
   const url=new URL(e.request.url);
-  if(url.origin!==self.location.origin||url.pathname.match(/\\.(json|csv)$/)||url.search){
+  // A5-5: the EOD2 data (external eod2BaseUrl or the app-local /data/ mirror) is NEVER intercepted or cached by the worker (the client owns its hash-checked cache)
+  if(url.origin!==self.location.origin||url.pathname.includes('/data/')||url.pathname.match(/\\.(json|csv)$/)||url.search){
     return; // pass through — don't cache dynamic data
   }
   e.respondWith(
@@ -14288,7 +14559,7 @@ function renderDhcTable() {
 // ── END STEP-2: DATA HEALTH CHECK ────────────────────────────────────────────
 
 // ── STEP-3: LIFO PARAM SWEEP ─────────────────────────────────────────────────
-let SWEEP_RESULTS = [];
+let SWEEP_RESULTS = [], SWEEP_PROV = null;   // A5-2: provenance of the sweep's runs (first result)
 let SWEEP_RUNNING = false;
 let SWEEP_CANCEL  = false;
 let SWEEP_SORT    = 'cagr';
@@ -14343,7 +14614,7 @@ async function runLifoParamSweep() {
 
   SWEEP_RUNNING = true;
   SWEEP_CANCEL  = false;
-  SWEEP_RESULTS = [];
+  SWEEP_RESULTS = [];SWEEP_PROV = null;
 
   const runBtn    = document.getElementById('sw-run-btn');
   const cancelBtn = document.getElementById('sw-cancel-btn');
@@ -14420,6 +14691,7 @@ async function runLifoParamSweep() {
               const wr = result.trades.length
                 ? result.trades.filter(t => t.netPnl > 0).length / result.trades.length * 100
                 : 0;
+              if (!SWEEP_PROV) SWEEP_PROV = result.provenance || null;
               SWEEP_RESULTS.push({
                 avgFall: af, minProfit: mp, scanN: sn, maxLots: ml,
                 cagr:    +(m.cagr * 100).toFixed(2),
@@ -14620,6 +14892,7 @@ function exportSweepCSV() {
     r.cagr, r.maxDD, r.sharpe, r.winRate, r.trades, r.endEq,
     r.worstRolling12M !== null ? r.worstRolling12M : ''
   ]));
+  rows.push([], ...eod2ProvenanceRows(SWEEP_PROV));
   dlCSV(rows, 'lifo_sweep');
 }
 
@@ -14645,7 +14918,7 @@ function initLifoSweepWiring(){
 // ══════════════════════════════════════════════════════════════════════════════
 // STEP-4: DM PARAM SWEEP
 // ══════════════════════════════════════════════════════════════════════════════
-let DM_SWEEP_RESULTS = [];
+let DM_SWEEP_RESULTS = [], DM_SWEEP_PROV = null;
 let DM_SWEEP_RUNNING = false;
 let DM_SWEEP_CANCEL  = false;
 let DM_SWEEP_SORT    = 'cagr';
@@ -14692,7 +14965,7 @@ async function runDmParamSweep() {
 
   DM_SWEEP_RUNNING = true;
   DM_SWEEP_CANCEL  = false;
-  DM_SWEEP_RESULTS = [];
+  DM_SWEEP_RESULTS = [];DM_SWEEP_PROV = null;
 
   const runBtn    = document.getElementById('dsw-run-btn');
   const cancelBtn = document.getElementById('dsw-cancel-btn');
@@ -14781,6 +15054,7 @@ async function runDmParamSweep() {
                 ? closedTrades.filter(t => (t.pnl || 0) > 0).length / closedTrades.length * 100
                 : 0;
 
+              if (!DM_SWEEP_PROV) DM_SWEEP_PROV = result.provenance || null;
               DM_SWEEP_RESULTS.push({
                 lookback: lb, slots: sl, hurdle: hu, rebalDays: rb,
                 // FIX BUG-4: DM cagr already in percent — do NOT multiply by 100 again
@@ -14987,6 +15261,7 @@ function exportDmSweepCSV() {
     r.cagr, r.maxDD, r.sharpe, r.winRate, r.trades, r.endEq,
     r.worstRolling12M !== null ? r.worstRolling12M : ''
   ]));
+  rows.push([], ...eod2ProvenanceRows(DM_SWEEP_PROV));
   dlCSV(rows, 'dm_sweep');
 }
 
@@ -15765,7 +16040,36 @@ function renderLifoSkipCard() {
 // PATCH: DC_ABORT declared at module scope so abort button can set it
 let DC_ABORT = false;
 
+// ── A5-3 EOD2 v3 panel (Data Center) ──
+async function eod2v3Render(){
+  mdTokenStateUI();
+  const sum=document.getElementById('eod2v3-summary'),tb=document.getElementById('eod2v3-table');if(!sum||!tb)return null;
+  try{
+    const c=await EOD2Store.cacheStatus(),k=c.rows.filter(r=>r.cached).length;
+    sum.innerHTML=`dataset <b>${escapeHtml(String(c.datasetId))}</b> · source ${escapeHtml(c.source)}${c.offline?' (offline replay)':''} · latest session ${escapeHtml(String(c.latestSession))} · <b>${k}/${c.rows.length}</b> files cached (${escapeHtml(c.cacheKind)})${c.otherDatasetEntries?` · ${c.otherDatasetEntries} entries belong to other datasets`:''}${c.source!=='snapshot'?' · <span style="color:var(--gold)">legacy mirror: no v3 cache</span>':''}`;
+    tb.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:4px 8px;color:var(--fog)">Symbol</th><th style="text-align:left;padding:4px 8px;color:var(--fog)">Kind</th><th style="padding:4px 8px;color:var(--fog)">sha256</th><th style="padding:4px 8px;color:var(--fog)">Cache</th><th></th></tr></thead><tbody>'+
+      c.rows.map(r=>`<tr data-sym="${escapeHtml(r.symbol)}"><td style="padding:3px 8px">${escapeHtml(r.symbol)}</td><td style="padding:3px 8px">${escapeHtml(r.kind)}</td><td style="padding:3px 8px;text-align:center;font-family:monospace">${escapeHtml(r.sha256.slice(0,8))}</td><td style="padding:3px 8px;text-align:center;color:${r.cached?'var(--gain)':'var(--fog)'}">${r.cached?'cached ✓':'not cached'}</td><td style="padding:3px 8px"><button class="icon-btn" style="font-size:10px" data-sym="${escapeHtml(r.symbol)}" onclick="eod2v3Clear('symbol',this.dataset.sym)">clear</button></td></tr>`).join('')+'</tbody></table>';
+    return c;
+  }catch(e){sum.textContent='EOD2 dataset unavailable: '+(e&&e.message||e);tb.innerHTML='';return null;}
+}
+async function eod2v3ForceVerify(){
+  const st=document.getElementById('eod2v3-status');if(st)st.textContent='Verifying every file against the manifest hashes…';
+  try{
+    const r=await EOD2Store.verifyAll((i,n)=>{if(st)st.textContent=`Verifying ${i}/${n}…`;});
+    const bad=r.results.filter(x=>!x.ok);
+    const msg=`${r.results.length-bad.length}/${r.results.length} files verified against the manifest`+(bad.length?' · FAILED: '+bad.map(x=>x.sym+' ('+x.reason+')').join(', '):'')+((r.tampered||[]).length?' · CACHE TAMPERED (repaired from network): '+r.tampered.join(', '):'');
+    if(st){st.textContent=msg;st.style.color=bad.length||(r.tampered||[]).length?'var(--loss)':'var(--gain)';}
+    await eod2v3Render();return r;
+  }catch(e){if(st){st.textContent='Verify failed: '+(e&&e.message||e);st.style.color='var(--loss)';}return null;}
+}
+async function eod2v3Clear(scope,symbol){
+  const what=scope==='all'?'ALL EOD2 v3 cache entries (every dataset)':scope==='dataset'?"this dataset's cache entries":('the cache entry of '+symbol);
+  if(scope!=='symbol'&&typeof confirm==='function'&&!confirm('Clear '+what+'?\n\nBacktests will re-download and re-verify the files. Nothing else is touched.'))return null;
+  try{const n=await EOD2Store.clearCache({scope,symbol});toast(`Cleared ${n} EOD2 cache entr${n===1?'y':'ies'}`,'warn');await eod2v3Render();return n;}
+  catch(e){toast('Clear failed: '+(e&&e.message||e),'err');return null;}
+}
 async function dcUpdateCacheSummary() {
+  eod2v3Render();
   const {count,bytes} = await idbHistSizeEstimate('bth_');
   const mb = (bytes / 1024 / 1024).toFixed(2);
   const countEl = document.getElementById('dc-cache-count');
