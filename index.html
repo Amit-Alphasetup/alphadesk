@@ -6751,6 +6751,7 @@ function momExecuteTrade(etf,action,units,price,charges,date,reason){
 }
 
 async function saveMomConfirmed(){
+  if(previewRecordBlocked())return;
   if(dmSignalData?.dataQualityOk===false){toast('⛔ DM execution blocked — recompute with complete, current market history','err');return;}
   if(!pendingMomConfirms.length)return;
   let count=0;
@@ -7690,8 +7691,13 @@ async function runDMBacktest(){
     statusCb: msg=>{ statusEl.textContent=msg; }
   };
 
+  const _gate=await eod2RunGate('DM',p,'dm-preflight','dm-bt-status');
+  if(!_gate.ok){statusEl.textContent=_gate.message;return;}
+  if(_gate.exclusions.length){const _ex=new Set(_gate.exclusions.map(x=>x.symbol));p.etfs=getMomUniverse().filter(sy=>!DHC_EXCLUDED.has(sy)&&!_ex.has(sy));}
   const result = await runDMBacktestCore(p);
   if(result.error){ statusEl.textContent=result.error; return; }
+  { const _ref=runRefusal(result); if(_ref){ renderPreflightPanel('dm-preflight',_gate.pf,{refusal:_ref}); statusEl.textContent=_ref.message; _dmBtResult=null; return; }
+    eod2ShowResultLabel('dm-preflight',resultLabel('DM',_gate.pf,{mode:_gate.mode,executionGaps:result.executionGaps,valuationGaps:result.valuationGaps})); }
 
   const {equity,tradeLog,shortfallLog,dmRebalLog,metrics,taxResult,benchEq,benchCAGR} = result;
   // FIX BUG-22: metrics key is 'maxDD' not 'maxDD2' — use correct destructuring
@@ -8538,6 +8544,206 @@ async function fetchHistDaily(sym,yfSym,startTs,endTs,ctx){
   clearHistFetchFailure(sym);
   return out;
 }
+
+
+// ══ RUN CONTRACT · PREFLIGHT · MODES (A2b) ══════════════════════════════════════════════════════════
+// A run states what data it needs (roles), the preflight checks that against ONE pinned snapshot, and the result label is decided in one place.
+const ENGINE_CERTIFIABLE=Object.freeze({LIFO:false,DM:false,TENET:false});   // A4 flips an engine to true only when its A4 tests pass
+const RUN_ROLES=Object.freeze(['CORE_REFERENCE','EXECUTION_REQUIRED','HELD_POSITION','LIQUID_SLEEVE','RANKING_CANDIDATE','BENCHMARK','OPTIONAL_DISPLAY']);
+const RUN_MODE={LIFO:'research',DM:'research',TENET:'research'};             // what the existing "Run" buttons do (certified is disabled until an engine is certifiable)
+const RUN_PREVIEW={active:false,until:0};                                    // set while a preview is shown (10 min): money-write handlers refuse
+function previewRecordBlocked(){if(RUN_PREVIEW.active&&Date.now()<RUN_PREVIEW.until){try{toast('Preview only — not actionable. Run the preflight and a real signal first.','warn');}catch(e){}return true;}RUN_PREVIEW.active=false;return false;}
+function _cAddDays(d,n){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
+function buildRunContract(strategy,params,snapshot,terminalState){
+  const eng=String(strategy||'').toUpperCase(),p=params||{},ts=terminalState||null;
+  let from,to,warmDays,warmSessions,execOpen=false,volume=false;
+  const deps=[],held=new Set();
+  const add=(symbol,role,fields,f,t)=>deps.push(Object.freeze({symbol,role,fields:Object.freeze([...fields]),from:f||from,to:t||to}));
+  if(eng==='DM'){
+    from=p.fromDate;to=p.toDate;
+    const lb=finiteParam(p.lookback,182,{min:1,integer:true});warmDays=lb+220;warmSessions=Math.ceil(lb*5/7);
+    execOpen=p.executionMode!=='sheet-close';volume=finiteParam(p.minVol,0,{min:0})>0;
+    const all=[...(p.etfs||getMomUniverse().filter(s=>!DHC_EXCLUDED.has(s)))];
+    const cands=[...new Set(all.filter(s=>s!=='NIFTYBEES'&&s!=='LIQUIDBEES'))];
+    for(const s of cands)add(s,'RANKING_CANDIDATE',volume?['close','volume']:['close']);
+    if(execOpen)for(const s of cands)add(s,'EXECUTION_REQUIRED',['open']);
+    if(p.niftyOn)add('NIFTYBEES','CORE_REFERENCE',['close']);
+    add('LIQUIDBEES','LIQUID_SLEEVE',['close']);
+    add('NIFTYBEES','BENCHMARK',['close']);
+    if(ts&&ts.positions)Object.keys(ts.positions).forEach(s=>{if(s!=='LIQUIDBEES')held.add(s);});
+  }else if(eng==='LIFO'){
+    from=p.startDate;to=p.endDate;warmDays=365;warmSessions=252;
+    execOpen=p.executionMode!=='sheet-close';volume=finiteParam(p.minVol,0,{min:0})>0;
+    const cands=[...new Set((p.etfs||LIFO_ETF_UNIVERSE.map(e=>e.sym)).filter(s=>s!=='NIFTYBEES'))];
+    for(const s of cands)add(s,'RANKING_CANDIDATE',volume?['close','volume']:['close']);
+    if(execOpen)for(const s of cands)add(s,'EXECUTION_REQUIRED',['open']);
+    add('NIFTYBEES','BENCHMARK',['close']);
+    if(ts&&ts.openLots)Object.entries(ts.openLots).forEach(([s,l])=>{if(Array.isArray(l)?l.length:l)held.add(s);});
+  }else if(eng==='TENET'){
+    from=p.from;to=p.to;warmDays=370;warmSessions=250;
+    const pairs=p.pairs||tenetState().pairs||[];
+    const idxSeen=new Set(),etfSeen=new Set();
+    for(const pr of pairs){
+      const u=sanIndexName(pr.underlying);
+      if(u&&!idxSeen.has(u)){idxSeen.add(u);const me=snapshot&&snapshot.manifest&&snapshot.manifest.files&&(snapshot.manifest.files[u]||snapshot.manifest.files[u.replace(/ /g,'_')]);
+        add(u,'CORE_REFERENCE',Array.isArray(me&&me.requiredFields)&&me.requiredFields.length?me.requiredFields:['open','close']);}
+      for(const e of [pr.green,pr.red].map(sanSym).filter(Boolean))if(!etfSeen.has(e)){etfSeen.add(e);add(e,'RANKING_CANDIDATE',['open','high','low','close']);}
+    }
+    if(ts&&Array.isArray(ts.holdings))ts.holdings.forEach(h=>h&&h.etf&&held.add(h.etf));
+  }else throw new Error('buildRunContract: unknown strategy '+strategy);
+  const resume=(ts&&ts.resumeDate)||from;
+  held.forEach(s=>add(s,'HELD_POSITION',['close'],resume,to));
+  const cal=snapshot&&snapshot.calendar,sess=cal&&Array.isArray(cal.sessions)?cal.sessions:null;
+  const firstTradableDate=sess?(sess.find(d=>d>=from)||null):null;
+  return Object.freeze({strategy:eng,datasetId:snapshot?(snapshot.id||null):null,calendarId:cal&&cal.id?cal.id:null,reportStart:from,reportEnd:to,warmupStart:_cAddDays(from,-warmDays),warmupSessions:warmSessions,
+    firstTradableDate,executionMode:execOpen?'next-open':'sheet-close',heldSymbols:Object.freeze([...held]),deps:Object.freeze(deps)});
+}
+// Pure evaluation. cov[mode][symbol+'|'+role] = checkCoverage-style {ok,code,detail}. Resolution order (A2b-1a):
+// (1) candidates, (2) execution deps of RETAINED candidates only, (3) held/core/liquid/benchmark unconditionally, (4) validate the final set.
+function evaluatePreflight(contract,cov,{certifiable=true,certifiableWhy=''}={}){
+  const held=new Set(contract.heldSymbols||[]),rows=[],exclusions=[],key=d=>d.symbol+'|'+d.role;
+  const get=(mode,d)=>(cov[mode]&&cov[mode][key(d)])||{ok:false,code:'SOURCE_UNAVAILABLE',detail:'not evaluated'};
+  const row=(d,c,r,action,detail)=>rows.push({symbol:d.symbol,role:d.role,code:action==='OK'?'OK':(c&&!c.ok?c.code:(r&&r.code)||'OK'),detail:detail||(c&&!c.ok?c.detail:(r&&!r.ok?r.detail:''))||'',
+    certified:{ok:!!c.ok,code:c.code},research:{ok:!!r.ok,code:r.code},action});
+  let blockCert=false,blockRes=false,blockPrev=false;
+  const retained=new Set(),cands=contract.deps.filter(d=>d.role==='RANKING_CANDIDATE');
+  // (1) ranking candidates
+  for(const d of cands){
+    const c=get('certified',d),r=get('research',d),pv=get('preview',d);
+    if(!c.ok)blockCert=true;
+    if(held.has(d.symbol)){                                   // a held symbol is never excluded: its HELD row decides (run refused if that fails)
+      retained.add(d.symbol);row(d,c,r,c.ok?'OK':(r.ok?'OK':'BLOCKS_RESEARCH'),'held position: cannot be excluded');continue;
+    }
+    if(r.ok){retained.add(d.symbol);row(d,c,r,c.ok?'OK':'RESEARCH_ONLY');}
+    else{row(d,c,r,'EXCLUDED');exclusions.push({symbol:d.symbol,code:r.code,detail:r.detail||''});}
+    if(!pv.ok&&!r.ok){/* excluded from preview as well */}
+  }
+  // (2) execution deps for retained candidates only
+  for(const d of contract.deps.filter(x=>x.role==='EXECUTION_REQUIRED')){
+    if(!retained.has(d.symbol))continue;
+    const c=get('certified',d),r=get('research',d);
+    if(!c.ok)blockCert=true;
+    if(!r.ok){blockRes=true;row(d,c,r,'BLOCKS_RESEARCH');}else row(d,c,r,c.ok?'OK':'RESEARCH_ONLY');
+  }
+  // (3) held, core, liquid, benchmark, optional
+  for(const d of contract.deps){
+    if(d.role==='RANKING_CANDIDATE'||d.role==='EXECUTION_REQUIRED')continue;
+    const c=get('certified',d),r=get('research',d),pv=get('preview',d);
+    if(d.role==='OPTIONAL_DISPLAY'){row(d,c,r,'INFO');continue;}
+    if(d.role==='BENCHMARK'){
+      if(!c.ok)blockCert=true;
+      row(d,c,r,r.ok?(c.ok?'OK':'RESEARCH_ONLY'):'BENCHMARK_UNAVAILABLE',r.ok?'':'benchmark unavailable — the run continues without it');continue;
+    }
+    if(d.role==='HELD_POSITION'){
+      if(!c.ok)blockCert=true;if(!r.ok)blockRes=true;if(!pv.ok)blockPrev=true;
+      row(d,c,r,!r.ok?'BLOCKS_RESEARCH':(c.ok?'OK':'RESEARCH_ONLY'));continue;
+    }
+    // CORE_REFERENCE, LIQUID_SLEEVE
+    if(!c.ok)blockCert=true;if(!r.ok)blockRes=true;
+    if(d.role==='CORE_REFERENCE'&&!pv.ok)blockPrev=true;
+    row(d,c,r,!r.ok?'BLOCKS_RESEARCH':(c.ok?'OK':'RESEARCH_ONLY'));
+  }
+  // a run with candidates needs at least one retained candidate
+  const candSyms=[...new Set(cands.map(d=>d.symbol))];
+  if(candSyms.length&&!candSyms.some(s=>retained.has(s))){blockRes=true;rows.push({symbol:'CANDIDATES',role:'RANKING_CANDIDATE',code:'NO_CANDIDATE_READY',detail:'no ranking candidate has usable data',certified:{ok:false,code:'NO_CANDIDATE_READY'},research:{ok:false,code:'NO_CANDIDATE_READY'},action:'BLOCKS_RESEARCH'});}
+  if(!certifiable){blockCert=true;rows.unshift({symbol:'DATASET',role:'DATASET',code:'CALENDAR_UNVERIFIED',detail:certifiableWhy||'dataset/calendar is not verified',certified:{ok:false,code:'CALENDAR_UNVERIFIED'},research:{ok:true,code:'OK'},action:'BLOCKS_CERTIFIED'});}
+  const counts={total:rows.length,ok:rows.filter(x=>x.action==='OK'||x.action==='RESEARCH_ONLY'||x.action==='INFO').length,excluded:exclusions.length,
+    blocking:rows.filter(x=>x.action==='BLOCKS_RESEARCH').length,candidates:candSyms.length,candidatesRetained:candSyms.filter(s=>retained.has(s)).length};
+  return{engine:contract.strategy,rows,counts,exclusions,retainedCandidates:candSyms.filter(s=>retained.has(s)),canCertifyData:!blockCert,canResearch:!blockRes,canPreview:!blockPrev};
+}
+// Async preflight over a pinned snapshot handle (v3 handle: real coverage; legacy mirror: never certifiable).
+async function preflight(contract,snapshot){
+  const h=snapshot||null;
+  if(!h)return evaluatePreflight(contract,{},{certifiable:false,certifiableWhy:'no snapshot'});
+  const raw=h.raw||null,cov={certified:{},research:{},preview:{}};
+  const syms=[...new Set(contract.deps.map(d=>d.symbol))];
+  const loaded={};
+  await Promise.all(syms.map(async s=>{try{loaded[s]=await h.series(s);}catch(e){loaded[s]={ok:false,code:'SOURCE_UNAVAILABLE',detail:String(e&&e.message||e)};}}));
+  const last=h.latestCompleted;
+  for(const d of contract.deps){
+    const k=d.symbol+'|'+d.role,L=loaded[d.symbol];
+    if(!L.ok){const r={ok:false,code:L.code,detail:L.detail||''};cov.certified[k]=r;cov.research[k]=r;cov.preview[k]=r;continue;}
+    if(!raw){                                               // mirror: series validated, but no per-symbol certification metadata exists
+      const okb={ok:true,code:'OK',detail:''};cov.research[k]=okb;cov.preview[k]=okb;cov.certified[k]={ok:false,code:'CALENDAR_UNVERIFIED',detail:'legacy mirror has no certification metadata'};continue;
+    }
+    const o=m=>({from:d.from,to:d.to,fields:d.fields,warmupSessions:d.role==='RANKING_CANDIDATE'||d.role==='CORE_REFERENCE'||d.role==='BENCHMARK'?contract.warmupSessions:0,mode:m});
+    const f=r=>({ok:!!r.ok,code:r.code,detail:r.detail||''});
+    cov.certified[k]=f(raw.checkCoverage(d.symbol,o('certified')));
+    cov.research[k]=f(raw.checkCoverage(d.symbol,o('research')));
+    const pvRes=raw.checkCoverage(d.symbol,{from:last,to:last,fields:['close'],mode:'research'});     // preview: a current mark, any warn
+    cov.preview[k]=f(pvRes);
+  }
+  const certifiable=h.source==='snapshot'&&!h.offline&&NSE_CAL.loaded&&contract.reportEnd<=NSE_CAL.verifiedThrough;
+  const why=h.source!=='snapshot'?'legacy mirror data cannot be certified':h.offline?'offline replay of a cached manifest':!NSE_CAL.loaded?'no verified calendar':contract.reportEnd>NSE_CAL.verifiedThrough?'window beyond the verified calendar':'';
+  const pf=evaluatePreflight(contract,cov,{certifiable,certifiableWhy:why});
+  pf.datasetId=h.id;pf.source=h.source;
+  return pf;
+}
+// In-run gaps: a run that ends with execution or valuation gaps is not a result.
+function runRefusal(run){
+  const eg=(run&&run.executionGaps)||[],vg=(run&&run.valuationGaps)||[];
+  if(!eg.length&&!vg.length)return null;
+  return{refused:true,message:`Run refused — ${eg.length} execution / ${vg.length} valuation gaps`,executionGaps:eg,valuationGaps:vg};
+}
+// The ONE place that decides what a result may be called.
+function resultLabel(engine,pf,run){
+  const eng=String(engine).toUpperCase(),mode=(run&&run.mode)||'research',ref=runRefusal(run);
+  if(mode==='preview')return 'PREVIEW — not actionable';
+  if(ref)return ref.message;
+  if(mode==='certified'&&pf&&pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true)return 'CERTIFIED';
+  if(mode==='certified'&&pf&&pf.canCertifyData)return 'RESEARCH (engine fixes pending)';
+  const c=pf&&pf.counts;return `RESEARCH — ${c?c.candidatesRetained:0}/${c?c.candidates:0} candidates`;
+}
+const _pfEsc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function renderPreflightPanel(containerId,pf,{refusal=null}={}){
+  const el=document.getElementById(containerId);if(!el||!pf)return;
+  const eng=pf.engine,certifiable=!!(pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true),c=pf.counts||{};
+  const bad=pf.rows.filter(r=>r.action==='EXCLUDED'||r.action.startsWith('BLOCKS')||r.action==='BENCHMARK_UNAVAILABLE'||r.action==='RESEARCH_ONLY');
+  const groups={};bad.forEach(r=>{(groups[r.code]=groups[r.code]||[]).push(r);});
+  const btn=(id,label,enabled,mode)=>`<button class="action-btn sm" id="${_pfEsc(containerId)}-${id}" ${enabled?`onclick="preflightAction('${_pfEsc(eng)}','${mode}')"`:'disabled'} style="${enabled?'':'opacity:.45;cursor:not-allowed'}">${_pfEsc(label)}</button>`;
+  el.innerHTML=`<div class="card" style="margin:8px 0;padding:10px">
+    <div style="font-size:11px;font-weight:700">Data preflight · ${_pfEsc(eng)} · dataset ${_pfEsc(pf.datasetId||'—')} · ${_pfEsc(pf.source||'')}</div>
+    <div style="font-size:10.5px;color:var(--fog);margin:4px 0">${c.ok||0} ready · ${c.excluded||0} excluded · ${c.blocking||0} blocking · candidates ${c.candidatesRetained||0}/${c.candidates||0}</div>
+    ${refusal?`<div style="padding:6px 8px;border-radius:5px;background:rgba(239,68,68,.12);color:var(--loss);font-weight:600;margin:6px 0">${_pfEsc(refusal.message)}</div>`:''}
+    ${Object.keys(groups).sort().map(code=>`<div style="font-size:10.5px;margin:3px 0"><b>${_pfEsc(code)}</b> — ${groups[code].map(r=>_pfEsc(r.symbol)+' ('+_pfEsc(r.role)+')').join(', ')}</div>`).join('')}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      ${btn('certified','Run Certified',certifiable,'certified')}
+      ${btn('research',`Run Research ${c.candidatesRetained||0}/${c.candidates||0}`,!!pf.canResearch,'research')}
+      ${btn('preview','Show Preview',!!pf.canPreview,'preview')}
+    </div>
+    <div style="font-size:10px;color:var(--fog);margin-top:6px">${certifiable?'':'Certified runs are disabled: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending).':'the data does not meet the certified requirements.')}</div></div>`;
+}
+const PREFLIGHT_LAST={};   // engine -> {contract, pf}
+function preflightAction(engine,mode){
+  const eng=String(engine).toUpperCase();
+  if(mode==='preview'){RUN_PREVIEW.active=true;RUN_PREVIEW.until=Date.now()+10*60*1000;try{toast('Preview mode: record/confirm actions are disabled','warn');}catch(e){}
+    if(eng==='DM'&&typeof computeDMSignal==='function')computeDMSignal();return;}
+  RUN_PREVIEW.active=false;
+  if(mode==='certified'&&!(PREFLIGHT_LAST[eng]&&PREFLIGHT_LAST[eng].pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true))return;
+  RUN_MODE[eng]=mode;
+  if(eng==='DM')return runDMBacktest();if(eng==='LIFO')return runLifoBacktest();if(eng==='TENET')return runTenetBacktestV3();
+}
+
+// Runs the preflight for one engine run (on the run's pinned snapshot when given) and decides what may start.
+async function eod2RunGate(engine,params,panelId,anchorId,snapshot){
+  const eng=String(engine).toUpperCase(),mode=RUN_MODE[eng]||'research';
+  let own=null,h=snapshot||null;
+  try{
+    if(!h){own=await EOD2Store.startRun('PREFLIGHT',{mode:'preview'});h=own.snapshot;}
+    const contract=buildRunContract(eng,params,h,null),pf=await preflight(contract,h);
+    PREFLIGHT_LAST[eng]={contract,pf,mode};
+    let host=document.getElementById(panelId);
+    if(!host){const a=document.getElementById(anchorId);if(a&&a.parentNode){host=document.createElement('div');host.id=panelId;a.parentNode.insertBefore(host,a);}}
+    renderPreflightPanel(panelId,pf);
+    if(mode==='certified'&&!(pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true))return{ok:false,pf,mode,exclusions:[],message:'Certified run is not available: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending)':'the data does not meet the certified requirements')};
+    if(!pf.canResearch)return{ok:false,pf,mode,exclusions:[],message:'Run refused — '+(pf.rows.filter(r=>r.action==='BLOCKS_RESEARCH').map(r=>`${r.symbol} ${r.code}`).join(', ')||'required data unavailable')};
+    RUN_PREVIEW.active=false;
+    return{ok:true,pf,mode,exclusions:pf.exclusions};
+  }catch(e){return{ok:false,exclusions:[],message:'Preflight failed: '+(e&&e.message||e)};}
+  finally{if(own)EOD2Store.endRun(own);}
+}
+function eod2ShowResultLabel(panelId,label){const host=document.getElementById(panelId);if(!host)return;let l=document.getElementById(panelId+'-label');if(!l){l=document.createElement('div');l.id=panelId+'-label';l.style.cssText='font-size:11px;font-weight:700;margin:4px 0';host.appendChild(l);}l.textContent=label;}
+let TENET_RUN_PAIRS=null;   // pairs of the running Tenet backtest after research exclusions (null = the configured pairs)
 
 
 // Legacy Yahoo reader: no longer called by any history path (kept inert).
@@ -9493,9 +9699,12 @@ async function runLifoBacktest(){
   const btn=document.getElementById('bt-run-btn');btn.disabled=true;btn.textContent='⏳ Running…';
   setBtStatus('Fetching historical data…');showBtProgress(0,'Initializing…');
 
+  const _lp={...collectLifoBtParams(),executionMode: document.getElementById('bt-execution-model')?.value||'next-open'};
+  const _gate=await eod2RunGate('LIFO',_lp,'lifo-preflight','bt-status');
+  if(!_gate.ok){BT.running=false;btn.disabled=false;btn.textContent='▶ Run Backtest';setBtStatus(_gate.message);toast(_gate.message,'warn');return;}
   const result=await runLifoBacktestCore({
-    ...collectLifoBtParams(),
-    executionMode: document.getElementById('bt-execution-model')?.value||'next-open',
+    ..._lp,
+    ...(_gate.exclusions.length?{excludeSyms:_gate.exclusions.map(x=>x.symbol)}:{}),
     statusCb:    msg=>setBtStatus(msg),
     progressCb:  (pct,msg)=>showBtProgress(pct,msg)
   });
@@ -9503,6 +9712,8 @@ async function runLifoBacktest(){
   BT.running=false;btn.disabled=false;btn.textContent='▶ Run Backtest';
 
   if(result.error){setBtStatus(result.error);toast(result.error,'err');return;}
+  { const _ref=runRefusal(result); if(_ref){ renderPreflightPanel('lifo-preflight',_gate.pf,{refusal:_ref}); setBtStatus(_ref.message); toast(_ref.message,'err'); return; }
+    eod2ShowResultLabel('lifo-preflight',resultLabel('LIFO',_gate.pf,{mode:_gate.mode,executionGaps:result.executionGaps,valuationGaps:result.valuationGaps})); }
 
   BT.trades=result.trades;BT.dailyLog=result.dailyLog;
   BT.equity=result.equity;BT.utilization=result.utilization;
@@ -11138,8 +11349,8 @@ function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=t
   buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
 async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}TENET_RUNTIME.metrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive,indexObservedMs:snap.quote&&snap.quote.asOf?Date.parse(snap.quote.asOf):null};}catch(e){return{...p,error:e?.message||String(e)}}});TENET_RUNTIME.live=rows;TENET_RUNTIME.liveAt=Date.now();TENET_RUNTIME.fingerprint=tenetFingerprint();const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
 async function tenetTestIndexMappings(){const t=tenetState(),msg=document.getElementById('tenet-pair-validation');if(!S.config.marketBridgeUrl)return toast('Configure Market Bridge first','warn');if(!t.pairs.length)return toast('Add Tenet scanner pairs first','warn');if(msg)msg.textContent='Testing Upstox index mappings…';const rows=await mapWithConcurrency(t.pairs,2,async p=>{const j=await marketBridgeFetch('/resolve',{symbol:p.underlying},10000);return{u:p.underlying,ok:!!j?.mapping,key:j?.mapping?.key||'',name:j?.mapping?.name||'',err:j?.error||''};});const bad=rows.filter(x=>!x.ok);if(msg){msg.style.color=bad.length?'var(--bad)':'var(--go)';msg.textContent=bad.length?`⚠ Mapping failed: ${bad.map(x=>x.u+' — '+(x.err||'no mapping')).join(' · ')}`:`✓ Upstox mappings verified: ${rows.map(x=>x.u+' → '+x.key).join(' · ')}`;}toast(bad.length?`${bad.length} Tenet index mapping(s) failed`:'All Tenet index mappings verified',bad.length?'warn':'ok');}
-function tenetRecordBuy(etf,team,price,underlying,isBid=false){const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
-function tenetRecordSell(id,price){const t=tenetState(),i=t.holdings.findIndex(x=>x.id===id);if(i<0)return;const h=t.holdings[i],last=tenetLatestLot(h.etf);if(last?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');if(+price<h.targetPrice)return toast('Target not reached','warn');t.holdings.splice(i,1);const sellDate=tenetISTNow().date;t.sold.push({...h,sellDate,sellPrice:+price,profit:(+price-h.buyPrice)*h.qty,holdingDays:Math.max(0,tenetDaysBetween(h.buyDate,sellDate)),sellPriceSource:q.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet SELL recorded: ${h.etf}`,'ok');}
+function tenetRecordBuy(etf,team,price,underlying,isBid=false){if(previewRecordBlocked())return;const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
+function tenetRecordSell(id,price){if(previewRecordBlocked())return;const t=tenetState(),i=t.holdings.findIndex(x=>x.id===id);if(i<0)return;const h=t.holdings[i],last=tenetLatestLot(h.etf);if(last?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');if(+price<h.targetPrice)return toast('Target not reached','warn');t.holdings.splice(i,1);const sellDate=tenetISTNow().date;t.sold.push({...h,sellDate,sellPrice:+price,profit:(+price-h.buyPrice)*h.qty,holdingDays:Math.max(0,tenetDaysBetween(h.buyDate,sellDate)),sellPriceSource:q.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet SELL recorded: ${h.etf}`,'ok');}
 function tenetRenderSignals(){const t=tenetState(),host=document.getElementById('tenet-signal-list');if(!host)return;const gate=tenetLiveGate(),live=tenetLiveRows()||[];if(!live.length){host.innerHTML='<div class="card"><span style="color:var(--fog)">Tap <b>Refresh Tenet scanner</b> to load index candles and ETF prices. No trade action is shown until data is validated.</span></div>';return;}const sig=tenetSignalsFromPairs(live,{actionable:gate.actionable,weekKey:gate.weekKey,requireLiveQuality:gate.actionable}),sells=[],blockedSells=[];for(const h of t.holdings){const last=tenetLatestLot(h.etf),price=+PRICES[h.etf]?.cmp||0;if(last?.id!==h.id||!(price>0)||price<h.targetPrice)continue;const q=tenetPriceQuality(h.etf);if(q.allowed)sells.push({h,price,q});else blockedSells.push({h,price,q});}
   const rows=[...sells.map(x=>`<div style="margin:6px 0"><b>SELL</b> ${escapeHtml(x.h.etf)} · LIFO lot ${x.h.buySeq} · ${fmtINR(x.price)} ≥ target ${fmtINR(x.h.targetPrice)} · ${escapeHtml(x.q.source)} <button class="action-btn sm" onclick="tenetRecordSell(${htmlJsArg(x.h.id)},${x.price})">Record sell</button></div>`),...sig.buys.map(x=>`<div style="margin:6px 0"><b>BUY</b> ${escapeHtml(x.etf)} · ${escapeHtml(x.team)} · ${escapeHtml(x.underlying)} · index ${escapeHtml(x.direction)} (${escapeHtml(x.indexSource||'')}) · 52W distance ${Number.isFinite(x.distance)?x.distance.toFixed(2)+'%':'—'} · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},false)">Record buy</button></div>`),...sig.selectedBid.map(x=>`<div style="margin:6px 0"><b>BID</b> ${escapeHtml(x.etf)} · largest eligible fall ${x.fall.toFixed(2)}% · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},true)">Record BID</button></div>` )];
   if(blockedSells.length)rows.push(`<div style="margin:6px 0;color:var(--gold)">⚠ ${blockedSells.length} target-hit SELL candidate(s) hidden because current price data is not verified/fresh. Refresh market data before acting.</div>`);const preview=!gate.actionable&&sig.previewBuys.length?`<div style="font-size:10px;color:var(--fog);margin-top:8px"><b>Directional preview only — NOT an order signal:</b> ${sig.previewBuys.map(x=>`${escapeHtml(x.etf)} ${x.team}`).join(' · ')}</div>`:'';const bidNote=sig.bidUsed?' · BID already used this week':'';const diag=`<details open style="margin-top:10px"><summary style="cursor:pointer;color:var(--fog);font-size:10px">Scanner diagnostics</summary><div class="tbl-wrap"><table><thead><tr><th>Index</th><th>ETF</th><th>Team</th><th>Status</th><th>Index src</th><th>Price src</th><th>Reason</th></tr></thead><tbody>${sig.diag.map(x=>`<tr><td>${escapeHtml(x.underlying||'')}</td><td>${escapeHtml(x.etf||'—')}</td><td>${escapeHtml(x.team||'—')}</td><td>${escapeHtml(x.status||'')}</td><td>${escapeHtml(x.indexSource||'—')}</td><td>${escapeHtml(x.priceSource||String(PRICES[x.etf]?._src||'—'))}</td><td>${escapeHtml(x.reason||'')}</td></tr>`).join('')}</tbody></table></div></details>`;
@@ -11186,7 +11397,7 @@ async function tenetRunHistoricalScanner(){
 }
 
 async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.config.marketBridgeUrl){t.universeHistory=[];return[];}const j=await marketBridgeFetch('/universe-history',{start:from,end:to},15000),rows=Array.isArray(j?.rows)?j.rows:[];t.universeHistory=rows.map(r=>({effectiveDate:String(r.effectiveDate||r.date||r.effective_date||'').slice(0,10),underlying:sanIndexName(r.underlying||r.index||r.underlyingAsset||''),indexYf:sanIndexTicker(r.indexYf||r.indexYahoo||r.yahoo||''),etf:sanSym(r.etf||r.symbol||''),team:String(r.team||r.side||'GREEN').toUpperCase(),counterETF:sanSym(r.counterETF||r.red||''),turnover:Number.isFinite(+(r.turnover??r.turnoverValue))?+(r.turnover??r.turnoverValue):null,distance52w:Number.isFinite(+(r.distance52w??r.distance??r.distanceFrom52WHigh))?+(r.distance52w??r.distance??r.distanceFrom52WHigh):null})).filter(r=>r.effectiveDate&&r.underlying&&r.etf);return t.universeHistory;}
-function tenetPairsForDate(date){const t=tenetState(),hist=t.universeHistory||[];if(!hist.length)return t.pairs.map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
+function tenetPairsForDate(date){const t=tenetState(),hist=t.universeHistory||[];if(!hist.length)return (TENET_RUN_PAIRS||t.pairs).map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
 function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>(+h[d].high||0)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
 function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to&&!isSpecialSession(d))){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
 function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0&&!isSpecialSession(d)).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
@@ -11310,7 +11521,7 @@ async function runTenetBacktestV3(){
       red:r.team==='RED'?r.etf:r.counterETF,
       indexYf:r.indexYf
     }));
-    const allPairs=[...t.pairs,...histPairs];
+    const allPairs=[...(TENET_RUN_PAIRS||t.pairs),...histPairs];
     const indexNames=[...new Set(allPairs.map(p=>sanIndexName(p.underlying)).filter(Boolean))];
     const etfSymbols=[...new Set(allPairs.flatMap(p=>[p.green,p.red]).map(sanSym).filter(Boolean))];
     const warmStart=new Date(new Date(from+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10);
@@ -11329,9 +11540,14 @@ async function runTenetBacktestV3(){
         return{kind:'ETF',key:sym,provider:sym,yf:e?.yf||sym+'.NS'};
       })
     ];
-    let tctx=null;try{tctx=await EOD2Store.startRun('TENET',{mode:'research'});}catch(e){if(st)st.textContent=e.message+' Backtest not run.';return;}   // A2-5: one pinned snapshot for the whole Tenet run
+    const _tenetEx=new Set();let tctx=null;try{tctx=await EOD2Store.startRun('TENET',{mode:'research'});}catch(e){if(st)st.textContent=e.message+' Backtest not run.';return;}   // A2-5: one pinned snapshot for the whole Tenet run
     {const _g=await eod2Preflight(from,to,tctx.snapshot);if(_g){EOD2Store.endRun(tctx);if(st)st.textContent=_g+' Backtest not run.';return;}}
-    const rows=await mapWithConcurrency(jobs,2,async j=>{
+    TENET_RUN_PAIRS=null;
+    {const _gate=await eod2RunGate('TENET',{from,to,pairs:t.pairs},'tenet-preflight','tenet-bt-status',tctx.snapshot);
+     if(!_gate.ok){EOD2Store.endRun(tctx);if(st)st.textContent=_gate.message;return;}
+     if(_gate.exclusions.length){const _ex=new Set(_gate.exclusions.map(x=>x.symbol));_ex.forEach(x=>_tenetEx.add(x));TENET_RUN_PAIRS=t.pairs.map(p=>({...p,green:_ex.has(sanSym(p.green))?'':p.green,red:_ex.has(sanSym(p.red))?'':p.red})).filter(p=>p.green||p.red);}
+     eod2ShowResultLabel('tenet-preflight',resultLabel('TENET',_gate.pf,{mode:_gate.mode}));}
+    const rows=await mapWithConcurrency(jobs.filter(j=>!(j.kind==='ETF'&&_tenetEx.has(j.key))),2,async j=>{
       try{
         const h=await tenetFetchHistory(j.kind,j.key,j.provider,j.yf,warmStart,historyTo,tctx);
         return{...j,h,err:Object.keys(h).length?'':'no bars'};
@@ -11543,7 +11759,7 @@ async function runTenetBacktestV3(){
   }catch(e){
     console.error('Tenet 2.0 backtest failed',e);
     if(st)st.textContent='Tenet backtest error: '+(e?.message||String(e));
-  }
+  }finally{TENET_RUN_PAIRS=null;}
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
@@ -13083,7 +13299,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A2';
-const APP_SOURCE_SHA256='cdb8960dacf32e3eec280c0c3bd5d59222bb969ce8073fa7293cc16d4684f378';
+const APP_SOURCE_SHA256='44b48963d815709d522bd6f247500e1fbf8c5a6e91c92bf934f25f57a004ec90';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -13228,8 +13444,13 @@ runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};
   const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
   return eod2GuardRun('LIFO',p.startDate,p.endDate,async ctx=>{
     const startTs=Math.floor(new Date(p.startDate).getTime()/1000)-365*86400,endTs=Math.floor(new Date(p.endDate).getTime()/1000)+86400;
-    const q=await eod2PrepareCoreParams(p,ctx,{syms:LIFO_ETF_UNIVERSE.map(e=>e.sym),from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:true});
-    return q.error?q:core(q);
+    const excl=new Set(p.excludeSyms||[]);      // A2b: candidates excluded by the research preflight (from the FIRST date, never mid-run)
+    const q=await eod2PrepareCoreParams(p,ctx,{syms:LIFO_ETF_UNIVERSE.map(e=>e.sym).filter(sy=>!excl.has(sy)),from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:true});
+    if(q.error)return q;
+    if(!excl.size)return core(q);
+    // the core rebuilds LIFO_ETF_UNIVERSE itself, but honours DHC_EXCLUDED: add the excluded symbols for the duration of this run only
+    const added=[...excl].filter(sy=>!DHC_EXCLUDED.has(sy));added.forEach(sy=>DHC_EXCLUDED.add(sy));
+    try{return await core(q);}finally{added.forEach(sy=>DHC_EXCLUDED.delete(sy));}
   },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runLifoBacktestCore);
 runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
   const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
