@@ -851,6 +851,8 @@ td.c,th.c{text-align:center}
   table{width:100%;border-collapse:collapse}
   th,td{border:1px solid #ccc;padding:4px 6px;color:#000!important}
 }
+/* A3/A2b: preview mode shows NO record/confirm buttons */
+body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onclick*="tenetRecordSell"],body.preview-mode button[onclick*="saveMomConfirmed"],body.preview-mode button[onclick*="tenetOpenFillModal"],body.preview-mode button[onclick*="stageMomTrade"]{display:none!important}
 </style>
 </head>
 <body>
@@ -1745,6 +1747,8 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <input class="form-input" id="uni-search" oninput="renderUniverse()" placeholder="Search…" style="margin-bottom:10px"/>
 <div id="uni-list"></div>
+<div id="holdings-by-etf"></div>
+<div style="margin-top:8px"><button class="action-btn sm" onclick="importEnginesFromMarketData()">⇩ Import engines from market-data</button></div>
 <div id="uni-sync-status" style="font-size:11px;color:var(--fog);margin-top:10px"></div>
 <button class="save-btn" onclick="syncUniverseToSB()" style="margin-top:8px">Sync to Supabase</button>
 </div>
@@ -1792,6 +1796,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <option value="all">All ETFs</option>
 <option value="lifo">LIFO only</option>
 <option value="momentum">DM only</option>
+<option value="tenet">TENET only</option>
 </select>
 </div>
 <button class="action-btn azure-btn" id="dc-sync-btn" onclick="syncTotalUniverse()" style="padding:8px 20px">▶ Sync All Data</button>
@@ -2918,7 +2923,7 @@ function sanitizeStateStringsInPlace(st){
   };
   (st.lifoLedger||[]).forEach(t=>cleanTrade(t,false));
   (st.momTrades||[]).forEach(t=>cleanTrade(t,true));
-  (st.universe||[]).forEach(e=>{e.sym=sanSym(e.sym);e.yf=sanTicker(e.yf);e.name=sanNote(e.name,100);e.tag=['lifo','momentum','both'].includes(e.tag)?e.tag:'lifo';e.assetClass=['equity','debt','gold','international'].includes(e.assetClass)?e.assetClass:'equity';e.linkedIndex=sanIndexName(e.linkedIndex);e.linkedIndexYf=sanIndexTicker(e.linkedIndexYf);});
+  (st.universe||[]).forEach(e=>{e.sym=sanSym(e.sym);e.yf=sanTicker(e.yf);e.name=sanNote(e.name,100);e.tag=['lifo','momentum','both','none'].includes(e.tag)?e.tag:'lifo';e.assetClass=['equity','debt','gold','international'].includes(e.assetClass)?e.assetClass:'equity';e.linkedIndex=sanIndexName(e.linkedIndex);e.linkedIndexYf=sanIndexTicker(e.linkedIndexYf);});
   if(Array.isArray(st.momUniverse))st.momUniverse=st.momUniverse.map(sanSym).filter(Boolean);
   (st.priceAlerts||[]).forEach(a=>{a.id=sanIdToken(a.id);a.sym=sanSym(a.sym);a.type=a.type==='below'?'below':'above';a.note=sanNote(a.note,300);});
   (st.watchlist||[]).forEach(w=>{w.sym=sanSym(w.sym);w.yf=sanTicker(w.yf);w.name=sanNote(w.name,100);w.note=sanNote(w.note,300);});
@@ -2947,10 +2952,13 @@ let lastPriceTs = 0;            // FIX #25: persist staleness timestamp
 
 // ── PERSISTENCE ──────────────────────────────────────────────────────────────
 function loadState(){
+  S._rev=0;
   try{
     const raw=localStorage.getItem('alphadesk_v1');
     if(raw){
       const d=JSON.parse(raw);
+      S._rev=Number.isInteger(d._rev)?d._rev:0;
+      migrateRawState(d);
       applyStateSnapshot(d,{mergeConfig:true});
       sanitizeStateStringsInPlace(S);
     }
@@ -2993,9 +3001,11 @@ function loadState(){
       const sym=sanSym(e?.sym||''); if(!sym)return null;
       const def=_defaultBySym.get(sym);
       const ac=['equity','debt','gold','international'].includes(e?.assetClass)?e.assetClass:(def?.assetClass||'equity');
-      return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),tag:['lifo','momentum','both'].includes(e?.tag)?e.tag:'momentum',assetClass:ac};
+      return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),tag:['lifo','momentum','both','none'].includes(e?.tag)?e.tag:'momentum',assetClass:ac};
     }).filter(Boolean);
+    ensureUniverseEngines();
     rebuildUniverses();
+    { const _ve=[...validateTenetState(S.tenet,S),...validateConfigRanges(S.config)]; if(_ve.length){console.warn('loadState validation:',_ve);setTimeout(()=>{try{toast('⚠️ Stored data has problems: '+_ve.slice(0,2).join(' · '),'warn');}catch(e){}},1500);} }
     loadPricesCache();
     loadDmSignalCache();
   }catch(e){console.error('loadState:',e);}
@@ -3432,17 +3442,233 @@ function safeLsSet(key,val){
   }
 }
 
-function saveState(){
+// ── STATE COMMIT (A3-1) ──────────────────────────────────────────────────────────────────────
+// Every write of user money/trade/config data goes through commitState: cross-tab exclusive lock around
+// read-rev -> validate -> mutate -> write, with rollback when the durable write fails. saveState() (legacy, non-transactional callers)
+// still refuses on a stale tab and bumps the revision.
+const STATE_KEY='alphadesk_v1';
+let STATE_STALE=false;
+S._rev=S._rev|0;                                    // revision of the persisted state (loadState reads the stored one)
+const TAB_ID='tab-'+Math.random().toString(36).slice(2)+Date.now().toString(36);
+function readStoredRev(){try{const raw=localStorage.getItem(STATE_KEY);if(!raw)return 0;const d=JSON.parse(raw);return Number.isInteger(d&&d._rev)?d._rev:0;}catch(e){return 0;}}
+function markStateStale(){
+  STATE_STALE=true;
   try{
-    // A cosmetic header failure must never prevent persistence.
+    if(document.getElementById('state-stale-banner'))return;
+    const b=document.createElement('div');b.id='state-stale-banner';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2500;padding:10px 14px;background:#7f1d1d;color:#fff;font-size:13px;font-weight:700;text-align:center';
+    b.textContent='Updated in another tab — reload before making changes. ';
+    const btn=document.createElement('button');btn.textContent='Reload';btn.style.cssText='margin-left:8px;padding:3px 10px';btn.onclick=()=>location.reload();
+    b.appendChild(btn);document.body.appendChild(b);
+  }catch(e){}
+}
+try{window.addEventListener('storage',e=>{if(e.key===STATE_KEY||e.key===null)markStateStale();});}catch(e){}
+function saveStateRaw(){
+  try{
     try{ renderLedgerStatus(); }catch(_){}
-    const ok=safeLsSet('alphadesk_v1',JSON.stringify(serializeState()));
+    ensureUniverseEngines();
+    const ok=safeLsSet(STATE_KEY,JSON.stringify({...serializeState(),_rev:S._rev|0}));
     if(!ok)return false;
-    // Mirror only after durable local persistence succeeded.
-    scheduleLifoLedgerSync();
+    scheduleLifoLedgerSync();                       // remote mirror only after durable local persistence
     return true;
   }catch(e){console.error('saveState:',e);_storageFailToast();return false;}
 }
+function saveState(){
+  if(STATE_STALE){try{toast('⚠️ Changed in another tab — reload, then retry','err');}catch(e){}return false;}
+  const stored=readStoredRev();
+  if(stored!==(S._rev|0)){markStateStale();try{toast('⚠️ Changed in another tab — reload, then retry','err');}catch(e){}return false;}
+  const prev=S._rev|0;S._rev=stored+1;
+  if(!saveStateRaw()){S._rev=prev;return false;}
+  return true;
+}
+async function sha256Hex(text){
+  if(globalThis.crypto&&crypto.subtle){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(text)));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+  let h=5381;const t=String(text);for(let i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))|0;return 'x'+(h>>>0).toString(16);   // no crypto.subtle (insecure origin): still deterministic
+}
+let _stateTabChain=Promise.resolve();
+async function withLeaseLock(fn){
+  const KEY='alphadesk_lease',t0=Date.now(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch(e){return null;}};
+  while(Date.now()-t0<3000){
+    const cur=read();
+    if(!cur||!(cur.until>Date.now())){
+      try{localStorage.setItem(KEY,JSON.stringify({tabId:TAB_ID,until:Date.now()+5000}));}catch(e){}
+      await sleep(50);
+      const chk=read();
+      if(chk&&chk.tabId===TAB_ID){
+        try{return await fn();}
+        finally{const c=read();if(c&&c.tabId===TAB_ID){try{localStorage.removeItem(KEY);}catch(e){}}}
+      }
+    }
+    await sleep(20+Math.random()*40);
+  }
+  try{toast('⚠️ Could not get the save lock — try again','err');}catch(e){}
+  return false;
+}
+async function withStateLock(fn){
+  // serialize inside this tab first (a lease held by our own tab would otherwise be re-entered), then across tabs
+  const run=()=>{
+    if(typeof navigator!=='undefined'&&navigator.locks&&navigator.locks.request)return navigator.locks.request('alphadesk-state',{mode:'exclusive'},fn);
+    return withLeaseLock(fn);
+  };
+  const p=_stateTabChain.then(run,run);_stateTabChain=p.then(()=>{},()=>{});return p;
+}
+async function commitState(mutator,{label='Change'}={}){
+  return withStateLock(async()=>{
+    if(STATE_STALE){try{toast('⚠️ Changed in another tab — reload, then retry','err');}catch(e){}return false;}
+    const stored=readStoredRev();
+    if(stored!==(S._rev|0)){markStateStale();try{toast('⚠️ Changed in another tab — reload, then retry','err');}catch(e){}return false;}
+    const snap=JSON.stringify(serializeState());
+    const restore=()=>{applyStateSnapshot(JSON.parse(snap),{mergeConfig:false});try{momRebuildState();}catch(e){}};
+    let res;
+    try{res=mutator();}catch(e){restore();throw e;}
+    if(res===false){restore();return false;}
+    S._rev=stored+1;
+    if(!saveStateRaw()){S._rev=stored;restore();try{toast('❌ '+label+' NOT saved','err');}catch(e){}return false;}
+    return true;
+  });
+}
+
+// ── TENET ACTUAL FILLS (A3-3) ─────────────────────────────────────────────────────────────────
+// A fill is what really happened at the broker. Every change to Tenet holdings/sold comes from a fill (or a correction record).
+function tenetFills(){const t=tenetState();if(!Array.isArray(t.fills))t.fills=[];return t.fills;}
+function _fillId(){return 'fill_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);}
+const _isoDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
+function tenetOrderIdTaken(orderId,fills=tenetFills()){const o=String(orderId||'').trim().toUpperCase();return !!o&&fills.some(f=>String(f.orderId||'').trim().toUpperCase()===o);}
+// Pure validation. spec: {side:'BUY'|'SELL', etf, team, underlying, isBid, lotId, date, time, price, qty, charges, orderId, reason, confirmDeviation, source}
+function tenetValidateFill(spec){
+  const t=tenetState(),errors=[],warn=[];const s=spec||{};
+  const side=String(s.side||'').toUpperCase(),etf=sanSym(s.etf),price=+s.price,qty=+s.qty,charges=s.charges==null||s.charges===''?0:+s.charges;
+  if(side!=='BUY'&&side!=='SELL')errors.push('side must be BUY or SELL');
+  if(!etf)errors.push('ETF is required');
+  if(!_isoDate(s.date))errors.push('date must be a real YYYY-MM-DD date');
+  else if(s.date>tenetISTNow().date)errors.push('date is in the future');
+  if(s.time!=null&&s.time!==''&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(s.time)))errors.push('time must be HH:MM');
+  if(!(Number.isFinite(price)&&price>0))errors.push('price must be a positive number');
+  if(!(Number.isInteger(qty)&&qty>=1))errors.push('quantity must be a whole number ≥ 1');
+  if(!(Number.isFinite(charges)&&charges>=0))errors.push('charges must be a number ≥ 0');
+  if(s.orderId!=null&&String(s.orderId).length>40)errors.push('order id is too long');
+  if(tenetOrderIdTaken(s.orderId))errors.push('order id '+String(s.orderId).trim()+' is already recorded');
+  if(errors.length)return{ok:false,errors,warn};
+  if(side==='BUY'){
+    if(!tenetActiveEtfs(t.pairs).includes(etf))errors.push(etf+' is not in any configured Tenet pair');
+    const cmp=+PRICES[etf]?.cmp;
+    if(cmp>0&&Math.abs(price/cmp-1)>0.05){if(s.confirmDeviation)warn.push('price differs from the current price by more than 5% (confirmed)');else return{ok:false,needsConfirm:true,errors:['price is more than 5% away from the current price '+cmp.toFixed(2)+' — confirm to record'],warn};}
+  }else{
+    const lot=t.holdings.find(x=>x.id===s.lotId);
+    if(!lot)errors.push('lot not found');
+    else{
+      if(tenetLatestLot(lot.etf)?.id!==lot.id)errors.push('LIFO lock: the newest Tenet lot of '+lot.etf+' must sell first');
+      if(qty>lot.qty)errors.push('cannot sell '+qty+' — lot holds '+lot.qty);
+      if(s.date<lot.buyDate)errors.push('sell date is before the buy date '+lot.buyDate);
+      if(!(price>=lot.targetPrice)&&!String(s.reason||'').trim())errors.push('below the target price '+lot.targetPrice.toFixed(2)+': a reason is required');
+    }
+  }
+  return{ok:errors.length===0,errors,warn};
+}
+// Pure application of one validated fill to a Tenet state object (used inside commitState). Returns the created holding / sold entry.
+function tenetApplyFill(t,fill){
+  const now=fill.recordedAt||new Date().toISOString();
+  if(!Array.isArray(t.fills))t.fills=[];
+  if(fill.side==='BUY'){
+    const n=t.holdings.filter(x=>x.etf===fill.etf).length+1,tp=fill.legacyTargetPct!=null?fill.legacyTargetPct:tenetTarget(n);
+    const lot={id:fill.lotId||('lot_'+fill.fillId),etf:fill.etf,team:fill.team||'GREEN',underlying:fill.underlying||'',buyDate:fill.date,buyTime:fill.time||'',buyPrice:fill.price,qty:fill.qty,buySeq:n,targetPct:tp,
+      targetPrice:fill.price*(1+tp/100),isBid:!!fill.isBid,buyFee:fill.charges||0,priceSource:fill.priceSource||'',orderId:fill.orderId||'',fillId:fill.fillId,source:fill.source};
+    t.holdings.push(lot);t.fills.push({...fill,lotId:lot.id,recordedAt:now});return lot;
+  }
+  const i=t.holdings.findIndex(x=>x.id===fill.lotId),lot=t.holdings[i],part=fill.qty<lot.qty;
+  const buyFeeAlloc=(lot.buyFee||0)*(fill.qty/lot.qty);
+  const gross=(fill.price-lot.buyPrice)*fill.qty,profit=gross-(fill.charges||0)-buyFeeAlloc;
+  const rec={...lot,id:part?lot.id+'_s'+(t.sold.filter(x=>String(x.id).startsWith(lot.id+'_s')).length+1):lot.id,lotId:lot.id,qty:fill.qty,buyFee:buyFeeAlloc,sellDate:fill.date,sellTime:fill.time||'',sellPrice:fill.price,sellFee:fill.charges||0,grossProfit:gross,profit,
+    holdingDays:Math.max(0,tenetDaysBetween(lot.buyDate,fill.date)),sellPriceSource:fill.priceSource||'',sellOrderId:fill.orderId||'',sellFillId:fill.fillId,sellReason:fill.reason||''};
+  if(part){lot.qty-=fill.qty;lot.buyFee=(lot.buyFee||0)-buyFeeAlloc;}else t.holdings.splice(i,1);
+  t.sold.push(rec);t.fills.push({...fill,recordedAt:now});return rec;
+}
+// Records ONE actual fill transactionally. Never depends on the scanner, quotes or EOD2 unless the fill was opened from a signal.
+async function tenetRecordFill(spec,{fromSignal=false}={}){
+  const v=tenetValidateFill(spec);
+  if(!v.ok){const m=(v.errors||[]).join(' · ');try{toast('Fill not recorded: '+m,'warn');}catch(e){}return{ok:false,errors:v.errors,needsConfirm:!!v.needsConfirm};}
+  if(fromSignal&&String(spec.side).toUpperCase()==='BUY'){
+    const sg=tenetScannerActionGate(spec.underlying,sanSym(spec.etf));
+    if(!sg.ok){try{toast('Tenet signal action blocked: '+sg.reason,'warn');}catch(e){}return{ok:false,errors:[sg.reason]};}
+  }
+  const side=String(spec.side).toUpperCase(),etf=sanSym(spec.etf);
+  const fill={fillId:_fillId(),engine:'TENET',orderId:String(spec.orderId||'').trim(),side,etf,team:String(spec.team||'').toUpperCase()==='RED'?'RED':'GREEN',underlying:spec.underlying?sanIndexName(spec.underlying):'',isBid:!!spec.isBid,lotId:side==='SELL'?spec.lotId:'',
+    date:spec.date,time:spec.time||'',price:+spec.price,qty:+spec.qty,charges:spec.charges==null||spec.charges===''?0:+spec.charges,reason:String(spec.reason||'').slice(0,300),
+    source:fromSignal?'signal':(side==='BUY'?'manual-unlinked':'manual'),priceSource:spec.priceSource||'',recordedAt:new Date().toISOString()};
+  if(fromSignal&&fill.isBid&&tenetState().config.oneBidPerWeek&&tenetState().bidWeeks[tenetWeekKey(fill.date)]){try{toast('Tenet BID already used this week','warn');}catch(e){}return{ok:false,errors:['BID already used this week']};}
+  let created=null;
+  const ok=await commitState(()=>{
+    const t=tenetState();
+    if(fill.isBid&&t.config.oneBidPerWeek){const wk=tenetWeekKey(fill.date);if(fromSignal&&t.bidWeeks[wk])return false;t.bidWeeks[wk]=1;}
+    created=tenetApplyFill(t,fill);
+  },{label:'Tenet '+side+' fill'});
+  if(!ok)return{ok:false,errors:['not saved']};
+  try{tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${side} recorded: ${etf} ${fill.qty} @ ${fill.price}`,'ok');}catch(e){}
+  return{ok:true,fill,created};
+}
+// A correction never edits history: it is a new record that changes the referenced fill's numbers and re-derives the affected lot.
+async function tenetRecordCorrection(refFillId,patch){
+  const t0=tenetState(),ref=tenetFills().find(f=>f.fillId===refFillId&&f.type!=='correction');
+  if(!ref)return{ok:false,errors:['fill not found']};
+  const p={};for(const k of ['price','qty','charges','date'])if(patch&&patch[k]!=null)p[k]=patch[k];
+  if('price' in p&&!(+p.price>0))return{ok:false,errors:['price must be positive']};
+  if('charges' in p&&!(+p.charges>=0))return{ok:false,errors:['charges must be ≥ 0']};
+  if('date' in p&&!_isoDate(p.date))return{ok:false,errors:['date must be a real date']};
+  if('qty' in p)return{ok:false,errors:['a quantity correction must be recorded as a new fill (sell/buy the difference)']};
+  const ok=await commitState(()=>{
+    const t=tenetState();
+    t.fills.push({fillId:_fillId(),type:'correction',engine:'TENET',refFillId,patch:p,recordedAt:new Date().toISOString()});
+    if(ref.side==='BUY'){
+      // the BUY fill's numbers apply to the still-open remainder AND to every already-sold slice of that lot
+      const lot=t.holdings.find(x=>x.id===ref.lotId),slices=t.sold.filter(x=>x.lotId===ref.lotId);
+      const price='price' in p?+p.price:null,chg='charges' in p?+p.charges:null,date='date' in p?p.date:null;
+      if(lot){if(price!=null){lot.buyPrice=price;lot.targetPrice=price*(1+lot.targetPct/100);}if(chg!=null)lot.buyFee=chg*(lot.qty/ref.qty);if(date)lot.buyDate=date;}
+      for(const x of slices){
+        if(price!=null){x.buyPrice=price;x.targetPrice=price*(1+x.targetPct/100);}if(chg!=null)x.buyFee=chg*(x.qty/ref.qty);if(date){x.buyDate=date;x.holdingDays=Math.max(0,tenetDaysBetween(date,x.sellDate));}
+        x.grossProfit=(x.sellPrice-x.buyPrice)*x.qty;x.profit=x.grossProfit-(x.sellFee||0)-(x.buyFee||0);
+      }
+    }else{const x=t.sold.find(y=>y.sellFillId===refFillId);if(x){if('price' in p)x.sellPrice=+p.price;if('charges' in p)x.sellFee=+p.charges;if('date' in p){x.sellDate=p.date;x.holdingDays=Math.max(0,tenetDaysBetween(x.buyDate,p.date));}x.grossProfit=(x.sellPrice-x.buyPrice)*x.qty;x.profit=x.grossProfit-(x.sellFee||0)-(x.buyFee||0);}}
+  },{label:'Tenet correction'});
+  return{ok};
+}
+// Cash / pools recomputed from the fills alone must agree with the materialised book (used after reload).
+function tenetReconcile(){
+  const t=tenetState(),fills=(t.fills||[]).filter(f=>f.type!=='correction'),diffs=[];
+  const byLot={};
+  for(const f of fills){if(f.side==='BUY')byLot[f.lotId]=(byLot[f.lotId]||0)+f.qty;}
+  for(const f of fills){if(f.side==='SELL')byLot[f.lotId]=(byLot[f.lotId]||0)-f.qty;}
+  for(const h of t.holdings){if(h.fillId){const exp=byLot[h.id];if(exp!==h.qty)diffs.push(`lot ${h.id}: fills say ${exp}, holding ${h.qty}`);}}
+  for(const [id,q] of Object.entries(byLot))if(q>0&&!t.holdings.some(h=>h.id===id))diffs.push(`lot ${id}: fills say ${q} open, no holding`);
+  return{ok:diffs.length===0,diffs,cash:tenetCashAvailable(),pools:tenetPoolUsage()};
+}
+// ── fill modal (two entry points to the same form) ──
+function tenetOpenFillModal(spec){
+  const s={side:'BUY',price:'',qty:'',charges:'',orderId:'',time:'',date:tenetISTNow().date,reason:'',...spec};
+  const old=document.getElementById('tenet-fill-modal');if(old)old.remove();
+  const ov=document.createElement('div');ov.id='tenet-fill-modal';ov.style.cssText='position:fixed;inset:0;z-index:1800;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:14px';
+  const box=document.createElement('div');box.style.cssText='background:var(--ink2);border:1px solid var(--plate);border-radius:12px;padding:14px;max-width:420px;width:100%;max-height:90vh;overflow:auto';
+  const h=document.createElement('div');h.style.cssText='font-size:13px;font-weight:800;margin-bottom:6px';
+  h.textContent=(s.fromSignal?'Record from signal — ':'Record executed fill — ')+s.side+(s.isBid?' (BID)':'')+' '+(s.etf||'');box.appendChild(h);
+  const mk=(id,label,val,type='text')=>{const w=document.createElement('label');w.style.cssText='display:block;font-size:11px;margin:6px 0';w.textContent=label;const i=document.createElement('input');i.id='tf-'+id;i.type=type;i.value=val==null?'':val;i.className='form-input';i.style.cssText='width:100%;margin-top:2px';w.appendChild(i);box.appendChild(w);return i;};
+  if(!s.etf)mk('etf','ETF symbol','');if(s.side==='BUY'&&!s.fromSignal){mk('underlying','Underlying index (as in the pair)','');}
+  mk('date','Date (YYYY-MM-DD)',s.date,'date');mk('time','Time (HH:MM, optional)',s.time);mk('price','Fill price ₹',s.price,'number');mk('qty','Quantity',s.qty,'number');
+  mk('charges','Charges ₹ (estimate prefilled; use the contract note)',s.charges,'number');mk('order','Broker order ID (optional)',s.orderId);
+  if(s.side==='SELL')mk('reason','Reason (required if below target)',s.reason);
+  const msg=document.createElement('div');msg.id='tf-msg';msg.style.cssText='font-size:11px;color:var(--loss);margin:6px 0;min-height:14px';box.appendChild(msg);
+  const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;justify-content:flex-end';
+  const cancel=document.createElement('button');cancel.className='icon-btn';cancel.textContent='Cancel';cancel.onclick=()=>ov.remove();
+  const save=document.createElement('button');save.className='save-btn';save.textContent='Record fill';
+  save.onclick=async()=>{
+    const g=id=>{const e=document.getElementById('tf-'+id);return e?e.value:'';};
+    const r=await tenetRecordFill({side:s.side,etf:s.etf||g('etf'),team:s.team,underlying:s.underlying||g('underlying'),isBid:s.isBid,lotId:s.lotId,date:g('date'),time:g('time'),price:g('price'),qty:g('qty'),charges:g('charges'),orderId:g('order'),reason:g('reason'),confirmDeviation:s._confirm,priceSource:s.priceSource},{fromSignal:!!s.fromSignal});
+    if(r.ok)ov.remove();
+    else{msg.textContent=(r.errors||[]).join(' · ');if(r.needsConfirm){s._confirm=true;save.textContent='Confirm and record';}}
+  };
+  row.appendChild(cancel);row.appendChild(save);box.appendChild(row);ov.appendChild(box);document.body.appendChild(ov);
+  return ov;
+}
+
 
 // ── P14-B: DEBOUNCED SUPABASE LEDGER SYNC ────────────────────────────────────
 let _sbSyncTimer=null;
@@ -4036,10 +4262,11 @@ function pushTrash(kind,data){
   S.trash=S.trash.filter(t=>t.deletedAt>=cutoff).slice(0,100); // cap 100, auto-purge >30d
 }
 
-function restoreFromTrash(trashId){
+async function restoreFromTrash(trashId){
   const idx=(S.trash||[]).findIndex(t=>t.id===trashId);
   if(idx<0){toast('Item not found in Trash','err');return;}
   const item=S.trash[idx];
+  const _muts=[];
   if(item.kind==='lifo'){
     if(S.lifoLedger.some(t=>t.id===item.data.id)){toast('A transaction with this ID already exists — cannot restore','err');return;}
     // B1 FIX (restore path): if restoring a SELL, verify its cost basis won't be zero.
@@ -4055,14 +4282,13 @@ function restoreFromTrash(trashId){
         return;
       }
     }
-    S.lifoLedger.push(item.data);
+    _muts.push(()=>S.lifoLedger.push(item.data));
   } else if(item.kind==='mom'){
     if(S.momTrades.some(t=>t.id===item.data.id)){toast('A trade with this ID already exists — cannot restore','err');return;}
-    S.momTrades.push(item.data);
-    momRebuildState();
+    _muts.push(()=>{S.momTrades.push(item.data);momRebuildState();});
   }
-  S.trash.splice(idx,1);
-  saveState();
+  const _okr=await commitState(()=>{_muts.forEach(m=>m());const k=S.trash.findIndex(t=>t.id===trashId);if(k>=0)S.trash.splice(k,1);},{label:'Restore from Trash'});
+  if(!_okr)return;
   renderLifo();renderMomPortfolio();renderMomTradeLog();renderTax();renderTrash();
   validateLedgerIntegrity();   // P14-D: re-validate after restore
   toast('Restored from Trash','ok');
@@ -4111,7 +4337,7 @@ function renderTrash(){
 }
 
 // ── PHASE 5: BROKER IMPORT REVIEW PANEL ─────────────────────────────────────
-function importBrokerHolding(idx){
+async function importBrokerHolding(idx){
   if(!guardLedgerWrite())return;   // SAFEGUARD 3
   const c=(S.brokerImportCandidates||[])[idx];
   if(!c){toast('Candidate not found','err');return;}
@@ -4130,9 +4356,9 @@ function importBrokerHolding(idx){
   const priceVal=parseFloat(document.getElementById(`bic-price-${idx}`)?.value)||c.avg;
   const {turn,friction}=lifoFriction('BUY',c.qty,priceVal);
   const txId='bx_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  S.lifoLedger.push({id:txId,date:dateVal,sym:c.sym,type:'BUY',qty:c.qty,price:priceVal,turn,friction,lifoProfit:0,avgBuy:0,linkedBuyId:'',reason:`Imported from ${c.broker} broker sync`});
-  S.brokerImportCandidates=(S.brokerImportCandidates||[]).filter((_,i)=>i!==idx);
-  saveState();renderLifo();renderBrokerImportPanel();
+  const _oki=await commitState(()=>{S.lifoLedger.push({id:txId,date:dateVal,sym:c.sym,type:'BUY',qty:c.qty,price:priceVal,turn,friction,lifoProfit:0,avgBuy:0,linkedBuyId:'',reason:`Imported from ${c.broker} broker sync`});S.brokerImportCandidates=(S.brokerImportCandidates||[]).filter((_,i)=>i!==idx);},{label:'Broker import'});
+  if(!_oki)return;
+  renderLifo();renderBrokerImportPanel();
   toast(`Imported ${c.sym} × ${c.qty} as a BUY lot`,'ok');
 }
 
@@ -4264,23 +4490,23 @@ function renderCorpActions(){
 }
 
 // ── PHASE 5.3: DIVIDEND TRACKING (manual entry, not auto-fetched) ───────────
-function addDividend(){
+async function addDividend(){
   const sym=sanSym(document.getElementById('div-sym')?.value); // SEC FIX 4
   const amount=parseFloat(document.getElementById('div-amount')?.value);
   const date=document.getElementById('div-date')?.value||localDate();
   const note=sanNote(document.getElementById('div-note')?.value); // SEC FIX 4
   if(!sym){toast('Enter a symbol','err');return;}
   if(!amount||amount<=0){toast('Enter a positive amount','err');return;}
-  if(!Array.isArray(S.dividends)) S.dividends=[];
-  S.dividends.unshift({id:'dv_'+Date.now(),sym,amount,date,note});
-  saveState();renderDividends();
+  const _okv=await commitState(()=>{if(!Array.isArray(S.dividends))S.dividends=[];S.dividends.unshift({id:'dv_'+Date.now(),sym,amount,date,note});},{label:'Dividend'});
+  if(!_okv)return;
+  renderDividends();
   toast(`₹${amount.toFixed(2)} dividend logged for ${sym}`,'ok');
   ['div-sym','div-amount','div-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
 }
 
-function deleteDividend(id){
-  S.dividends=(S.dividends||[]).filter(d=>d.id!==id);
-  saveState();renderDividends();
+async function deleteDividend(id){
+  const _okv=await commitState(()=>{S.dividends=(S.dividends||[]).filter(d=>d.id!==id);},{label:'Delete dividend'});
+  if(_okv)renderDividends();
 }
 
 function totalDividends(){
@@ -5862,9 +6088,9 @@ function logLifoOrder(){
   if(btn&&btn.disabled) return; // already in-flight
   if(btn) btn.disabled=true;
   // Use a finally-style re-enable via wrapper
-  try{ _logLifoOrderInner(); }finally{ if(btn) setTimeout(()=>{btn.disabled=false;},600); }
+  Promise.resolve(_logLifoOrderInner()).catch(e=>console.error('logLifoOrder',e)).finally(()=>{ if(btn) setTimeout(()=>{btn.disabled=false;},600); });
 }
-function _logLifoOrderInner(){
+async function _logLifoOrderInner(){
   const sym=document.getElementById('f-sym').value;
   const type=document.getElementById('f-type').value;
   const date=document.getElementById('f-date').value;
@@ -5944,10 +6170,11 @@ function _logLifoOrderInner(){
   // Every other path uses Date.now()+'_'+Math.random(); now consistent.
   const txId='lx_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
   const reason=document.getElementById('f-reason')?.value.trim()||'';
-  S.lifoLedger.push({id:txId,date,sym,type,qty,price,turn,friction,lifoProfit:0,avgBuy:0,linkedBuyId,reason});
+  const _okg=await commitState(()=>{S.lifoLedger.push({id:txId,date,sym,type,qty,price,turn,friction,lifoProfit:0,avgBuy:0,linkedBuyId,reason});},{label:'LIFO order'});
+  if(!_okg)return;
   qtyEl.dataset.linkedBuyId='';
   if(document.getElementById('f-reason'))document.getElementById('f-reason').value='';
-  saveState();renderLifo();
+  renderLifo();
   clearStaged();
   // Persistent confirmation with undo (10s window)
   _showConfirmCard(type,qty,sym,price,turn,friction,txId);
@@ -6085,7 +6312,7 @@ function stageSell(sym,cmp,qty,linkedBuyId){
   setTimeout(()=>{const b=document.getElementById('staged-banner');if(b)b.scrollIntoView({behavior:'smooth',block:'center'});},120);
 }
 
-function deleteLifoTx(id){
+async function deleteLifoTx(id){
   const tx=S.lifoLedger.find(t=>t.id===id);
   if(!tx){toast('Transaction not found','err');return;}
 
@@ -6133,9 +6360,9 @@ function deleteLifoTx(id){
   }
 
   if(!confirm('Delete this transaction? You can restore it from Trash within 30 days.'))return;
-  S.lifoLedger=S.lifoLedger.filter(t=>t.id!==id);
-  pushTrash('lifo',tx);
-  saveState();renderLifo();renderTrash();
+  const _okl=await commitState(()=>{S.lifoLedger=S.lifoLedger.filter(t=>t.id!==id);pushTrash('lifo',tx);},{label:'Delete transaction'});
+  if(!_okl)return;
+  renderLifo();renderTrash();
   toast('Transaction deleted — moved to Trash','ok');
 }
 
@@ -6712,7 +6939,7 @@ function momRecordFy(date,pnl,holdDays,sym){
 function momExecuteTrade(etf,action,units,price,charges,date,reason){
   etf=sanSym(etf);action=String(action||'').toUpperCase();
   units=Number(units);price=Number(price);charges=Number(charges)||0;
-  if(!etf||!(units>0)||!(price>0)||!['BUY','SELL','EXIT','SKIM'].includes(action)){
+  if(!etf||!Number.isFinite(units)||!(units>0)||!Number.isFinite(price)||!(price>0)||!Number.isFinite(charges)||!['BUY','SELL','EXIT','SKIM'].includes(action)){
     toast('⛔ DM trade rejected — invalid symbol/action/units/price','err');return null;
   }
   const frictPct=dmTotalFrictionFraction();
@@ -6750,43 +6977,53 @@ function momExecuteTrade(etf,action,units,price,charges,date,reason){
   return trade;
 }
 
+let _momConfirmInFlight=false;
 async function saveMomConfirmed(){
   if(previewRecordBlocked())return;
   if(dmSignalData?.dataQualityOk===false){toast('⛔ DM execution blocked — recompute with complete, current market history','err');return;}
   if(!pendingMomConfirms.length)return;
-  let count=0;
-  // FIX BUG-30: use user-set execution date from dm-exec-date field; fallback to today
-  const execDateEl=document.getElementById('dm-exec-date');
-  const today=execDateEl?.value||localDate();
-  for(let i=0;i<pendingMomConfirms.length;i++){
-    const c=pendingMomConfirms[i];
-    if(c.isLiquid)continue; // skip LIQUIDBEES — no execution needed
-    // FIX #20: use correct IDs matching renderDMSignal output (dm-price-i / dm-units-i)
-    const ckEl=document.getElementById(`dm-ck-${i}`);
-    if(ckEl&&!ckEl.checked)continue;
-    const units=parseFloat(document.getElementById(`dm-units-${i}`)?.value||0);
-    const price=parseFloat(document.getElementById(`dm-price-${i}`)?.value||c.execPrice||0);
-    const charges=parseFloat(document.getElementById(`dm-charges-${i}`)?.value||0);
-    const reason=document.getElementById(`dm-reason-${i}`)?.value.trim()||'';
-    if(!units||!price)continue;
-    if(c.action==='BUY'){
-      const cc=checkConcentration(c.etf,units*price);
-      if(cc.block){toast(`⛔ ${c.etf} skipped: would be ${cc.pct.toFixed(1)}% of treasury`,'err');continue;}
-      if(cc.warn)toast(`⚠️ ${c.etf} now ${cc.pct.toFixed(1)}% of treasury`,'warn');
+  if(_momConfirmInFlight){toast('A DM save is already in progress','warn');return;}
+  _momConfirmInFlight=true;
+  try{
+    // FIX BUG-30: use user-set execution date from dm-exec-date field; fallback to today
+    const execDateEl=document.getElementById('dm-exec-date');
+    const today=execDateEl?.value||localDate();
+    const signalDate=dmSignalData?.commonAsOf||today;
+    const specs=[];
+    for(let i=0;i<pendingMomConfirms.length;i++){
+      const c=pendingMomConfirms[i];
+      if(c.isLiquid)continue; // skip LIQUIDBEES — no execution needed
+      // FIX #20: use correct IDs matching renderDMSignal output (dm-price-i / dm-units-i)
+      const ckEl=document.getElementById(`dm-ck-${i}`);
+      if(ckEl&&!ckEl.checked)continue;
+      const units=parseFloat(document.getElementById(`dm-units-${i}`)?.value||0);
+      const price=parseFloat(document.getElementById(`dm-price-${i}`)?.value||c.execPrice||0);
+      const charges=parseFloat(document.getElementById(`dm-charges-${i}`)?.value||0);
+      const reason=document.getElementById(`dm-reason-${i}`)?.value.trim()||'';
+      if(!units||!price)continue;
+      if(c.action==='BUY'){
+        const cc=checkConcentration(c.etf,units*price);
+        if(cc.block){toast(`⛔ ${c.etf} skipped: would be ${cc.pct.toFixed(1)}% of treasury`,'err');continue;}
+        if(cc.warn)toast(`⚠️ ${c.etf} now ${cc.pct.toFixed(1)}% of treasury`,'warn');
+      }
+      specs.push({i,etf:c.etf,action:c.action,units,price,charges,reason});
     }
-    const trade=momExecuteTrade(c.etf,c.action,units,price,charges,today,reason);
-    if(!trade)continue;
-    await saveMomTradeToSB(trade);
-    count++;
-  }
-  if(count>0){
+    if(!specs.length){toast('No trades saved — fill in units first','warn');return;}
+    // A3-2: idempotency key per intended trade
+    const fresh=[];let dups=0;
+    for(const sp of specs){sp.opId=await sha256Hex([signalDate,sp.etf,sp.action,sp.units,sp.price].join('|'));if(S.momTrades.some(t=>t.opId===sp.opId))dups++;else fresh.push(sp);}
+    const handled=new Set(specs.map(sp=>sp.i));
+    if(dups)toast(`${dups} trade(s) already recorded — skipped (duplicate confirm)`,'warn');
+    if(!fresh.length){pendingMomConfirms=pendingMomConfirms.filter((c,i)=>!handled.has(i));return;}
+    const done=[];
+    const ok=await commitState(()=>{for(const sp of fresh){const tr=momExecuteTrade(sp.etf,sp.action,sp.units,sp.price,sp.charges,today,sp.reason);if(tr){tr.opId=sp.opId;done.push(tr);}}if(!done.length)return false;},{label:'DM trades'});
+    if(!ok)return;
+    pendingMomConfirms=pendingMomConfirms.filter((c,i)=>!handled.has(i));      // confirmed items leave the list after the commit
+    for(const tr of done)await saveMomTradeToSB(tr);                            // remote only after the durable local commit
     await syncMomPortfolioToSB();
-    saveState();
     renderMomPortfolio();renderMomTradeLog();renderTax();
-    toast(`${count} trade(s) saved`,'ok');
-  } else {
-    toast('No trades saved — fill in units first','warn');
-  }
+    toast(`${done.length} trade(s) saved`,'ok');
+  }finally{_momConfirmInFlight=false;}
 }
 
 async function addMomManualTrade(){
@@ -6803,11 +7040,11 @@ async function addMomManualTrade(){
     if(cc.block){toast(`⛔ Blocked: ${etf} would be ${cc.pct.toFixed(1)}% of treasury`,'err');return;}
     if(cc.warn&&!confirm(`⚠️ ${etf} would be ${cc.pct.toFixed(1)}% of your total treasury. Continue?`))return;
   }
-  const trade=momExecuteTrade(etf,type,units,price,charges,date,document.getElementById('m-reason')?.value.trim()||'');
-  if(!trade)return;
-  await saveMomTradeToSB(trade);
+  let trade=null;
+  const _okc=await commitState(()=>{trade=momExecuteTrade(etf,type,units,price,charges,date,document.getElementById('m-reason')?.value.trim()||'');if(!trade)return false;},{label:'DM trade'});
+  if(!_okc||!trade)return;
+  await saveMomTradeToSB(trade);          // remote only after the durable local commit
   await syncMomPortfolioToSB();
-  saveState();
   renderMomPortfolio();renderMomTradeLog();renderTax();
   ['m-etf','m-units','m-price'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('m-charges').value='0';
@@ -7075,10 +7312,9 @@ function exportMomCSV(){
 async function deleteMomTrade(id){
   if(!confirm('Delete trade? You can restore it from Trash within 30 days.'))return;
   const tr=S.momTrades.find(t=>t.id===id);
-  await sbFetch(`trades?id=eq.${encodeURIComponent(id)}`,{method:'DELETE'});   // F-10 FIX: encode filter value
-  S.momTrades=S.momTrades.filter(t=>t.id!==id);
-  if(tr) pushTrash('mom',tr);
-  momRebuildState();saveState();
+  const _okd=await commitState(()=>{S.momTrades=S.momTrades.filter(t=>t.id!==id);if(tr)pushTrash('mom',tr);momRebuildState();},{label:'Delete trade'});
+  if(!_okd)return;
+  await sbFetch(`trades?id=eq.${encodeURIComponent(id)}`,{method:'DELETE'});   // F-10 FIX: encode filter value; remote only after the local commit
   renderMomPortfolio();renderMomTradeLog();renderTax();renderTrash();
   toast('Trade deleted — moved to Trash','ok');
 }
@@ -8552,7 +8788,8 @@ const ENGINE_CERTIFIABLE=Object.freeze({LIFO:false,DM:false,TENET:false});   // 
 const RUN_ROLES=Object.freeze(['CORE_REFERENCE','EXECUTION_REQUIRED','HELD_POSITION','LIQUID_SLEEVE','RANKING_CANDIDATE','BENCHMARK','OPTIONAL_DISPLAY']);
 const RUN_MODE={LIFO:'research',DM:'research',TENET:'research'};             // what the existing "Run" buttons do (certified is disabled until an engine is certifiable)
 const RUN_PREVIEW={active:false,until:0};                                    // set while a preview is shown (10 min): money-write handlers refuse
-function previewRecordBlocked(){if(RUN_PREVIEW.active&&Date.now()<RUN_PREVIEW.until){try{toast('Preview only — not actionable. Run the preflight and a real signal first.','warn');}catch(e){}return true;}RUN_PREVIEW.active=false;return false;}
+function setPreviewMode(on){try{document.body.classList.toggle('preview-mode',!!on);}catch(e){}}
+function previewRecordBlocked(){if(RUN_PREVIEW.active&&Date.now()<RUN_PREVIEW.until){try{toast('Preview only — not actionable. Run the preflight and a real signal first.','warn');}catch(e){}return true;}RUN_PREVIEW.active=false;setPreviewMode(false);return false;}
 function _cAddDays(d,n){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);}
 function buildRunContract(strategy,params,snapshot,terminalState){
   const eng=String(strategy||'').toUpperCase(),p=params||{},ts=terminalState||null;
@@ -8716,9 +8953,9 @@ function renderPreflightPanel(containerId,pf,{refusal=null}={}){
 const PREFLIGHT_LAST={};   // engine -> {contract, pf}
 function preflightAction(engine,mode){
   const eng=String(engine).toUpperCase();
-  if(mode==='preview'){RUN_PREVIEW.active=true;RUN_PREVIEW.until=Date.now()+10*60*1000;try{toast('Preview mode: record/confirm actions are disabled','warn');}catch(e){}
+  if(mode==='preview'){RUN_PREVIEW.active=true;RUN_PREVIEW.until=Date.now()+10*60*1000;setPreviewMode(true);try{toast('Preview mode: record/confirm actions are disabled','warn');}catch(e){}
     if(eng==='DM'&&typeof computeDMSignal==='function')computeDMSignal();return;}
-  RUN_PREVIEW.active=false;
+  RUN_PREVIEW.active=false;setPreviewMode(false);
   if(mode==='certified'&&!(PREFLIGHT_LAST[eng]&&PREFLIGHT_LAST[eng].pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true))return;
   RUN_MODE[eng]=mode;
   if(eng==='DM')return runDMBacktest();if(eng==='LIFO')return runLifoBacktest();if(eng==='TENET')return runTenetBacktestV3();
@@ -8737,7 +8974,7 @@ async function eod2RunGate(engine,params,panelId,anchorId,snapshot){
     renderPreflightPanel(panelId,pf);
     if(mode==='certified'&&!(pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true))return{ok:false,pf,mode,exclusions:[],message:'Certified run is not available: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending)':'the data does not meet the certified requirements')};
     if(!pf.canResearch)return{ok:false,pf,mode,exclusions:[],message:'Run refused — '+(pf.rows.filter(r=>r.action==='BLOCKS_RESEARCH').map(r=>`${r.symbol} ${r.code}`).join(', ')||'required data unavailable')};
-    RUN_PREVIEW.active=false;
+    RUN_PREVIEW.active=false;setPreviewMode(false);
     return{ok:true,pf,mode,exclusions:pf.exclusions};
   }catch(e){return{ok:false,exclusions:[],message:'Preflight failed: '+(e&&e.message||e)};}
   finally{if(own)EOD2Store.endRun(own);}
@@ -10376,7 +10613,7 @@ function renderTaxTradeBreakdown(preRecords=null,preCalc=null){
 // ── UNIVERSE MANAGEMENT ───────────────────────────────────────────────────────
 function getMomUniverse(){rebuildUniverses();return S.universe.filter(e=>e.tag==='momentum'||e.tag==='both').map(e=>e.sym);}
 
-function renderUniverse(){
+function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}
   rebuildUniverses();
   const uni=S.universe;
   const search=(document.getElementById('uni-search')?.value||'').toUpperCase().trim();
@@ -10391,7 +10628,7 @@ function renderUniverse(){
     <div class="stat-card"><div class="stat-label">Showing</div><div class="stat-val">${filtered.length}</div></div>`;
   const tagCol={lifo:'var(--azure)',momentum:'var(--go)',both:'var(--gold)'};
   const tagLbl={lifo:'LIFO',momentum:'MOM',both:'BOTH'};
-  document.getElementById('uni-list').innerHTML=`<div style="display:flex;flex-wrap:wrap">${filtered.map(e=>`<div class="etf-chip">${escapeHtml(e.sym)}<span style="font-size:8px;color:var(--fog);margin-left:5px">${escapeHtml((e.assetClass||'equity').toUpperCase())}</span>${e.linkedIndex?`<span style="font-size:8px;color:var(--fog);margin-left:5px">→ ${escapeHtml(e.linkedIndex)}</span>`:''}<button onclick="cycleTag(${htmlJsArg(e.sym)})" title="Tap to switch engine" style="background:none;border:1px solid ${tagCol[e.tag]||tagCol.momentum};color:${tagCol[e.tag]||tagCol.momentum};border-radius:4px;font-size:8px;font-weight:800;margin-left:6px;padding:1px 4px;cursor:pointer">${tagLbl[e.tag]||'MOM'}</button><button onclick="editAssetClass(${htmlJsArg(e.sym)})" title="Edit tax asset class" style="background:none;border:none;color:var(--violet);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">⚖</button><button onclick="editLinkedIndex(${htmlJsArg(e.sym)})" title="Link this ETF to its real underlying index" style="background:none;border:none;color:var(--gold);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">🔗</button><button onclick="editYfSymbol(${htmlJsArg(e.sym)})" title="Edit Yahoo ticker (${escapeHtml(e.yf||e.sym+'.NS')})" style="background:none;border:none;color:var(--fog);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">✎</button><button class="chip-del" onclick="removeETF(${htmlJsArg(e.sym)})">×</button></div>`).join('')}</div><p style="font-size:10px;color:var(--fog);margin-top:8px">Tap a tag to cycle 📦 LIFO → 📡 MOM → ⚡ BOTH</p>`;
+  document.getElementById('uni-list').innerHTML=`<div style="display:flex;flex-wrap:wrap">${filtered.map(e=>`<div class="etf-chip">${escapeHtml(e.sym)}<span style="font-size:8px;color:var(--fog);margin-left:5px">${escapeHtml((e.assetClass||'equity').toUpperCase())}</span>${e.linkedIndex?`<span style="font-size:8px;color:var(--fog);margin-left:5px">→ ${escapeHtml(e.linkedIndex)}</span>`:''}${['LIFO','DM','TENET'].map(en=>{const on=(e.engines||enginesFromTag(e.tag)).includes(en),col=en==='LIFO'?'var(--azure)':en==='DM'?'var(--go)':'var(--gold)';return `<button onclick="toggleEngine(${htmlJsArg(e.sym)},'${en}')" title="${en} engine ${on?'ON':'OFF'} — tap to toggle" style="background:${on?col:'none'};border:1px solid ${col};color:${on?'var(--ink)':col};border-radius:4px;font-size:8px;font-weight:800;margin-left:${en==='LIFO'?'6':'2'}px;padding:1px 4px;cursor:pointer;opacity:${on?1:.55}">${en[0]}</button>`;}).join('')}<button onclick="editAssetClass(${htmlJsArg(e.sym)})" title="Edit tax asset class" style="background:none;border:none;color:var(--violet);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">⚖</button><button onclick="editLinkedIndex(${htmlJsArg(e.sym)})" title="Link this ETF to its real underlying index" style="background:none;border:none;color:var(--gold);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">🔗</button><button onclick="editYfSymbol(${htmlJsArg(e.sym)})" title="Edit Yahoo ticker (${escapeHtml(e.yf||e.sym+'.NS')})" style="background:none;border:none;color:var(--fog);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">✎</button><button class="chip-del" onclick="removeETF(${htmlJsArg(e.sym)})">×</button></div>`).join('')}</div><p style="font-size:10px;color:var(--fog);margin-top:8px">Tap a tag to cycle 📦 LIFO → 📡 MOM → ⚡ BOTH</p>`;
 }
 
 // If a symbol's Yahoo ticker is wrong, no history can ever be fetched for it and
@@ -10434,7 +10671,155 @@ async function editYfSymbol(sym){
   }catch(err){toast(`Fetch failed: ${err?.message||err}`,'err');}
 }
 
-function cycleTag(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;e.tag=e.tag==='lifo'?'momentum':e.tag==='momentum'?'both':'lifo';rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();syncUniverseToSB();}
+// ── ENGINES MODEL · MIGRATION · VALIDATION (A3-4, A3-5, A3-6) ───────────────────────────────────
+const ENGINES=Object.freeze(['LIFO','DM','TENET']);
+function enginesFromTag(tag){return tag==='both'?['LIFO','DM']:tag==='lifo'?['LIFO']:tag==='momentum'?['DM']:[];}
+function tagFromEngines(engines){const l=engines.includes('LIFO'),d=engines.includes('DM');return l&&d?'both':l?'lifo':d?'momentum':'none';}   // 'none' = TENET-only: in neither the LIFO nor the DM list
+function ensureUniverseEngines(){
+  (S.universe||[]).forEach(e=>{if(!e||typeof e!=='object')return;
+    if(!Array.isArray(e.engines))e.engines=enginesFromTag(e.tag);
+    e.engines=[...new Set(e.engines.filter(x=>ENGINES.includes(x)))];
+    e.tag=tagFromEngines(e.engines);});
+}
+// Runs on a RAW parsed snapshot (stored state or backup) BEFORE it is applied. Idempotent.
+function migrateRawState(raw){
+  if(!raw||typeof raw!=='object')return raw;
+  const t=raw.tenet;
+  if(t&&typeof t==='object'){
+    const c=t.config;
+    if(c&&typeof c==='object'&&c.selectionDistancePct==null&&c.highExclusionPct!=null){const v=parseFloat(c.highExclusionPct);if(Number.isFinite(v))c.selectionDistancePct=Math.min(100,Math.max(0,v));}
+    delete t._live;delete t._indexMetrics;
+    ['holdings','sold','fills'].forEach(k=>{if(Array.isArray(t[k]))t[k].forEach(x=>{if(x&&typeof x==='object'&&!x.engine)x.engine='TENET';});});
+  }
+  if(Array.isArray(raw.lifoLedger))raw.lifoLedger.forEach(x=>{if(x&&typeof x==='object'&&!x.engine)x.engine='LIFO';});
+  if(Array.isArray(raw.momTrades))raw.momTrades.forEach(x=>{if(x&&typeof x==='object'&&!x.engine)x.engine='DM';});
+  if(Array.isArray(raw.universe)){
+    const inPair=new Set();((t&&Array.isArray(t.pairs)?t.pairs:[])).forEach(p=>{if(p)[p.green,p.red].forEach(s=>{if(s)inPair.add(String(s).toUpperCase());});});
+    raw.universe.forEach(e=>{if(!e||typeof e!=='object')return;
+      if(!Array.isArray(e.engines)){const en=enginesFromTag(e.tag);if(inPair.has(String(e.sym||'').toUpperCase()))en.push('TENET');e.engines=en;}
+      e.engines=[...new Set(e.engines.filter(x=>ENGINES.includes(x)))];e.tag=tagFromEngines(e.engines);});
+  }
+  return raw;
+}
+const _finPos=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
+function validateTenetState(t,st){
+  const errs=[];if(!t||typeof t!=='object')return errs;
+  const uni=new Set(((st&&st.universe)||[]).map(e=>String(e&&e.sym||'').toUpperCase()));
+  (t.holdings||[]).forEach((h,i)=>{const w=`Tenet holding #${i+1} (${h&&h.etf})`;
+    if(!h||typeof h!=='object'){errs.push(w+' is not an object');return;}
+    if(!(Number.isInteger(h.qty)&&h.qty>=1))errs.push(w+': qty must be a whole number ≥ 1');
+    if(!_finPos(h.buyPrice))errs.push(w+': buyPrice must be positive');
+    if(!_isoDate(h.buyDate))errs.push(w+': buyDate is not a real date');
+    if(!(Number.isInteger(h.buySeq)&&h.buySeq>0))errs.push(w+': buySeq must be a positive integer');
+    if(!(_finPos(h.targetPrice)&&h.targetPrice>h.buyPrice))errs.push(w+': target must be above the buy price');
+    if(uni.size&&!uni.has(String(h.etf||'').toUpperCase()))errs.push(w+': symbol is not in the universe');
+    if(h.buyFee!=null&&!(Number.isFinite(h.buyFee)&&h.buyFee>=0))errs.push(w+': buyFee must be ≥ 0');});
+  (t.sold||[]).forEach((x,i)=>{const w=`Tenet sold #${i+1}`;
+    if(!(Number.isInteger(x&&x.qty)&&x.qty>=1))errs.push(w+': qty must be a whole number ≥ 1');
+    if(!_finPos(x&&x.buyPrice)||!_finPos(x&&x.sellPrice))errs.push(w+': prices must be positive');
+    if(!_isoDate(x&&x.buyDate)||!_isoDate(x&&x.sellDate))errs.push(w+': dates must be real');
+    else if(x.sellDate<x.buyDate)errs.push(w+': sold before bought');
+    if(!Number.isFinite(x&&x.profit))errs.push(w+': profit must be a number');});
+  (t.capital||[]).forEach((c,i)=>{if(!Number.isFinite(c&&c.amount))errs.push(`Tenet capital #${i+1}: amount must be a number`);});
+  const alloc=(t.capital||[]).reduce((a,c)=>a+(+c.amount||0),0);
+  if(alloc<0)errs.push('Tenet allocated capital is negative');
+  const open=(t.holdings||[]).reduce((a,h)=>a+(+h.buyPrice||0)*(+h.qty||0),0);
+  if(open>alloc+1e-6&&alloc>=0&&(t.holdings||[]).length)errs.push('Tenet open cost exceeds allocated capital (pools would be negative)');
+  const seen=new Set();(t.fills||[]).forEach(f=>{if(f&&f.orderId){const k=String(f.orderId).toUpperCase();if(seen.has(k))errs.push('duplicate Tenet order id '+f.orderId);seen.add(k);}});
+  return errs;
+}
+function validateConfigRanges(c){
+  const errs=[];if(!c||typeof c!=='object')return errs;
+  const num=(k,lo,hi)=>{if(c[k]==null)return;const v=c[k];if(typeof v!=='number'||!Number.isFinite(v)||v<lo||v>hi)errs.push(`config.${k} must be a number between ${lo} and ${hi}`);};
+  num('momCapital',0,1e12);num('slippage',0,100);num('dmFriction',0,100);num('maxLots',1,1000);num('maxScan',1,1000);num('dmSlots',1,100);num('dmRebalanceDays',1,365);
+  num('minVol',0,1e12);num('highGuardPct',0,100);num('lifoLiquidRate',0,100);num('refreshMins',0,1440);
+  const t=c.tenet;if(t&&typeof t==='object'){['firstTargetPct','targetStepPct','avgTriggerPct','selectionDistancePct','newBuyAllocPct','bidAllocPct'].forEach(k=>{if(t[k]!=null&&!(Number.isFinite(t[k])&&t[k]>=0&&t[k]<=100))errs.push(`tenet.config.${k} must be between 0 and 100`);});}
+  return errs;
+}
+// open units per symbol per engine, from a state snapshot (default: live state)
+function openUnitsByEngine(st){
+  st=st||S;const out={};const add=(sym,eng,u)=>{if(!sym||!(u>1e-9))return;(out[sym]=out[sym]||{})[eng]=(out[sym][eng]||0)+u;};
+  const net={};(st.lifoLedger||[]).forEach(t=>{if(!t)return;net[t.sym]=(net[t.sym]||0)+(t.type==='BUY'?+t.qty||0:-(+t.qty||0));});
+  Object.entries(net).forEach(([s,u])=>add(s,'LIFO',u));
+  Object.entries(st.momPositions||{}).forEach(([s,p])=>add(s,'DM',+(p&&p.units)||0));
+  ((st.tenet&&st.tenet.holdings)||[]).forEach(h=>add(h&&h.etf,'TENET',+h.qty||0));
+  return out;
+}
+// A3-4: may this universe exist given the pairs and the open positions? (never mutates)
+function validateUniverseChange(next,st){
+  st=st||S;const errors=[],uni=Array.isArray(next)?next:[];
+  const seen=new Set();uni.forEach(e=>{const k=String(e&&e.sym||'').toUpperCase();if(!k){errors.push('an entry has no symbol');return;}if(seen.has(k))errors.push('duplicate symbol '+k);seen.add(k);});
+  const by=new Map(uni.map(e=>[String(e&&e.sym||'').toUpperCase(),e]));
+  const engOf=e=>Array.isArray(e&&e.engines)?e.engines:enginesFromTag(e&&e.tag);
+  for(const p of ((st.tenet&&st.tenet.pairs)||[])){
+    if(!p.green&&p.red)errors.push(`Tenet slot ${p.underlying}: a RED-only pair is not allowed`);
+    for(const [side,sym] of [['GREEN',p.green],['RED',p.red]]){
+      if(!sym)continue;const e=by.get(String(sym).toUpperCase());
+      if(!e){errors.push(`Tenet slot ${p.underlying}: ${side} ${sym} is not in the universe`);continue;}
+      if(!engOf(e).includes('TENET'))errors.push(`Tenet slot ${p.underlying}: ${sym} needs the TENET engine`);
+      if(sanIndexName(e.linkedIndex)!==sanIndexName(p.underlying))errors.push(`Tenet slot ${p.underlying}: ${sym} is not linked to ${p.underlying}`);
+    }
+  }
+  for(const [sym,m] of Object.entries(openUnitsByEngine(st))){
+    const e=by.get(sym.toUpperCase());
+    for(const [eng,u] of Object.entries(m)){
+      if(!e)errors.push(`Close ${+u.toFixed(4)} unit(s) of ${sym} in ${eng} first (it would leave the universe)`);
+      else if(!engOf(e).includes(eng))errors.push(`Close ${+u.toFixed(4)} unit(s) of ${sym} in ${eng} first (the ${eng} engine would be removed)`);
+    }
+  }
+  return{ok:errors.length===0,errors};
+}
+function _universeBlocked(errors){try{toast('⛔ Blocked: '+errors.slice(0,3).join(' · ')+(errors.length>3?` (+${errors.length-3} more)`:''),'err');}catch(e){}}
+async function setEnginesFor(sym,engines){
+  ensureUniverseEngines();
+  const e=S.universe.find(x=>x.sym===sym);if(!e)return false;
+  const en=[...new Set(engines.filter(x=>ENGINES.includes(x)))];
+  const next=S.universe.map(x=>x.sym===sym?{...x,engines:en,tag:tagFromEngines(en)}:x);
+  const v=validateUniverseChange(next);if(!v.ok){_universeBlocked(v.errors);return false;}
+  const ok=await commitState(()=>{const x=S.universe.find(y=>y.sym===sym);x.engines=en;x.tag=tagFromEngines(en);rebuildUniverses();},{label:'Engines'});
+  if(!ok)return false;
+  TENET_RUNTIME.live=null;
+  try{renderUniverse();populateLifoDropdown();}catch(e2){}
+  try{await syncUniverseToSB();}catch(e3){}
+  return true;
+}
+function toggleEngine(sym,engine){ensureUniverseEngines();const e=S.universe.find(x=>x.sym===sym);if(!e)return;const has=e.engines.includes(engine);return setEnginesFor(sym,has?e.engines.filter(x=>x!==engine):[...e.engines,engine]);}
+// A3-5: read-only consolidated view; optional broker quantity per ETF shows a mismatch
+function holdingsByEtf(st,brokerQty){
+  const open=openUnitsByEngine(st||S),rows=Object.entries(open).map(([sym,m])=>({sym,total:Object.values(m).reduce((a,b)=>a+b,0),byEngine:m}));
+  rows.forEach(r=>{const b=brokerQty&&brokerQty[r.sym];r.broker=Number.isFinite(+b)&&b!==''&&b!=null?+b:null;r.mismatch=r.broker!=null&&Math.abs(r.broker-r.total)>1e-6;});
+  return rows.sort((a,b)=>a.sym.localeCompare(b.sym));
+}
+const HOLDINGS_BROKER_QTY={};
+function renderHoldingsByEtf(){
+  const host=document.getElementById('holdings-by-etf');if(!host)return;
+  const rows=holdingsByEtf(S,HOLDINGS_BROKER_QTY);
+  host.innerHTML=`<div class="card" style="margin-top:10px"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Holdings by ETF (all engines, read-only)</div>${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Total units</th><th>LIFO</th><th>DM</th><th>TENET</th><th>Broker qty</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.sym)}</td><td class="mono">${+r.total.toFixed(4)}</td><td class="mono">${+(r.byEngine.LIFO||0).toFixed(4)}</td><td class="mono">${+(r.byEngine.DM||0).toFixed(4)}</td><td class="mono">${+(r.byEngine.TENET||0).toFixed(4)}</td><td><input class="form-input" style="width:80px" value="${r.broker==null?'':r.broker}" onchange="HOLDINGS_BROKER_QTY[${htmlJsArg(r.sym)}]=this.value;renderHoldingsByEtf()">${r.mismatch?` <span style="color:var(--loss);font-size:10px">≠ ${+r.total.toFixed(4)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<span style="color:var(--fog);font-size:11px">No open positions.</span>'}</div>`;
+}
+// Import engines from market-data: a pure diff; applied only on confirm
+function diffEnginesFromManifest(manifest){
+  ensureUniverseEngines();const out=[],files=(manifest&&manifest.files)||{};
+  S.universe.forEach(e=>{const f=files[e.sym];if(!f||!Array.isArray(f.engines))return;const want=[...new Set(f.engines.filter(x=>ENGINES.includes(x)))].sort(),have=[...e.engines].sort();
+    if(want.join()!==have.join())out.push({sym:e.sym,from:have,to:want});});
+  return out;
+}
+async function importEnginesFromMarketData(){
+  let m;try{m=(await EOD2Store.loadHandle()).manifest;}catch(e){toast('Cannot load the market-data manifest: '+(e&&e.message||e),'err');return;}
+  const d=diffEnginesFromManifest(m);if(!d.length){toast('Engines already match market-data','ok');return;}
+  if(!confirm('Apply engine changes from market-data?\n\n'+d.map(x=>`${x.sym}: ${x.from.join('+')||'—'} → ${x.to.join('+')||'—'}`).join('\n')))return;
+  const next=S.universe.map(e=>{const x=d.find(y=>y.sym===e.sym);return x?{...e,engines:x.to,tag:tagFromEngines(x.to)}:e;});
+  const v=validateUniverseChange(next);if(!v.ok){_universeBlocked(v.errors);return;}
+  const ok=await commitState(()=>{d.forEach(x=>{const e=S.universe.find(y=>y.sym===x.sym);e.engines=x.to;e.tag=tagFromEngines(x.to);});rebuildUniverses();},{label:'Import engines'});
+  if(ok){TENET_RUNTIME.live=null;try{renderUniverse();}catch(e){}toast(`${d.length} ETF engine assignment(s) updated`,'ok');}
+}
+function tenetAssertHistoryComplete(rows){
+  if(!rows.length)throw new Error('universe-history returned no valid rows');
+  const first=[...new Set(rows.map(r=>r.effectiveDate))].sort()[0],inFirst=new Set(rows.filter(r=>r.effectiveDate===first).map(r=>r.underlying));
+  const missing=[...new Set(rows.map(r=>r.underlying))].filter(u=>!inFirst.has(u));
+  if(missing.length)throw new Error(`first snapshot (${first}) is incomplete: missing ${missing.join(', ')}`);
+}
+
+function cycleTag(sym){ensureUniverseEngines();const e=S.universe.find(x=>x.sym===sym);if(!e)return;const tn=e.engines.includes('TENET')?['TENET']:[];const nx=e.tag==='lifo'?['DM']:e.tag==='momentum'?['LIFO','DM']:['LIFO'];return setEnginesFor(sym,[...nx,...tn]);}
 async function addSingleETF(){
   // F-6 FIX: addBulkETFs stripped [^A-Z0-9] but this path did not, so a crafted
   // symbol reached innerHTML unescaped (stored XSS) and Supabase query strings
@@ -10444,29 +10829,33 @@ async function addSingleETF(){
   if(v.length<2||v.length>20){toast('Symbol must be 2–20 letters/digits','err');return;}if(S.universe.some(e=>e.sym===v)){toast(v+' already in universe','warn');return;}const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const linkedIndex=sanIndexName(document.getElementById('uni-linked-index')?.value||'');const linkedIndexYf=sanIndexTicker(document.getElementById('uni-linked-index-yf')?.value||'');S.universe.push({sym:v,yf:v+'.NS',name:v,tag,assetClass,linkedIndex,linkedIndexYf});rebuildUniverses();saveState();document.getElementById('uni-single').value='';if(document.getElementById('uni-linked-index'))document.getElementById('uni-linked-index').value='';if(document.getElementById('uni-linked-index-yf'))document.getElementById('uni-linked-index-yf').value='';renderUniverse();populateLifoDropdown();tenetPopulatePairBuilder();await syncUniverseToSB();}
 async function addBulkETFs(){const raw=document.getElementById('uni-bulk').value||'';const syms=raw.split(/[,\n\r]+/).map(s=>s.trim().toUpperCase().replace(/\.NS$/i,'').replace(/[^A-Z0-9]/g,'')).filter(s=>s.length>=2&&s.length<=20);const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const news=syms.filter(s=>!S.universe.some(e=>e.sym===s));if(!news.length){toast('All already in universe','warn');return;}news.forEach(s=>S.universe.push({sym:s,yf:s+'.NS',name:s,tag,assetClass}));rebuildUniverses();saveState();document.getElementById('uni-bulk').value='';renderUniverse();populateLifoDropdown();await syncUniverseToSB();toast(`Added ${news.length} ETF(s) tagged ${tag}`,'ok');}
 async function removeETF(s){
-  // S0-6b: this path bypassed Tenet pair protection completely. Deleting an ETF
-  // from Master Universe could orphan a live Tenet pair — or a pair with an OPEN
-  // position — leaving holdings whose reference mapping no longer exists.
+  // S0-6b + A3-4: removal is checked against the Tenet pairs and every engine's open units BEFORE anything changes.
+  ensureUniverseEngines();
   const _t=(S.tenet&&S.tenet.pairs)?S.tenet:null;
-  if(_t){
-    if((_t.holdings||[]).some(h=>h.etf===s))
-      return toast(`${s} has an open Tenet position. Sell it before removing the instrument.`,'warn');
-    const inPair=(_t.pairs||[]).find(p=>p.green===s||p.red===s);
-    if(inPair&&!confirm(`${s} is assigned to the Tenet slot "${inPair.underlying}".\n\nRemoving it will clear that side of the pair and change future per-buy sizing.\n\nContinue?`))return;
-    if(inPair){
-      _t.pairs=(_t.pairs||[]).map(p=>p.green===s?{...p,green:''}:p.red===s?{...p,red:''}:p)
-        .filter(p=>p.green||p.red);
-    }
+  let nextPairs=_t?(_t.pairs||[]).map(p=>({...p})):[];
+  const inPair=_t?(_t.pairs||[]).find(p=>p.green===s||p.red===s):null;
+  if(_t&&(_t.holdings||[]).some(h=>h.etf===s))return toast(`${s} has an open Tenet position. Sell it before removing the instrument.`,'warn');
+  if(inPair){
+    if(!confirm(`${s} is assigned to the Tenet slot "${inPair.underlying}".\n\nRemoving it will clear that side of the pair and change future per-buy sizing.\n\nContinue?`))return;
+    nextPairs=nextPairs.map(p=>p.green===s?{...p,green:''}:p.red===s?{...p,red:''}:p).filter(p=>p.green||p.red);
   }
-  S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();
+  const _next=S.universe.filter(e=>e.sym!==s);
+  const _v=validateUniverseChange(_next,{...S,tenet:{...(S.tenet||{}),pairs:nextPairs}});
+  if(!_v.ok){_universeBlocked(_v.errors);return;}
+  const _ok=await commitState(()=>{if(_t)tenetState().pairs=nextPairs;S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();},{label:'Remove ETF'});
+  if(!_ok)return;
+  TENET_RUNTIME.live=null;
+  renderUniverse();populateLifoDropdown();
   if(_t&&typeof tenetRenderPairList==='function'){tenetRenderPairList();tenetRenderHoldings();}
   await syncUniverseToSB();}
-async function resetToDefault(){if(!confirm('Reset universe to defaults?'))return;S.universe=buildDefaultUniverse();rebuildUniverses();saveState();renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
+async function resetToDefault(){if(!confirm('Reset universe to defaults?'))return;const _d=buildDefaultUniverse().map(e=>({...e,engines:enginesFromTag(e.tag)}));const _v=validateUniverseChange(_d);if(!_v.ok){_universeBlocked(_v.errors);return;}const _ok=await commitState(()=>{S.universe=_d;rebuildUniverses();},{label:'Reset universe'});if(!_ok)return;TENET_RUNTIME.live=null;renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
 async function clearAllETFs(){
   if(!confirm('Clear entire universe?'))return;
+  const _v=validateUniverseChange([]);if(!_v.ok){_universeBlocked(_v.errors);return;}   // A3-4: never with open positions or Tenet pairs
   _autoExportBeforeDestruct('pre-clear-universe');   // SAFEGUARD 2
-  S.universe=[];LIFO_ETF_UNIVERSE=[];
-  saveState();renderUniverse();populateLifoDropdown();
+  const _ok=await commitState(()=>{S.universe=[];LIFO_ETF_UNIVERSE=[];},{label:'Clear universe'});
+  if(!_ok)return;
+  TENET_RUNTIME.live=null;renderUniverse();populateLifoDropdown();
   await syncUniverseToSB();
 }
 
@@ -10487,14 +10876,20 @@ async function syncUniverseToSB(){
   }catch(e){if(el){el.style.color='var(--stop)';el.textContent=`❌ ${e.message}`;}}
 }
 
+let UNIVERSE_REMOTE_CONFLICT=null;
 async function loadUniverseFromSB(){
   const rows=await sbFetch('etf_universe?user_id=eq.default&select=symbols');
   if(rows?.length&&rows[0].symbols){
     try{
       const s=JSON.parse(rows[0].symbols);
       if(Array.isArray(s)&&s.length){
-        S.universe=typeof s[0]==='string'?s.map(sym=>({sym,yf:sym+'.NS',name:sym,tag:DEFAULT_LIFO_UNIVERSE.some(e=>e.sym===sym)?'both':'momentum'})):s;
-        rebuildUniverses();saveState();return true;
+        const _remote=(typeof s[0]==='string'?s.map(sym=>({sym,yf:sym+'.NS',name:sym,tag:DEFAULT_LIFO_UNIVERSE.some(e=>e.sym===sym)?'both':'momentum'})):s).map(e=>({...e,engines:Array.isArray(e.engines)?e.engines:enginesFromTag(e.tag)}));
+        const _v=validateUniverseChange(_remote);
+        if(!_v.ok){UNIVERSE_REMOTE_CONFLICT=_v.errors;_universeBlocked(_v.errors);rebuildUniverses();return false;}     // remote load keeps the LOCAL universe + banner
+        UNIVERSE_REMOTE_CONFLICT=null;
+        const _ok=await commitState(()=>{S.universe=_remote;rebuildUniverses();},{label:'Load universe'});
+        if(_ok)TENET_RUNTIME.live=null;
+        return _ok;
       }
     }catch(e){swallowLoud('loadUniverseFromSB',e);}
   }
@@ -11014,7 +11409,7 @@ const TENET_NSE_HOLIDAYS_2026=[
   '2026-01-15','2026-01-26','2026-02-19','2026-03-03','2026-03-19','2026-03-26','2026-03-31','2026-04-01','2026-04-03','2026-04-14',
   '2026-05-01','2026-05-28','2026-06-26','2026-08-26','2026-09-14','2026-10-02','2026-10-20','2026-11-10','2026-11-24','2026-12-25'
 ];
-function tenetDefaults(){return{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[],brokeragePerOrder:0};}
+function tenetDefaults(){return{universeMode:'fixed',firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[],brokeragePerOrder:0};}
 // A2-3 (F03): transient scanner state. Never serialized, never part of S. Any pair/config/app-version change invalidates it.
 const TENET_RUNTIME={live:null,liveAt:0,fingerprint:'',metrics:{}};
 function tenetFingerprint(){const t=S.tenet||{};return JSON.stringify({pairs:t.pairs||[],config:t.config||{},v:APP_VERSION});}
@@ -11116,9 +11511,9 @@ function tenetOpenCost(hold=tenetState().holdings){return hold.reduce((a,x)=>a+(
 function tenetPoolUsage(hold=tenetState().holdings){let newUsed=0,bidUsed=0;for(const x of hold){const c=(+x.buyPrice||0)*(+x.qty||0);if(x.isBid)bidUsed+=c;else newUsed+=c;}return{newUsed,bidUsed};}
 function tenetActiveEtfs(pairs=tenetState().pairs){return [...new Set(pairs.flatMap(p=>[p.green,p.red]).map(sanSym).filter(Boolean))];}
 function tenetPerBuy(cap=tenetAllocatedCapital(),pairs=tenetState().pairs){const n=tenetActiveEtfs(pairs).length;return n>0?cap*tenetState().config.newBuyAllocPct/100/n:0;}
-function tenetCashAvailable(){return tenetAllocatedCapital()+tenetRealizedProfit()-tenetOpenCost();}
-function tenetAddCapital(){const a=+prompt('Capital to add (₹):','100000');if(!(a>0))return;tenetState().capital.push({date:tenetISTNow().date,amount:a,type:'ADD'});saveState();tenetRenderHoldings();}
-function tenetWithdrawCapital(){const t=tenetState(),a=+prompt('Capital to withdraw/reduce from Tenet allocation (₹):','100000');if(!(a>0))return;const next=tenetAllocatedCapital()-a;if(next<0)return toast('Withdrawal exceeds allocated Tenet capital','warn');if(next<tenetOpenCost())return toast('Cannot reduce allocation below current open cost basis','warn');t.capital.push({date:tenetISTNow().date,amount:-a,type:'WITHDRAW'});saveState();tenetRenderHoldings();}
+function tenetCashAvailable(){return tenetAllocatedCapital()+tenetRealizedProfit()-tenetOpenCost()-tenetState().holdings.reduce((a,x)=>a+(+x.buyFee||0),0);}
+async function tenetAddCapital(){const a=+prompt('Capital to add (₹):','100000');if(!(a>0))return;const ok=await commitState(()=>{tenetState().capital.push({date:tenetISTNow().date,amount:a,type:'ADD'});},{label:'Capital add'});if(ok)tenetRenderHoldings();}
+async function tenetWithdrawCapital(){const t=tenetState(),a=+prompt('Capital to withdraw/reduce from Tenet allocation (₹):','100000');if(!(a>0))return;const next=tenetAllocatedCapital()-a;if(next<0)return toast('Withdrawal exceeds allocated Tenet capital','warn');if(next<tenetOpenCost())return toast('Cannot reduce allocation below current open cost basis','warn');const ok=await commitState(()=>{tenetState().capital.push({date:tenetISTNow().date,amount:-a,type:'WITHDRAW'});},{label:'Capital withdraw'});if(ok)tenetRenderHoldings();}
 function sanIndexName(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9 &()\/\-]/g,'').slice(0,60);}
 function sanIndexTicker(v){return String(v||'').trim().toUpperCase().replace(/[^A-Z0-9^&.\-]/g,'').slice(0,40);}
 // S1-2: this read the LIVE PRICES map unconditionally, so a historical run
@@ -11150,7 +11545,7 @@ function tenetAddPairFromBuilder(){const t=tenetState(),u=sanIndexName(document.
 function tenetEditPair(underlying){const p=tenetState().pairs.find(x=>x.underlying===underlying);if(!p)return;const u=document.getElementById('tenet-pair-underlying'),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(!u||!g||!r)return;u.innerHTML=tenetIndexOptions(p.underlying);u.value=p.underlying;g.innerHTML=tenetEtfOptions(p.underlying,p.green,false);r.innerHTML=tenetEtfOptions(p.underlying,p.red||'',true);g.value=p.green;r.value=p.red||'';u.scrollIntoView({behavior:'smooth',block:'center'});}
 function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.underlying===underlying);if(!p)return;const held=[p.green,p.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));if(held.length)return toast(`Keep this scanner slot until holdings are fully sold: ${held.join(', ')}`,'warn');t.pairs=t.pairs.filter(x=>x.underlying!==underlying);saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Removed ${underlying} from Tenet scanner`,'ok');}
 function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanIndexName(index))?.yf||'';}
-async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}e.linkedIndex=clean;e.linkedIndexYf=yf;saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
+async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}{const _nx=S.universe.map(x=>x.sym===sym?{...x,linkedIndex:clean}:x);const _v=validateUniverseChange(_nx);if(!_v.ok){_universeBlocked(_v.errors);return;}}TENET_RUNTIME.live=null;e.linkedIndex=clean;e.linkedIndexYf=yf;saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
 function tenetRenderPairList(){const host=document.getElementById('tenet-pair-list'),msg=document.getElementById('tenet-pair-validation');if(!host)return;const t=tenetState(),errs=tenetValidatePairs(),conflicts=tenetIndexRegistry().filter(x=>x.conflict),activeEtfs=tenetActiveEtfs(),per=tenetPerBuy();if(msg){msg.style.color=errs.length||conflicts.length?'var(--bad)':'var(--go)';msg.textContent=errs.length?`⚠ ${errs.join(' · ')}`:conflicts.length?`⚠ Conflicting Yahoo index tickers: ${conflicts.map(x=>x.name).join(', ')}`:`✓ ${t.pairs.length}/${t.config.maxGreen} GREEN slots · ${activeEtfs.length} actual ETFs · per-buy ${fmtINR(per)}.`;}
   host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=TENET_RUNTIME.metrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
 function tenetSaveConfigFromUI(){const t=tenetState();
@@ -11349,13 +11744,25 @@ function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=t
   buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
 async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}TENET_RUNTIME.metrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive,indexObservedMs:snap.quote&&snap.quote.asOf?Date.parse(snap.quote.asOf):null};}catch(e){return{...p,error:e?.message||String(e)}}});TENET_RUNTIME.live=rows;TENET_RUNTIME.liveAt=Date.now();TENET_RUNTIME.fingerprint=tenetFingerprint();const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
 async function tenetTestIndexMappings(){const t=tenetState(),msg=document.getElementById('tenet-pair-validation');if(!S.config.marketBridgeUrl)return toast('Configure Market Bridge first','warn');if(!t.pairs.length)return toast('Add Tenet scanner pairs first','warn');if(msg)msg.textContent='Testing Upstox index mappings…';const rows=await mapWithConcurrency(t.pairs,2,async p=>{const j=await marketBridgeFetch('/resolve',{symbol:p.underlying},10000);return{u:p.underlying,ok:!!j?.mapping,key:j?.mapping?.key||'',name:j?.mapping?.name||'',err:j?.error||''};});const bad=rows.filter(x=>!x.ok);if(msg){msg.style.color=bad.length?'var(--bad)':'var(--go)';msg.textContent=bad.length?`⚠ Mapping failed: ${bad.map(x=>x.u+' — '+(x.err||'no mapping')).join(' · ')}`:`✓ Upstox mappings verified: ${rows.map(x=>x.u+' → '+x.key).join(' · ')}`;}toast(bad.length?`${bad.length} Tenet index mapping(s) failed`:'All Tenet index mappings verified',bad.length?'warn':'ok');}
-function tenetRecordBuy(etf,team,price,underlying,isBid=false){if(previewRecordBlocked())return;const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');t.bidWeeks[gate.weekKey]=1;}const n=existing.length+1,tp=tenetTarget(n);t.holdings.push({id:crypto?.randomUUID?.()||Date.now().toString(36),etf,team,underlying,buyDate:gate.date,buyPrice:livePrice,qty:q,buySeq:n,targetPct:tp,targetPrice:livePrice*(1+tp/100),isBid:!!isBid,priceSource:ql.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet ${isBid?'BID':'BUY'} recorded: ${etf} · ${ql.source}`,'ok');}
-function tenetRecordSell(id,price){if(previewRecordBlocked())return;const t=tenetState(),i=t.holdings.findIndex(x=>x.id===id);if(i<0)return;const h=t.holdings[i],last=tenetLatestLot(h.etf);if(last?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');if(+price<h.targetPrice)return toast('Target not reached','warn');t.holdings.splice(i,1);const sellDate=tenetISTNow().date;t.sold.push({...h,sellDate,sellPrice:+price,profit:(+price-h.buyPrice)*h.qty,holdingDays:Math.max(0,tenetDaysBetween(h.buyDate,sellDate)),sellPriceSource:q.source});saveState();tenetRenderSignals();tenetRenderHoldings();toast(`Tenet SELL recorded: ${h.etf}`,'ok');}
+async function tenetRecordBuy(etf,team,price,underlying,isBid=false,opts={}){if(previewRecordBlocked())return;const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');}const est=tenetFriction(cost,'BUY',tenetAssetClassOf(etf));
+  const spec={side:'BUY',etf,team,underlying,isBid:!!isBid,date:gate.date,price:livePrice,qty:q,charges:est,priceSource:ql.source};
+  if(opts&&opts.direct)return tenetRecordFill(spec,{fromSignal:true});
+  tenetOpenFillModal({...spec,fromSignal:true});}
+async function tenetRecordSell(id,price,opts={}){
+  if(previewRecordBlocked())return;
+  const t=tenetState(),h=t.holdings.find(x=>x.id===id);if(!h)return;
+  if(tenetLatestLot(h.etf)?.id!==id)return toast('LIFO lock: newest Tenet lot must sell first','warn');
+  const q=tenetPriceQuality(h.etf);if(!q.allowed)return toast('SELL blocked by live-data gate: '+q.reason,'warn');
+  if(+price<h.targetPrice)return toast('Target not reached','warn');
+  const spec={side:'SELL',etf:h.etf,lotId:id,date:tenetISTNow().date,price:+price,qty:h.qty,charges:tenetFriction(h.qty*(+price),'SELL',tenetAssetClassOf(h.etf)),priceSource:q.source};
+  if(opts&&opts.direct)return tenetRecordFill(spec,{fromSignal:true});
+  tenetOpenFillModal({...spec,fromSignal:true});
+}
 function tenetRenderSignals(){const t=tenetState(),host=document.getElementById('tenet-signal-list');if(!host)return;const gate=tenetLiveGate(),live=tenetLiveRows()||[];if(!live.length){host.innerHTML='<div class="card"><span style="color:var(--fog)">Tap <b>Refresh Tenet scanner</b> to load index candles and ETF prices. No trade action is shown until data is validated.</span></div>';return;}const sig=tenetSignalsFromPairs(live,{actionable:gate.actionable,weekKey:gate.weekKey,requireLiveQuality:gate.actionable}),sells=[],blockedSells=[];for(const h of t.holdings){const last=tenetLatestLot(h.etf),price=+PRICES[h.etf]?.cmp||0;if(last?.id!==h.id||!(price>0)||price<h.targetPrice)continue;const q=tenetPriceQuality(h.etf);if(q.allowed)sells.push({h,price,q});else blockedSells.push({h,price,q});}
   const rows=[...sells.map(x=>`<div style="margin:6px 0"><b>SELL</b> ${escapeHtml(x.h.etf)} · LIFO lot ${x.h.buySeq} · ${fmtINR(x.price)} ≥ target ${fmtINR(x.h.targetPrice)} · ${escapeHtml(x.q.source)} <button class="action-btn sm" onclick="tenetRecordSell(${htmlJsArg(x.h.id)},${x.price})">Record sell</button></div>`),...sig.buys.map(x=>`<div style="margin:6px 0"><b>BUY</b> ${escapeHtml(x.etf)} · ${escapeHtml(x.team)} · ${escapeHtml(x.underlying)} · index ${escapeHtml(x.direction)} (${escapeHtml(x.indexSource||'')}) · 52W distance ${Number.isFinite(x.distance)?x.distance.toFixed(2)+'%':'—'} · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},false)">Record buy</button></div>`),...sig.selectedBid.map(x=>`<div style="margin:6px 0"><b>BID</b> ${escapeHtml(x.etf)} · largest eligible fall ${x.fall.toFixed(2)}% · ${fmtINR(x.price)} · ${escapeHtml(String(PRICES[x.etf]?._src||''))} <button class="action-btn sm" onclick="tenetRecordBuy(${htmlJsArg(sanSym(x.etf))},${htmlJsArg(x.team)},${x.price},${htmlJsArg(sanIndexName(x.underlying))},true)">Record BID</button></div>` )];
   if(blockedSells.length)rows.push(`<div style="margin:6px 0;color:var(--gold)">⚠ ${blockedSells.length} target-hit SELL candidate(s) hidden because current price data is not verified/fresh. Refresh market data before acting.</div>`);const preview=!gate.actionable&&sig.previewBuys.length?`<div style="font-size:10px;color:var(--fog);margin-top:8px"><b>Directional preview only — NOT an order signal:</b> ${sig.previewBuys.map(x=>`${escapeHtml(x.etf)} ${x.team}`).join(' · ')}</div>`:'';const bidNote=sig.bidUsed?' · BID already used this week':'';const diag=`<details open style="margin-top:10px"><summary style="cursor:pointer;color:var(--fog);font-size:10px">Scanner diagnostics</summary><div class="tbl-wrap"><table><thead><tr><th>Index</th><th>ETF</th><th>Team</th><th>Status</th><th>Index src</th><th>Price src</th><th>Reason</th></tr></thead><tbody>${sig.diag.map(x=>`<tr><td>${escapeHtml(x.underlying||'')}</td><td>${escapeHtml(x.etf||'—')}</td><td>${escapeHtml(x.team||'—')}</td><td>${escapeHtml(x.status||'')}</td><td>${escapeHtml(x.indexSource||'—')}</td><td>${escapeHtml(x.priceSource||String(PRICES[x.etf]?._src||'—'))}</td><td>${escapeHtml(x.reason||'')}</td></tr>`).join('')}</tbody></table></div></details>`;
   const safety=t.config.requireVerifiedLive===false?'Fallback data allowed':'Verified Upstox required';host.innerHTML=`<div class="card"><div style="font-size:10px;color:var(--fog);margin-bottom:7px">Data safety: <b>${safety}</b> · BUY/BID gate: <b>${gate.actionable?'OPEN':'CLOSED'}</b></div><b>New buys:</b> ${sig.buys.length} · <b>Eligible BIDs:</b> ${sig.bids.length} · <b>Selected BID:</b> ${sig.selectedBid.length}${bidNote} · <b>Sells:</b> ${sells.length}<div style="margin-top:8px">${rows.join('')||'<span style="color:var(--fog)">No actionable Tenet order right now.</span>'}</div>${preview}${diag}</div>`;}
-function tenetRenderHoldings(){const t=tenetState(),host=document.getElementById('tenet-holdings-list');tenetPopulatePairBuilder();if(!host)return;const cap=tenetAllocatedCapital(),usage=tenetPoolUsage(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,per=tenetPerBuy(),real=tenetRealizedProfit(),cash=tenetCashAvailable();host.innerHTML=`<div class="stat-grid" style="margin-bottom:10px"><div class="stat-card"><div class="stat-label">Allocated</div><div class="stat-value">${fmtINR(cap)}</div></div><div class="stat-card"><div class="stat-label">Per Buy</div><div class="stat-value">${fmtINR(per)}</div></div><div class="stat-card"><div class="stat-label">NEW Pool</div><div class="stat-value">${fmtINR(usage.newUsed)} / ${fmtINR(newMax)}</div></div><div class="stat-card"><div class="stat-label">BID Pool</div><div class="stat-value">${fmtINR(usage.bidUsed)} / ${fmtINR(bidMax)}</div></div><div class="stat-card"><div class="stat-label">Strategy Cash</div><div class="stat-value">${fmtINR(cash)}</div></div><div class="stat-card"><div class="stat-label">Realized P/L</div><div class="stat-value">${fmtINR(real)}</div></div></div>`+(t.holdings.map(h=>`<div class="card" style="margin:6px 0">${escapeHtml(h.etf)} · ${escapeHtml(h.team)} · ${h.isBid?'BID':'NEW'} lot ${h.buySeq} · ${escapeHtml(h.buyDate)} · ${fmtINR(h.buyPrice)} × ${h.qty} · target ${h.targetPct.toFixed(2)}% (${fmtINR(h.targetPrice)}) ${tenetLatestLot(h.etf)?.id===h.id?'· LIFO ACTIVE':'· LIFO LOCKED'}</div>`).join('')||'<span style="color:var(--fog)">No Tenet holdings yet.</span>');}
+function tenetRenderHoldings(){const t=tenetState(),host=document.getElementById('tenet-holdings-list');tenetPopulatePairBuilder();if(!host)return;const cap=tenetAllocatedCapital(),usage=tenetPoolUsage(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,per=tenetPerBuy(),real=tenetRealizedProfit(),cash=tenetCashAvailable();host.innerHTML=`<div style="margin-bottom:8px"><button class="action-btn sm" onclick="tenetOpenFillModal({side:'BUY'})">＋ Record executed BUY</button></div><div class="stat-grid" style="margin-bottom:10px"><div class="stat-card"><div class="stat-label">Allocated</div><div class="stat-value">${fmtINR(cap)}</div></div><div class="stat-card"><div class="stat-label">Per Buy</div><div class="stat-value">${fmtINR(per)}</div></div><div class="stat-card"><div class="stat-label">NEW Pool</div><div class="stat-value">${fmtINR(usage.newUsed)} / ${fmtINR(newMax)}</div></div><div class="stat-card"><div class="stat-label">BID Pool</div><div class="stat-value">${fmtINR(usage.bidUsed)} / ${fmtINR(bidMax)}</div></div><div class="stat-card"><div class="stat-label">Strategy Cash</div><div class="stat-value">${fmtINR(cash)}</div></div><div class="stat-card"><div class="stat-label">Realized P/L</div><div class="stat-value">${fmtINR(real)}</div></div></div>`+(t.holdings.map(h=>`<div class="card" style="margin:6px 0">${escapeHtml(h.etf)} · ${escapeHtml(h.team)} · ${h.isBid?'BID':'NEW'} lot ${h.buySeq} · ${escapeHtml(h.buyDate)} · ${fmtINR(h.buyPrice)} × ${h.qty} · target ${h.targetPct.toFixed(2)}% (${fmtINR(h.targetPrice)}) ${tenetLatestLot(h.etf)?.id===h.id?'· LIFO ACTIVE <button class="action-btn sm" style="margin-left:6px" onclick="tenetOpenFillModal({side:\'SELL\',etf:'+htmlJsArg(h.etf)+',lotId:'+htmlJsArg(h.id)+',qty:'+h.qty+'})">Record executed SELL</button>':'· LIFO LOCKED'}</div>`).join('')||'<span style="color:var(--fog)">No Tenet holdings yet.</span>');}
 function tenetInitBacktestDates(){const a=document.getElementById('tenet-bt-from'),b=document.getElementById('tenet-bt-to'),hs=document.getElementById('tenet-hist-start'),he=document.getElementById('tenet-hist-end');if(a&&!a.value){const d=new Date();d.setFullYear(d.getFullYear()-5);a.value=localDate(d);}if(b&&!b.value)b.value=localDate();if(hs&&!hs.value){const gate=tenetLiveGate();hs.value=gate.first||gate.weekKey;}if(he&&!he.value){const gate=tenetLiveGate();he.value=gate.last||gate.date;}tenetFillConfigUI();}
 
 async function tenetRunHistoricalScanner(){
@@ -11396,8 +11803,8 @@ async function tenetRunHistoricalScanner(){
   }
 }
 
-async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.config.marketBridgeUrl){t.universeHistory=[];return[];}const j=await marketBridgeFetch('/universe-history',{start:from,end:to},15000),rows=Array.isArray(j?.rows)?j.rows:[];t.universeHistory=rows.map(r=>({effectiveDate:String(r.effectiveDate||r.date||r.effective_date||'').slice(0,10),underlying:sanIndexName(r.underlying||r.index||r.underlyingAsset||''),indexYf:sanIndexTicker(r.indexYf||r.indexYahoo||r.yahoo||''),etf:sanSym(r.etf||r.symbol||''),team:String(r.team||r.side||'GREEN').toUpperCase(),counterETF:sanSym(r.counterETF||r.red||''),turnover:Number.isFinite(+(r.turnover??r.turnoverValue))?+(r.turnover??r.turnoverValue):null,distance52w:Number.isFinite(+(r.distance52w??r.distance??r.distanceFrom52WHigh))?+(r.distance52w??r.distance??r.distanceFrom52WHigh):null})).filter(r=>r.effectiveDate&&r.underlying&&r.etf);return t.universeHistory;}
-function tenetPairsForDate(date){const t=tenetState(),hist=t.universeHistory||[];if(!hist.length)return (TENET_RUN_PAIRS||t.pairs).map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
+async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.config.marketBridgeUrl)return t.universeHistory||[];const j=await marketBridgeFetch('/universe-history',{start:from,end:to},15000);if(!(j&&j.ok===true&&Array.isArray(j.rows)))throw new Error('universe-history unavailable'+(j&&j.error?': '+j.error:''));const rows=j.rows;const _next=rows.map(r=>({effectiveDate:String(r.effectiveDate||r.date||r.effective_date||'').slice(0,10),underlying:sanIndexName(r.underlying||r.index||r.underlyingAsset||''),indexYf:sanIndexTicker(r.indexYf||r.indexYahoo||r.yahoo||''),etf:sanSym(r.etf||r.symbol||''),team:String(r.team||r.side||'GREEN').toUpperCase(),counterETF:sanSym(r.counterETF||r.red||''),turnover:Number.isFinite(+(r.turnover??r.turnoverValue))?+(r.turnover??r.turnoverValue):null,distance52w:Number.isFinite(+(r.distance52w??r.distance??r.distanceFrom52WHigh))?+(r.distance52w??r.distance??r.distanceFrom52WHigh):null})).filter(r=>r.effectiveDate&&r.underlying&&r.etf);tenetAssertHistoryComplete(_next);t.universeHistory=_next;delete t._universeHistoryStale;return t.universeHistory;}
+function tenetPairsForDate(date){const t=tenetState(),hist=t.config.universeMode==='historical'?(t.universeHistory||[]):[];if(!hist.length)return (TENET_RUN_PAIRS||t.pairs).map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
 function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>(+h[d].high||0)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
 function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to&&!isSpecialSession(d))){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
 function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0&&!isSpecialSession(d)).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
@@ -11515,7 +11922,8 @@ async function runTenetBacktestV3(){
       if(st)st.textContent='⚠ Universe-history refresh failed — using last known snapshots. '+(t.universeHistory?.length?`${t.universeHistory.length} rows retained.`:'No snapshots available; point-in-time fidelity is NOT available for this run.');
     }
 
-    const histPairs=(t.universeHistory||[]).map(r=>({
+    if(t.config.universeMode==='historical'){const _fd=(t.universeHistory||[]).map(r=>r.effectiveDate).sort()[0];if(!_fd){if(st)st.textContent='Historical universe mode has no snapshots. Load them or switch to Fixed.';return;}if(from<_fd){if(st)st.textContent=`Historical universe mode: the start date ${from} is before the first snapshot ${_fd}. Pick a later start or use Fixed (current pairs).`;return;}}
+    const histPairs=(t.config.universeMode==='historical'?(t.universeHistory||[]):[]).map(r=>({
       underlying:r.underlying,
       green:r.team==='RED'?'':r.etf,
       red:r.team==='RED'?r.etf:r.counterETF,
@@ -13298,8 +13706,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A2b';
-const APP_SOURCE_SHA256='4269a7857b49494f8cd9e31c59fdd8c5a6eaf79750f754d24d20a2ceedfd8e16';
+const APP_BUILD='2026-09-20-v3.22-A3';
+const APP_SOURCE_SHA256='3e805403f9feb60b6d03248bb28e27642d9a3830a8b42f3929495e8eb7974e6a';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -15124,7 +15532,13 @@ function importFullBackup(inputEl){
 
     const migratedLegacyTenet=false; // v2 restore is intentionally unsupported: no complete schema migration exists.
     if(payload.state && typeof payload.state==='object'){
+      migrateRawState(payload.state);                                       // A3-6: legacy fields are upgraded on the RAW snapshot first
       errs.push(...validateStateSnapshotShape(payload.state,{requireExactKeys:true}));
+      if(!errs.length){
+        errs.push(...validateTenetState(payload.state.tenet,payload.state));
+        errs.push(...validateConfigRanges(payload.state.config));
+        const _uv=validateUniverseChange(payload.state.universe,payload.state);if(!_uv.ok)errs.push(..._uv.errors.filter(e=>!/^Close /.test(e)||true));
+      }
     }
     if(payload.extras!=null&&!_plainObject(payload.extras))errs.push('extras must be an object when present');
     if(_plainObject(payload.extras)){
@@ -15372,6 +15786,12 @@ async function clearLocalCache() {
   dcUpdateCacheSummary();
 }
 
+// A3-5: Data Center filter by engine (All / LIFO / DM / TENET)
+function dcUniverseFor(filterVal){
+  ensureUniverseEngines();
+  const eng={lifo:'LIFO',momentum:'DM',dm:'DM',tenet:'TENET'}[String(filterVal||'all').toLowerCase()];
+  return eng?S.universe.filter(e=>(e.engines||enginesFromTag(e.tag)).includes(eng)):S.universe;
+}
 async function syncTotalUniverse() {
   const btn       = document.getElementById('dc-sync-btn');
   const abortBtn  = document.getElementById('dc-abort-btn');
@@ -15398,9 +15818,7 @@ async function syncTotalUniverse() {
 
   rebuildUniverses();
   const filterVal = document.getElementById('dc-universe-filter')?.value || 'all';
-  let etfs = S.universe;
-  if (filterVal === 'lifo')     etfs = etfs.filter(e => e.tag === 'lifo' || e.tag === 'both');
-  if (filterVal === 'momentum') etfs = etfs.filter(e => e.tag === 'momentum' || e.tag === 'both');
+  const etfs = dcUniverseFor(filterVal);
 
   if (!etfs.length) { toast('Universe is empty', 'err'); return; }
 
