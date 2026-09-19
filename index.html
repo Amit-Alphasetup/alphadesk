@@ -52,7 +52,7 @@
     https://gist.githubusercontent.com;
 " http-equiv="Content-Security-Policy"/>
 <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0" name="viewport"/>
-<title>AlphaDesk V3.21 — EOD2 Certified Data</title>
+<title>AlphaDesk</title>
 <meta content="#0a0c10" name="theme-color"/>
 <meta content="yes" name="mobile-web-app-capable"/>
 <meta content="yes" name="apple-mobile-web-app-capable"/>
@@ -2142,6 +2142,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="strategy-pane" id="strategy-tax">
 <!-- P13 FIX 19: back row — mobile only -->
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Tax</span></div>
+<div id="tax-dm-basis-banner" class="alert-banner alert-warn" style="margin-bottom:8px"><div><span class="ab-badge ab-warn">PROVISIONAL</span><div class="ab-sub">DM holding periods provisional until lot-level FIFO (A6)</div></div></div>
 <div class="stat-grid" id="tax-summary-cards"></div>
 <div class="card" style="margin-bottom:14px"><div id="fifo-compare-zone"></div></div>
 <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
@@ -3194,12 +3195,17 @@ async function idbHistDelete(sym){
 async function idbHistDeleteAll(){
   try{
     const db=await openHistDB();
+    let n=0;
     await new Promise((resolve,reject)=>{
       const tx=db.transaction(HIST_STORE,'readwrite');
-      tx.objectStore(HIST_STORE).clear();
+      const st=tx.objectStore(HIST_STORE);
+      const cq=st.count();                                   // A1-8: report how many rows were removed
+      cq.onsuccess=()=>{n=cq.result||0;};
+      st.clear();
       tx.oncomplete=()=>resolve();
       tx.onerror=()=>reject(tx.error);
     });
+    return n;
   }catch(e){swallow('idbHistDeleteAll',e);}
   return 0;
 }
@@ -4850,32 +4856,34 @@ function checkRebalanceBanner(){
   const el=document.getElementById('rebalance-banner');
   if(!el) return;
   const intervalDays=S.config.dmRebalanceDays||30;
-  const now=new Date();
-  let show=false;
-  let label='';
+  const show=isRebalanceWindow(new Date(),intervalDays);
+  el.style.display=show?'block':'none';
+  if(show)el.textContent=rebalanceWindowLabel(intervalDays);
+}
+// A1-7 (N7): the window rule, pure. Used by the banner AND by the renderMomAlerts REBALANCE alert.
+function isRebalanceWindow(now,intervalDays){
   if(intervalDays<=7){
     // Weekly: show on Mon + Tue (execution window)
     const dow=now.getDay(); // 0=Sun,1=Mon,2=Tue
-    show=(dow===1||dow===2);
-    label=show?'📡 Weekly rebalance window — Monday/Tuesday. Compute signal today.':'';
+    return (dow===1||dow===2);
   } else if(intervalDays<=15){
     // Bi-weekly: show on 1st and 16th ±1 day
     const d=now.getDate();
-    show=(d<=2||(d>=15&&d<=17));
-    label=show?'📡 Bi-weekly rebalance window open. Compute signal.':'';
+    return (d<=2||(d>=15&&d<=17));
   } else {
     // BUG4 FIX: intervalDays is in TRADING days; 30 trading days ≈ 42 calendar days
-    // Previously: banner used fixed calendar month boundary regardless of interval setting
     // Convert trading days to approximate calendar days (×1.4 factor), then open window proportionally
     const calDays=Math.round(intervalDays*1.4);
     const windowDays=Math.max(3,Math.round(calDays*0.1)); // 10% of interval as window, min 3 days
     const day=now.getDate();
     const lastDay=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-    show=(day<=windowDays||(lastDay-day)<windowDays);
-    label=show?`📡 Rebalance window open (~${intervalDays} trading days interval) — compute signal.`:'';
+    return (day<=windowDays||(lastDay-day)<windowDays);
   }
-  el.style.display=show?'block':'none';
-  if(show)el.textContent=label;
+}
+function rebalanceWindowLabel(intervalDays){
+  if(intervalDays<=7)return '📡 Weekly rebalance window — Monday/Tuesday. Compute signal today.';
+  if(intervalDays<=15)return '📡 Bi-weekly rebalance window open. Compute signal.';
+  return `📡 Rebalance window open (~${intervalDays} trading days interval) — compute signal.`;
 }
 
 // ── LIFO FRICTION ─────────────────────────────────────────────────────────────
@@ -6698,6 +6706,7 @@ function momExecuteTrade(etf,action,units,price,charges,date,reason){
     }
   }
   const trade={id:'mx'+Date.now()+Math.random(),date:sanIsoDate(date)||date,etf,type:action,units,price,value:units*price,friction,pnl,holdDays,entryDate,reason:sanNote(reason||'')};
+  if(action!=='BUY')trade.taxBasis='PROVISIONAL_EARLIEST_BUY';     // A1-5: lot-level FIFO arrives in A6
   S.momTrades.unshift(trade);
   return trade;
 }
@@ -6939,13 +6948,15 @@ function renderMomAlerts(){
   });
 
   // Alert: rebalance window
-  const now=new Date();const d=now.getDate();const lastDay=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-  if(d<=3||(lastDay-d)<3){
-    parts.push(`<div class="alert-banner alert-info"><div><span class="ab-badge ab-info">REBALANCE</span><div class="ab-title">Month boundary — DM rebalance window</div><div class="ab-sub">Compute signal and review position changes.</div></div><button class="action-btn azure-btn sm" onclick="computeDMSignal()">Compute Signal</button></div>`);
+  if(isRebalanceWindow(new Date(),S.config.dmRebalanceDays||30)){
+    parts.push(`<div class="alert-banner alert-info"><div><span class="ab-badge ab-info">REBALANCE</span><div class="ab-title">DM rebalance window (~${S.config.dmRebalanceDays||30} trading days interval)</div><div class="ab-sub">Compute signal and review position changes.</div></div><button class="action-btn azure-btn sm" onclick="computeDMSignal()">Compute Signal</button></div>`);
   }
 
-  // Alert: positions not in latest signal
-  if(dmSignalData?.topPicks){
+  // Alert: positions not in latest signal (A1-4/N2: only from a verified, non-empty signal)
+  if(Object.keys(S.momPositions||{}).length&&!(dmSignalData?.dataQualityOk===true&&Array.isArray(dmSignalData?.topPicks)&&dmSignalData.topPicks.length>0)){
+    parts.push(`<div class="alert-banner alert-warn"><div><span class="ab-badge ab-warn">SIGNAL</span><div class="ab-title">Signal not verified — exits not evaluated</div><div class="ab-sub">Compute a signal with passing data checks before acting on exits.</div></div></div>`);
+  }
+  if(dmSignalData?.dataQualityOk===true&&Array.isArray(dmSignalData?.topPicks)&&dmSignalData.topPicks.length>0){
     const topSyms=dmSignalData.topPicks.filter(p=>!p.isLiquid).map(p=>p.sym);
     Object.keys(S.momPositions).forEach(etf=>{
       if(!topSyms.includes(etf)){
@@ -7053,7 +7064,8 @@ function momRebuildState(){
       const newMs=new Date(tr.date).getTime();
       pos.weightedEntryMs=(pos.weightedEntryMs*(pos.units*pos.avgPrice)+newMs*assetCost)/Math.max(tot,0.01);
       pos.units+=tr.units;pos.avgPrice=tot/pos.units;pos.costBasis=tot;
-      pos.entryDate=new Date(pos.weightedEntryMs).toISOString().slice(0,10);
+      // A1-5 (N3): holding period is measured from the EARLIEST open BUY (same rule as momExecuteTrade); weightedEntryMs stays informational
+      if(!pos.entryDate)pos.entryDate=tr.date;
     } else if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM'){
       const pos=S.momPositions[tr.etf];
       if(pos){
@@ -7071,6 +7083,7 @@ function momRebuildState(){
       }
     }
     tr.pnl=pnl;tr.holdDays=holdDays;
+    if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM')tr.taxBasis='PROVISIONAL_EARLIEST_BUY';
   });
 }
 
@@ -7119,8 +7132,8 @@ async function computeDMSignal(){
     const qualityReasons=[...failures.map(x=>`${x.sym}: ${x.error}`),...(decision.niftyError?[decision.niftyError]:[]),...(ageDays>7?[`common market date ${commonAsOf||'none'} is ${ageDays} days old`]:[])];
     dmSignalData={date:new Date().toISOString(),...decision,allLiquid:niftyOn&&!decision.niftyOk&&!decision.niftyError,dataQualityOk,dataQualityReasons:qualityReasons,commonAsOf};
     saveDmSignalCache();reportHistFetchFailuresIfAny('DM signal computation');renderDMSignal();renderMomAlerts();
-    const sDateEl=document.getElementById('mom-signal-date');if(sDateEl)sDateEl.innerHTML=`Signal computed ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} · common data date <b>${escapeHtml(commonAsOf||'N/A')}</b> · Lookback <b>${getLookbackLabel(lookback)}</b> · Hurdle <b>${decision.hurdlePct.toFixed(2)}%</b> · ${dataQualityOk?'<b style="color:var(--go)">DATA VERIFIED</b>':'<b style="color:var(--stop)">ACTIONS BLOCKED</b>'}`;
-    const d=document.getElementById('dm-signal-date');if(d)d.textContent=dataQualityOk?`Signal verified as of ${commonAsOf}`:`Signal preview only — ${qualityReasons.join(' · ')||'data quality gate failed'}`;
+    const sDateEl=document.getElementById('mom-signal-date');if(sDateEl)sDateEl.innerHTML=`Signal computed ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} · common data date <b>${escapeHtml(commonAsOf||'N/A')}</b> · Lookback <b>${getLookbackLabel(lookback)}</b> · Hurdle <b>${decision.hurdlePct.toFixed(2)}%</b> · ${dataQualityOk?'<b style="color:var(--go)">DATA CHECKS PASSED (preview-grade)</b>':'<b style="color:var(--stop)">ACTIONS BLOCKED</b>'}`;
+    const d=document.getElementById('dm-signal-date');if(d)d.textContent=dataQualityOk?`Signal data checks passed (preview-grade) as of ${commonAsOf}`:`Signal preview only — ${qualityReasons.join(' · ')||'data quality gate failed'}`;
   } finally {btn.disabled=false;btn.textContent='Compute Signal';prog.style.display='none';}
 }
 
@@ -7501,10 +7514,11 @@ async function runDMBacktestCore(p){
           liqEntryDate='';
         }
       }
-      newTop.filter(s=>s!=='LIQUIDBEES').forEach(sym=>{if(positions[sym])return;const cp=execPx(sym,execDate);if(!cp||slotSz<=0)return;if(cash<slotSz*0.95){shortfallLog.push({date:execDate,sym,neededCash:+slotSz.toFixed(2),availCash:+cash.toFixed(2),deficit:+(slotSz-cash).toFixed(2)});return;}const fr=slotSz*frPct;const units=(slotSz-fr)/cp;// G6 FIX: store slotSz at entry time — compound may change slotSz later, distorting P&L%
+      newTop.filter(s=>s!=='LIQUIDBEES').forEach(sym=>{if(positions[sym])return;const cp=execPx(sym,execDate);if(!cp||slotSz<=0)return;if(cash<slotSz-1e-9){shortfallLog.push({date:execDate,sym,neededCash:+slotSz.toFixed(2),availCash:+cash.toFixed(2),deficit:+(slotSz-cash).toFixed(2)});return;}const fr=slotSz*frPct;const units=(slotSz-fr)/cp;// G6 FIX: store slotSz at entry time — compound may change slotSz later, distorting P&L%
 positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBasis:slotSz};cash-=slotSz;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'BUY',entryDate:execDate,entryPrice:cp,exitPrice:null,units:+units.toFixed(4),friction:+fr.toFixed(2),costBasis:+slotSz.toFixed(2),exitReason:'',pnl:null,holdDays:null});});
       // FIX BUG-40: always update liqEntryDate on new entry (not just when empty) so each parking period gets correct start
-      if(newLiqSlots>oldLiqSlots){const adding=newLiqSlots-oldLiqSlots;const addVal=adding*slotSz;liqValue+=addVal;cash-=addVal;if(!liqEntryDate)liqEntryDate=execDate;liqSlots=newLiqSlots;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'BUY',entryDate:execDate,entryPrice:slotSz,exitPrice:null,pnl:null,holdDays:null});}
+      if(newLiqSlots>oldLiqSlots){const adding=newLiqSlots-oldLiqSlots;const wantVal=adding*slotSz;const addVal=Math.min(wantVal,Math.max(0,cash));if(addVal<wantVal-1e-9)shortfallLog.push({date:execDate,sym:'LIQUIDBEES',neededCash:+wantVal.toFixed(2),availCash:+Math.max(0,cash).toFixed(2),deficit:+(wantVal-Math.max(0,cash)).toFixed(2)});liqValue+=addVal;cash-=addVal;if(!liqEntryDate)liqEntryDate=execDate;liqSlots=newLiqSlots;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'BUY',entryDate:execDate,entryPrice:slotSz,exitPrice:null,pnl:null,holdDays:null});}
+      if(cash<-1e-9)return{error:'INVARIANT: negative cash on '+execDate};
       let nav=cash+liqValue;
       Object.entries(positions).forEach(([sym,pos])=>{nav+=pos.units*(px(sym,execDate)||pos.entryPrice);});
       const navBefore=equity.length?equity[equity.length-1].nav:100;
@@ -7766,6 +7780,7 @@ async function runDMBacktest(){
   renderDmRebalanceLog();
   // Store result for DM Deep Analytics tab
   _dmBtResult=result;
+  result.provenance=appProvenance();
   // Capture the exact params object this run used. Reconstructing it field by
   // field would drift from `p` the moment a parameter is added — and seven of
   // those names are not even in this scope.
@@ -9077,7 +9092,7 @@ async function runLifoBacktest(){
   const rm=result.metrics||{};
   const rbox=document.getElementById('lifo-bt-research-metrics');
   if(rbox)rbox.innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap"><span class="metric-chip">CAGR <b>${rm.cagr!=null?rm.cagr.toFixed(2)+'%':'—'}</b></span><span class="metric-chip">XIRR <b>${rm.xirr!=null?rm.xirr.toFixed(2)+'%':'—'}</b></span><span class="metric-chip">Avg Deployed <b>₹${Math.round(rm.avgDeployed||0).toLocaleString('en-IN')}</b></span><span class="metric-chip">Peak Deployed <b>₹${Math.round(rm.peakDeployed||0).toLocaleString('en-IN')}</b></span><span class="metric-chip">Avg Util. <b>${rm.avgUtilization!=null?rm.avgUtilization.toFixed(1)+'%':'—'}</b></span></div>`;
-  BT.metrics=result.metrics;BT.tax=result.tax;BT.bench=result.bench;
+  BT.metrics=result.metrics;BT.tax=result.tax;BT.bench=result.bench;BT.provenance=appProvenance();
   BT.capitalSkipLog=result.capitalSkipLog||[];
   BT.trailingLog=result.trailingLog||[];
   BT.inventoryLog=result.inventoryLog||[];
@@ -9345,8 +9360,8 @@ function exportBtInventoryCSV(){
 
 async function clearBtCache(){
   const n=await idbHistDeleteAll('bth_');
-  toast(`Cleared ${n} cached files`,'ok');
-  setBtStatus('Cache cleared — next run re-fetches all data');
+  toast(`Cleared ${n} legacy cached bars (EOD2 cache is managed in Data Center)`,'ok');
+  setBtStatus('Legacy cache cleared — next run re-fetches all data');
 }
 
 // ── TAX ENGINE ────────────────────────────────────────────────────────────────
@@ -9692,7 +9707,7 @@ function collectLiveTaxRecords(){
   (S.momTrades||[]).filter(t=>t.type!=='BUY'&&t.pnl!=null).forEach((tx,i)=>{
     let buyDate=tx.entryDate||'';if(!buyDate&&tx.holdDays>0){const d=new Date(tx.date);d.setDate(d.getDate()-tx.holdDays);buyDate=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
     const ac=(S.universe.find(e=>e.sym===tx.etf)?.assetClass)||'equity',stt=ac==='equity'?(+tx.units||0)*(+tx.price||0)*0.00001:0;
-    out.push({id:tx.id||`dm:${i}`,strategy:'DM',sym:tx.etf,sellDate:tx.date,buyDate,holdDays:+tx.holdDays||0,assetClass:ac,netPnl:+tx.pnl||0,grossPnl:(+tx.pnl||0)+(+tx.friction||0),friction:+tx.friction||0,stt,qty:+tx.units||0,buyPrice:0,sellPrice:+tx.price||0});
+    out.push({id:tx.id||`dm:${i}`,strategy:'DM',taxBasis:'PROVISIONAL_EARLIEST_BUY',sym:tx.etf,sellDate:tx.date,buyDate,holdDays:+tx.holdDays||0,assetClass:ac,netPnl:+tx.pnl||0,grossPnl:(+tx.pnl||0)+(+tx.friction||0),friction:+tx.friction||0,stt,qty:+tx.units||0,buyPrice:0,sellPrice:+tx.price||0});
   });
   const tt=tenetState();(tt.sold||[]).forEach((x,i)=>{const sym=sanSym(x.etf),buyDate=sanIsoDate(x.buyDate),sellDate=sanIsoDate(x.sellDate);if(!sym||!buyDate||!sellDate)return;out.push({id:`tenet:${x.id||i}`,strategy:'TENET',sym,sellDate,buyDate,holdDays:+x.holdingDays||Math.max(0,tenetDaysBetween(buyDate,sellDate)),assetClass:(S.universe.find(e=>e.sym===sym)?.assetClass)||'equity',netPnl:Number(x.profit)||0,grossPnl:Number(x.profit)||0,friction:0,stt:0,qty:+x.qty||0,buyPrice:+x.buyPrice||0,sellPrice:+x.sellPrice||0,buyFriction:0,sellFriction:0});});
   return out;
@@ -9946,7 +9961,7 @@ async function loadLifoLedgerFromSB(){
 function _autoExportBeforeDestruct(reason){
   try{
     const payload={
-      _meta:{version:BACKUP_VERSION,appName:'AlphaDesk',exportedAt:new Date().toISOString(),reason,lifoTrades:(S.lifoLedger||[]).length,momTrades:(S.momTrades||[]).length},
+      _meta:{version:BACKUP_VERSION,appName:'AlphaDesk',exportedAt:new Date().toISOString(),...appProvenance(),reason,lifoTrades:(S.lifoLedger||[]).length,momTrades:(S.momTrades||[]).length},
       state:{lifoLedger:S.lifoLedger,momTrades:S.momTrades,momPositions:S.momPositions,momFyData:S.momFyData,momFyLossCf:S.momFyLossCf,momUniverse:S.momUniverse,universe:S.universe,priceAlerts:S.priceAlerts,watchlist:S.watchlist,trash:S.trash,brokerImportCandidates:S.brokerImportCandidates,dividends:S.dividends,corpActions:S.corpActions,config:S.config}
     };
     const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
@@ -10368,7 +10383,7 @@ const TENET_NSE_HOLIDAYS_2026=[
   '2026-01-15','2026-01-26','2026-02-19','2026-03-03','2026-03-19','2026-03-26','2026-03-31','2026-04-01','2026-04-03','2026-04-14',
   '2026-05-01','2026-05-28','2026-06-26','2026-08-26','2026-09-14','2026-10-02','2026-10-20','2026-11-10','2026-11-24','2026-12-25'
 ];
-function tenetDefaults(){return{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[]};}
+function tenetDefaults(){return{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[],brokeragePerOrder:0};}
 function tenetState(){
   if(!S.tenet)S.tenet={};const t=S.tenet;
   // S0-2: legacy migration must read RAW stored config. It previously ran after
@@ -10709,25 +10724,33 @@ function tenetExactBar(h,date){return h?.[date]?.close>0?h[date]:null;}
 // fraction of the edge, not a rounding error. Deliberately NOT reusing
 // lifoFriction(): that frozen helper bakes in modelled slippage and has no
 // asset-class argument, and the lean plan forbids blind reuse.
+// ── FEE POLICY ── (A1-3, F15) one shared statutory-charge model. Slippage is NOT included.
+// Rates are checked against contract notes in A6. lifoFriction (protected) is deliberately left as it was.
+const FEE_POLICY_VERSION='2026-09-19';
+function feePolicy(side,turnover,assetClass,dateStr,opts={}){
+  const zero={brokerage:0,stt:0,exch:0,sebi:0,stamp:0,gst:0,total:0};
+  const v=Number(turnover);
+  if(!Number.isFinite(v)||v<=0)return zero;
+  const isBuy=String(side).toUpperCase()==='BUY';
+  const brokerage=finiteParam(opts&&opts.brokerage,0,{min:0});           // ₹ per order
+  const stt=(!isBuy&&assetClass==='equity')?v*0.00001:0;                   // equity SELL only; other asset classes 0
+  const exch=v*0.0000297;
+  const sebi=v*0.000001;
+  const stamp=isBuy?v*0.00015:0;                                           // BUY only
+  const gst=(brokerage+exch+sebi)*0.18;
+  const total=brokerage+stt+exch+sebi+stamp+gst;
+  return {brokerage,stt,exch,sebi,stamp,gst,total};
+}
 function tenetFriction(turnoverINR,side,assetClass){
   const v=Math.max(0,+turnoverINR||0); if(!v)return 0;
   const c=tenetState().config||{};
-  const brokerage=Math.min(
-    Number.isFinite(c.brokerageCap)?c.brokerageCap:20,
-    v*((Number.isFinite(c.brokeragePct)?c.brokeragePct:0)/100));
-  const isEquity=assetClass!=='commodity';
-  // STT: equity ETF delivery attracts it on both legs; gold/silver ETFs do not.
-  const stt=isEquity?v*0.001:0;
-  const exch=v*0.0000297;
-  const sebi=v*0.000001;
-  const stamp=side==='BUY'?v*0.00015:0;
-  const gst=(brokerage+exch+sebi)*0.18;
-  return +(brokerage+stt+exch+sebi+stamp+gst).toFixed(2);
+  const brokerage=finiteParam(c.brokeragePerOrder,0,{min:0});            // Q5: default ₹0 per order
+  return +feePolicy(side,v,assetClass,undefined,{brokerage}).total.toFixed(2);
 }
 function tenetAssetClassOf(sym){
   const e=(S.universe||[]).find(x=>x.sym===sym);
-  const hay=String(e?.assetClass||e?.name||sym||'').toUpperCase();
-  return /GOLD|SILVER/.test(hay)?'commodity':'equity';
+  const ac=e&&typeof e.assetClass==='string'&&e.assetClass?e.assetClass:'equity';   // unknown -> equity; no keyword guessing
+  return ac;
 }
 
 // S1-1 (CRITICAL) + S1-5.
@@ -11015,9 +11038,10 @@ async function runTenetBacktestV3(){
       evBox.innerHTML=`
       <div style="font-weight:600;font-size:12px;margin-bottom:4px">🔒 S1 Accounting Gate</div>
       <div style="padding:7px 9px;border-radius:5px;margin-bottom:8px;font-weight:600;background:${certified?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)'};color:${certified?'var(--gain)':'var(--loss)'}">
-        ${certified?'CERTIFIED — accounting identities hold; the performance numbers above are interpretable.'
-                  :'NOT CERTIFIED — do not interpret the performance numbers above until every failing line below is resolved.'}
+        ${certified?'ACCOUNTING CHECK PASSED — accounting identities hold; the performance numbers above are interpretable.'
+                  :'ACCOUNTING CHECK FAILED — do not interpret the performance numbers above until every failing line below is resolved.'}
       </div>
+      <div style="font-size:10.5px;color:var(--fog);margin:-4px 0 8px 2px">Data/engine certification: NOT EVALUATED · build <span style="font-family:monospace;word-break:break-all">${escapeHtml(APP_BUILD)} · ${escapeHtml(APP_SOURCE_SHA256)}</span></div>
       <div style="font-size:10.5px">
         ${line(identityOk,'Cash identity',`terminal ${inr(cash)} vs expected ${inr(expectedCash)} · drift ${inr(cashDrift)}`)}
         ${line(!negCash,'No negative cash',`terminal cash ${inr(cash)}`)}
@@ -11424,18 +11448,18 @@ function renderDmSignalLogic(){
     <tbody>${ranked.map((e,i)=>{
       const inTop=topSyms.includes(e.sym);
       const isHeld=heldSyms.includes(e.sym);
-      const aboveHurdle=e.r>hurdlePct;
+      const aboveHurdle=e.ret>hurdlePct;
       let status,reason,cls='';
       if(!niftyOk){status='<span class="badge b-liquid">LIQUIDBEES</span>';reason='Nifty below 200DMA — all slots to cash';}
       else if(inTop){status='<span class="badge b-buy">IN SIGNAL</span>';reason=`Rank #${i+1} · above hurdle ${hurdlePct.toFixed(1)}%`;cls='color:var(--go)';}
       else if(aboveHurdle){status='<span class="badge b-hold">ABOVE HURDLE</span>';reason=`Rank #${i+1} · above hurdle but outside top ${slots} slots`;}
-      else{status='<span class="badge b-skip">BELOW HURDLE</span>';reason=`Return ${e.r?.toFixed(2)}% < hurdle ${hurdlePct.toFixed(1)}%`;}
+      else{status='<span class="badge b-skip">BELOW HURDLE</span>';reason=`Return ${e.ret?.toFixed(2)}% < hurdle ${hurdlePct.toFixed(1)}%`;}
       const exitSignal=isHeld&&!inTop;
       return`<tr style="${exitSignal?'background:rgba(246,70,93,.04)':''}">
         <td class="neutral mono">${i+1}</td>
         <td class="sym-cell">${escapeHtml(e.sym)}${isHeld?'<span class="badge b-hold" style="margin-left:6px;font-size:8px">HELD</span>':''}</td>
-        <td class="r mono ${e.r>=0?'profit':'loss'}">${e.r>=0?'+':''}${e.r?.toFixed(2)}%</td>
-        <td class="r mono" style="color:${aboveHurdle?'var(--go)':'var(--stop)'}">${e.r>=0?'+':''}${(e.r-hurdlePct).toFixed(2)}%</td>
+        <td class="r mono ${e.ret>=0?'profit':'loss'}">${e.ret>=0?'+':''}${e.ret?.toFixed(2)}%</td>
+        <td class="r mono" style="color:${aboveHurdle?'var(--go)':'var(--stop)'}">${e.ret>=0?'+':''}${(e.ret-hurdlePct).toFixed(2)}%</td>
         <td>${status}</td>
         <td style="font-size:11px;color:var(--fog)">${escapeHtml(reason)}${exitSignal?' <b style="color:var(--stop)">→ EXIT</b>':''}</td>
       </tr>`;
@@ -12496,6 +12520,9 @@ function _csvEscape(v){
 }
 function dlCSV(rows,name){
   // FIX BUG-33: UTF-8 BOM (\uFEFF) prevents Excel on Windows from misreading ₹ as Windows-1252
+  // A1-1: full build identity as the last row of every CSV export
+  const _pv=appProvenance();
+  rows=[...rows,['# AlphaDesk build',_pv.appBuild,_pv.appSourceSha256]];
   const csv='\uFEFF'+rows.map(r=>r.map(_csvEscape).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
@@ -12575,8 +12602,15 @@ window.addEventListener('unhandledrejection',e=>{
 
 // PHASE 1 — BUILD STAMP. Half of this week's debugging was "are you on the new
 // build?". Now answerable from Settings without guessing.
-const APP_BUILD='2026-09-09-v3.17-money-deployable-audited';
-function getBuildStamp(){ return APP_BUILD; }
+// A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
+// bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
+const APP_VERSION='3.22';
+const APP_BUILD='2026-09-19-v3.22-A1';
+const APP_SOURCE_SHA256='a285e39b3efe30066508b6630b9d6af2460e0388568ac177b8820158aa751787';
+function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
+// Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
+function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
+try{ document.title='AlphaDesk V'+APP_VERSION; }catch(_e){}
 
 const INIT_FAILURES=[];
 function _step(name,fn,critical){
@@ -14332,6 +14366,7 @@ function exportFullBackup(){
         version:   BACKUP_VERSION,
         appName:   'AlphaDesk',
         exportedAt: now.toISOString(),
+        ...appProvenance(),
         lifoTrades:   (S.lifoLedger||[]).length,
         momTrades:    (S.momTrades||[]).length,
         universeSize: (S.universe||[]).length,
