@@ -1366,7 +1366,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <!-- Results -->
 <div class="card" id="sw-results-card" style="display:none">
 <div class="card-head" style="flex-wrap:wrap;gap:8px">
-<div class="card-title">📊 Sweep Results — <span id="sw-result-count" style="color:var(--go)"></span></div>
+<div class="card-title">📊 Sweep Results — <span id="sw-result-count" style="color:var(--go)"></span> <span style="font-size:10px;color:var(--gold);font-weight:700">Exploratory (in-sample) — not validation; see walk-forward</span></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap">
 <button class="icon-btn" onclick="exportSweepCSV()">⬇ Export CSV</button>
 <button class="action-btn azure-btn" onclick="sweepCopyToSettings()" style="padding:6px 14px;font-size:11px">📋 Copy Best to Settings (Review First)</button>
@@ -1932,7 +1932,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <!-- Results -->
 <div class="card" id="dsw-results-card" style="display:none">
 <div class="card-head" style="flex-wrap:wrap;gap:8px">
-<div class="card-title">📊 DM Sweep Results — <span id="dsw-result-count" style="color:var(--azure)"></span></div>
+<div class="card-title">📊 DM Sweep Results — <span id="dsw-result-count" style="color:var(--azure)"></span> <span style="font-size:10px;color:var(--gold);font-weight:700">Exploratory (in-sample) — not validation; see walk-forward</span></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap">
 <button class="icon-btn" onclick="exportDmSweepCSV()">⬇ Export CSV</button>
 <button class="action-btn azure-btn" onclick="dmSweepCopyToSettings()" style="padding:6px 14px;font-size:11px">📋 Copy Best to Settings (Review First)</button>
@@ -7694,6 +7694,10 @@ function setDmBtRange(y){
 // Dual Momentum backtest engine. DOM-free pure function.
 // Used by: DM backtest, DM param sweep, DM walk-forward, stability score.
 async function runDMBacktestCore(p){
+  // A4-7: state comes from params, never from hidden globals (wrapper fills the snapshots)
+  const _cfg=p.configSnapshot||S.config, _uni=p.universeSnapshot||S.universe;
+  const _bind=fn=>(...a)=>{const sc=S.config,su=S.universe;S.config=_cfg;S.universe=_uni;try{return fn(...a);}finally{S.config=sc;S.universe=su;}};
+  const _h={lifoFriction:_bind(lifoFriction),resolveMinProfit:_bind(resolveMinProfit),resolveTarget:_bind(resolveTarget),computeBtTax:_bind(computeBtTax),get52WLMethod:_bind(get52WLMethod)};
   // p = {fromDate,toDate,lookback,hurdle,slots,skimPct,frPct,niftyOn,minVol,
   //       btDmCompound,rebalDays,etfs,statusCb,histMap}
   // Returns {equity,tradeLog,shortfallLog,dmRebalLog,metrics,taxResult,benchEq,benchCAGR}
@@ -7710,9 +7714,9 @@ async function runDMBacktestCore(p){
   const frPct=finiteParam(p.frPct,0.0012,{min:0});
   const niftyOn=!!p.niftyOn;
   const minVol=finiteParam(p.minVol,0,{min:0});
-  const dmCompound=(p.btDmCompound!=null?!!p.btDmCompound:(p.dmCompound!=null?!!p.dmCompound:!!S.config.dmCompound));
+  const dmCompound=(p.btDmCompound!=null?!!p.btDmCompound:(p.dmCompound!=null?!!p.dmCompound:!!_cfg.dmCompound));
   const rebalDays=finiteParam(p.rebalDays,30,{min:1,integer:true});
-  const momCapital=finiteParam(p.momCapital,S.config.momCapital||100000,{min:0.01});
+  const momCapital=finiteParam(p.momCapital,_cfg.momCapital||100000,{min:0.01});
 
   // histMap may be pre-supplied (sweep reuse) or fetched fresh
   let histMap=p.histMap||null;
@@ -7736,12 +7740,16 @@ async function runDMBacktestCore(p){
   const sortedDates=[...allDates].sort();
   if(sortedDates.length<30)return {error:'Not enough data in range.'};
 
+  // A4-3 (F21): a resumed segment continues the uninterrupted schedule from nextSigIndexDate over the FULL session list
+  const _seedTs=p.terminalState||null;
+  let schedDates=sortedDates;
+  if(_seedTs&&_seedTs.nextSigIndexDate){const _all=new Set();Object.values(histMap).forEach(h=>Object.keys(h).forEach(d=>{if(d>=_seedTs.nextSigIndexDate&&d<=toDate)_all.add(d);}));schedDates=[..._all].sort();}
   const rebalSchedule=[];
   {
     let idx=0;
-    while(idx<sortedDates.length-1){
-      const sigDate=sortedDates[Math.min(idx+rebalDays-1,sortedDates.length-2)];
-      const execDate=sortedDates[Math.min(idx+rebalDays,sortedDates.length-1)];
+    while(idx<schedDates.length-1){
+      const sigDate=schedDates[Math.min(idx+rebalDays-1,schedDates.length-2)];
+      const execDate=schedDates[Math.min(idx+rebalDays,schedDates.length-1)];
       if(sigDate>=toDate)break;
       if(sigDate>=execDate)break;
       rebalSchedule.push({sigDate,execDate,periodLabel:rebalDays<=15?sigDate:sigDate.slice(0,7)});
@@ -7754,7 +7762,9 @@ async function runDMBacktestCore(p){
   const monthlyLiq=Math.pow(1+hurdle/100,rebalDays/365.25)-1; // FIX BUG-N7: 365.25 for leap-year accuracy
 
   function px(sym,date){const h=histMap[sym];if(!h)return null;const ds=Object.keys(h).filter(d=>d<=date).sort();return ds.length?h[ds[ds.length-1]].close:null;}
-  function execPx(sym,date){const h=histMap[sym];if(!h)return null;const b=h[date];if(sameCloseExecution)return b?.close||px(sym,date);if(b?.open>0)return b.open;return b?.close||px(sym,date);}
+  function execPx(sym,date){const h=histMap[sym];if(!h)return null;const b=h[date];if(sameCloseExecution)return b?.close||px(sym,date);if(b?.open>0)return b.open;return null;}   // A4-2: no OPEN -> no fill (never the old close)
+  const executionGaps=[],valuationGaps=[];
+  function execGap(sym,date){if(!sameCloseExecution)executionGaps.push({date,sym,code:'MISSING_EXECUTION_OPEN'});}
 
   function getVol(sym,date){const h=histMap[sym];if(!h)return 0;const ds=Object.keys(h).filter(d=>d<=date).sort();return ds.length?(h[ds[ds.length-1]].vol||0):0;}
   function ret6m(sym,date){const cp=px(sym,date);if(!cp)return null;const past=new Date(date);past.setDate(past.getDate()-lookback);const pastStr=fmt(past);const h=histMap[sym];if(!h)return null;const ds=Object.keys(h).filter(d=>d<=pastStr).sort();if(!ds.length)return null;return(cp/h[ds[ds.length-1]].close-1)*100;}
@@ -7772,6 +7782,7 @@ async function runDMBacktestCore(p){
   let liqValue=_dmTs?_dmTs.liqValue:0,liqSlots=_dmTs?_dmTs.liqSlots:0,liqEntryDate=_dmTs?_dmTs.liqEntryDate:'';
   let liqTotalMs=_dmTs?_dmTs.liqTotalMs:0; // FIX BUG-N5: accumulate total time parked across all periods
   const tradeLog=[],equity=[],shortfallLog=[],dmRebalLog=[];
+  const holdSnaps=[];let _prevExec=_dmTs&&_dmTs.terminalDate?_dmTs.terminalDate:fromDate;   // A4-3: post-trade holdings at every rebalance (daily NAV) + previous exec date (liquid sleeve return)
   let totalFrictionAbs=0;
 
   try{
@@ -7784,9 +7795,9 @@ async function runDMBacktestCore(p){
       const newTop=dmDecision.topPicks.map(x=>x.sym);
       const newLiqSlots=newTop.filter(s=>s==='LIQUIDBEES').length;
       const oldLiqSlots=liqSlots;
-      Object.entries(positions).forEach(([sym,pos])=>{const cp=execPx(sym,execDate);if(!cp)return;const gain=(cp-pos.entryPrice)/pos.entryPrice;if(gain>=skimPct){const val=pos.units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SKIM',entryDate:pos.entryDate,entryPrice:pos.entryPrice,exitPrice:cp,units:+pos.units.toFixed(4),friction:+fr.toFixed(2),exitReason:`Skim — gain ${(gain*100).toFixed(1)}% >= skim ${(skimPct*100).toFixed(0)}%`,pnl:(val-fr)-(pos.costBasis!=null?pos.costBasis:pos.units*pos.entryPrice),holdDays:Math.round((new Date(execDate)-new Date(pos.entryDate))/86400000)});delete positions[sym];}});
-      Object.keys(positions).forEach(sym=>{if(newTop.includes(sym))return;const cp=execPx(sym,execDate);if(!cp)return;const val=positions[sym].units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SELL',entryDate:positions[sym].entryDate,entryPrice:positions[sym].entryPrice,exitPrice:cp,units:+positions[sym].units.toFixed(4),friction:+fr.toFixed(2),exitReason:'Dropped out of top-'+slots+' momentum ranking',pnl:(val-fr)-(positions[sym].costBasis!=null?positions[sym].costBasis:positions[sym].units*positions[sym].entryPrice),holdDays:Math.round((new Date(execDate)-new Date(positions[sym].entryDate))/86400000)});delete positions[sym];});
-      if(liqValue>0&&liqSlots>0){liqValue*=(1+monthlyLiq);}
+      Object.entries(positions).forEach(([sym,pos])=>{const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}const gain=(cp-pos.entryPrice)/pos.entryPrice;if(gain>=skimPct){const val=pos.units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SKIM',entryDate:pos.entryDate,entryPrice:pos.entryPrice,exitPrice:cp,units:+pos.units.toFixed(4),friction:+fr.toFixed(2),exitReason:`Skim — gain ${(gain*100).toFixed(1)}% >= skim ${(skimPct*100).toFixed(0)}%`,pnl:(val-fr)-(pos.costBasis!=null?pos.costBasis:pos.units*pos.entryPrice),holdDays:Math.round((new Date(execDate)-new Date(pos.entryDate))/86400000)});delete positions[sym];}});
+      Object.keys(positions).forEach(sym=>{if(newTop.includes(sym))return;const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}const val=positions[sym].units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SELL',entryDate:positions[sym].entryDate,entryPrice:positions[sym].entryPrice,exitPrice:cp,units:+positions[sym].units.toFixed(4),friction:+fr.toFixed(2),exitReason:'Dropped out of top-'+slots+' momentum ranking',pnl:(val-fr)-(positions[sym].costBasis!=null?positions[sym].costBasis:positions[sym].units*positions[sym].entryPrice),holdDays:Math.round((new Date(execDate)-new Date(positions[sym].entryDate))/86400000)});delete positions[sym];});
+      if(liqValue>0&&liqSlots>0){const _la=px('LIQUIDBEES',_prevExec),_lb=px('LIQUIDBEES',execDate);if(_la>0&&_lb>0)liqValue*=_lb/_la;else valuationGaps.push({date:execDate,sym:'LIQUIDBEES'});}   // A4-3: price return of LIQUIDBEES (distributions not included)
       if(newLiqSlots<oldLiqSlots&&liqValue>0){const releasing=oldLiqSlots-newLiqSlots;const perSlot=liqValue/oldLiqSlots;const released=releasing*perSlot;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'EXIT',units:releasing,friction:0,exitReason:'LIQUIDBEES slots released — momentum candidates qualified',entryDate:liqEntryDate,entryPrice:perSlot/Math.max(1,Math.pow(1+monthlyLiq,Math.max(1,Math.round((new Date(execDate)-new Date(liqEntryDate))/2592000000)))),exitPrice:perSlot,pnl:released-(releasing*slotSz),holdDays:Math.round((new Date(execDate)-new Date(liqEntryDate))/86400000)});cash+=released;liqValue-=released;liqSlots=newLiqSlots;
         // FIX BUG-40: reset liqEntryDate when fully exited so next re-entry gets a fresh start date
         // FIX BUG-N5: accumulate total parked duration so liqMos reflects ALL parking periods, not just last
@@ -7795,15 +7806,16 @@ async function runDMBacktestCore(p){
           liqEntryDate='';
         }
       }
-      newTop.filter(s=>s!=='LIQUIDBEES').forEach(sym=>{if(positions[sym])return;const cp=execPx(sym,execDate);if(!cp||slotSz<=0)return;if(cash<slotSz-1e-9){shortfallLog.push({date:execDate,sym,neededCash:+slotSz.toFixed(2),availCash:+cash.toFixed(2),deficit:+(slotSz-cash).toFixed(2)});return;}const fr=slotSz*frPct;const units=(slotSz-fr)/cp;// G6 FIX: store slotSz at entry time — compound may change slotSz later, distorting P&L%
+      newTop.filter(s=>s!=='LIQUIDBEES').forEach(sym=>{if(positions[sym])return;const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}if(slotSz<=0)return;if(cash<slotSz-1e-9){shortfallLog.push({date:execDate,sym,neededCash:+slotSz.toFixed(2),availCash:+cash.toFixed(2),deficit:+(slotSz-cash).toFixed(2)});return;}const fr=slotSz*frPct;const units=(slotSz-fr)/cp;// G6 FIX: store slotSz at entry time — compound may change slotSz later, distorting P&L%
 positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBasis:slotSz};cash-=slotSz;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'BUY',entryDate:execDate,entryPrice:cp,exitPrice:null,units:+units.toFixed(4),friction:+fr.toFixed(2),costBasis:+slotSz.toFixed(2),exitReason:'',pnl:null,holdDays:null});});
       // FIX BUG-40: always update liqEntryDate on new entry (not just when empty) so each parking period gets correct start
       if(newLiqSlots>oldLiqSlots){const adding=newLiqSlots-oldLiqSlots;const wantVal=adding*slotSz;const addVal=Math.min(wantVal,Math.max(0,cash));if(addVal<wantVal-1e-9)shortfallLog.push({date:execDate,sym:'LIQUIDBEES',neededCash:+wantVal.toFixed(2),availCash:+Math.max(0,cash).toFixed(2),deficit:+(wantVal-Math.max(0,cash)).toFixed(2)});liqValue+=addVal;cash-=addVal;if(!liqEntryDate)liqEntryDate=execDate;liqSlots=newLiqSlots;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'BUY',entryDate:execDate,entryPrice:slotSz,exitPrice:null,pnl:null,holdDays:null});}
       if(cash<-1e-9)return{error:'INVARIANT: negative cash on '+execDate};
       let nav=cash+liqValue;
-      Object.entries(positions).forEach(([sym,pos])=>{nav+=pos.units*(px(sym,execDate)||pos.entryPrice);});
+      Object.entries(positions).forEach(([sym,pos])=>{const _pv=px(sym,execDate);if(!_pv)valuationGaps.push({date:execDate,sym});nav+=pos.units*(_pv||pos.entryPrice);});
       const navBefore=equity.length?equity[equity.length-1].nav:100;
       equity.push({date:execDate,nav:Math.max(0,nav)});
+      holdSnaps.push({date:execDate,cash,liqValue,pos:Object.fromEntries(Object.entries(positions).map(([sy,ps])=>[sy,{u:ps.units,e:ps.entryPrice}]))});
       if(dmCompound){
         const thisMonthPnl=tradeLog.filter(t=>t.date===execDate&&t.pnl!=null).reduce((s,t)=>s+t.pnl,0);
         // G1 FIX: symmetric ratchet — grow on profit, shrink on loss, hard cap prevents runaway inflation
@@ -7827,6 +7839,7 @@ positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBa
         }
         return{sym:t.sym,action:t.action,entryPrice:t.entryPrice,exitPrice:t.exitPrice,pnl:pnlPct,holdDays:t.holdDays};
       });
+      _prevExec=execDate;
       dmRebalLog.push({month:ym,sigDate,execDate,niftyOk:nOk,navBefore,navAfter:Math.max(0,nav),topPicks:newTop.filter(s=>s!=='LIQUIDBEES'),ranked:allRankedThisMonth,actions:thisMonthActions});
     }
   }catch(simErr){return {error:'Simulation error: '+simErr.message};}
@@ -7835,20 +7848,36 @@ positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBa
 
   // BUG1 FIX (DM walk-forward): test phase's CAGR baseline is the nav it was seeded at, not a fresh 100 —
   // otherwise a chained test phase measures growth over the whole train+test span while only dividing by test-window years.
-  const startNav=_dmTs?_dmTs.nav:100,endNav=equity[equity.length-1].nav;
+  // A4-3: daily NAV from the post-trade holdings of each rebalance, marked at every session close (liquid sleeve at LIQUIDBEES price)
+  const equityDaily=[];
+  {
+    const seed=_dmTs?{date:_dmTs.terminalDate||fromDate,cash:_dmTs.cash,liqValue:_dmTs.liqValue,pos:Object.fromEntries(Object.entries(_dmTs.positions||{}).map(([sy,ps])=>[sy,{u:ps.units,e:ps.entryPrice}]))}:{date:fromDate,cash:100,liqValue:0,pos:{}};
+    let cur=seed,si=0;
+    for(const d of sortedDates){
+      while(si<holdSnaps.length&&holdSnaps[si].date<=d){cur=holdSnaps[si];si++;}
+      let v=cur.cash;
+      if(cur.liqValue>0){const _la=px('LIQUIDBEES',cur.date),_lb=px('LIQUIDBEES',d);v+=cur.liqValue*((_la>0&&_lb>0)?_lb/_la:1);}
+      for(const [sy,q] of Object.entries(cur.pos)){const pv=px(sy,d);if(!pv)valuationGaps.push({date:d,sym:sy});v+=q.u*(pv||q.e);}
+      equityDaily.push({date:d,nav:v});
+    }
+  }
+  const startNav=_dmTs?((_dmTs.terminalEquity>0)?_dmTs.terminalEquity:_dmTs.nav):100,endNav=equity[equity.length-1].nav;
   // FIX BUG-2 / NIFTY-ENDPOINT: yrs uses equity terminal date, not toDate.
   // equity ends at the last rebalance execution date which may be before toDate (especially with large rebalDays).
   // Using toDate for yrs would understate CAGR (numerator ends earlier than denominator implies).
   // yrs is also used for benchCAGR so both strategy and Nifty measure the same window.
-  const yrs=Math.max(0.1,(new Date(equity[equity.length-1].date)-new Date(fromDate))/(365.25*86400000));
+  const yrs=Math.max(0.1,(new Date(equity[equity.length-1].date)-new Date(_dmTs&&_dmTs.terminalDate?_dmTs.terminalDate:fromDate))/(365.25*86400000));
   const cagr=(Math.pow(endNav/startNav,1/yrs)-1)*100;
+  // A4-3: drawdown and Sharpe come from the DAILY NAV (the sparse rebalance series is kept only for the chart)
   let peak2=startNav,maxDD2=0;
-  equity.forEach(e=>{if(e.nav>peak2)peak2=e.nav;const dd=(peak2-e.nav)/peak2*100;if(dd>maxDD2)maxDD2=dd;});
+  equityDaily.forEach(e=>{if(e.nav>peak2)peak2=e.nav;const dd=(peak2-e.nav)/peak2*100;if(dd>maxDD2)maxDD2=dd;});
+  const dRets=[];{let pv=startNav;for(const e of equityDaily){dRets.push(pv>0?(e.nav-pv)/pv:0);pv=e.nav;}}
+  const meanD=dRets.reduce((a,b)=>a+b,0)/(dRets.length||1),sdD=Math.sqrt(dRets.reduce((a,b)=>a+(b-meanD)**2,0)/(dRets.length||1));
   const mRets=[];
   for(let i=1;i<equity.length;i++)mRets.push((equity[i].nav-equity[i-1].nav)/equity[i-1].nav);
   const avgM=mRets.reduce((s,r)=>s+r,0)/mRets.length;
   const stdM=Math.sqrt(mRets.reduce((s,r)=>s+(r-avgM)**2,0)/mRets.length);
-  const sharpe=stdM>0?(avgM/stdM)*Math.sqrt(12):0;
+  const sharpe=sdD>0?(meanD/sdD)*Math.sqrt(252):0;
   const calmar=maxDD2>0?cagr/maxDD2:0;
   const winRate=mRets.filter(r=>r>0).length/mRets.length*100;
   // FIX BUG-N5: liqMos = total months parked across ALL periods (not just last entry to end)
@@ -7870,16 +7899,16 @@ positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBa
   // FIX BUG-15: filter null nav values so Math.min/max in chart isn't poisoned
   const benchEq=equity.map(e=>{const bp=px('NIFTYBEES',e.date);return{date:e.date,nav:(benchS&&bp)?(bp/benchS)*100:null};});
   const closed=tradeLog.filter(t=>t.pnl!==null&&t.holdDays!==null&&t.action!=='BUY');
-  const taxResult=computeBtTax(closed.map(t=>({sellDate:t.date,buyDate:t.entryDate||'',netPnl:t.pnl*momCapital/100,holdDays:t.holdDays,assetClass:(S.universe.find(e=>e.sym===t.sym)?.assetClass)||'equity'})));
+  const taxResult=_h.computeBtTax(closed.map(t=>({sellDate:t.date,buyDate:t.entryDate||'',netPnl:t.pnl*momCapital/100,holdDays:t.holdDays,assetClass:(_uni.find(e=>e.sym===t.sym)?.assetClass)||'equity'})));
   const afterTaxAdj=taxResult.totalTax/momCapital*100;
   const afterTaxCAGR=(Math.pow(Math.max(0.01,endNav-afterTaxAdj)/startNav,1/yrs)-1)*100;
 
   // Worst rolling 12M window (for regime breakdown — BUG-8 / Step 7)
   let worstRolling12M=null;
-  if(equity.length>=12){
-    const navArr=equity.map(e=>e.nav);
-    for(let i=0;i<=navArr.length-12;i++){
-      const ret=(navArr[i+11]-navArr[i])/navArr[i]*100;
+  if(equityDaily.length>=252){
+    const navArr=equityDaily.map(e=>e.nav);
+    for(let i=0;i<=navArr.length-252;i++){
+      const ret=(navArr[i+251]-navArr[i])/navArr[i]*100;
       if(worstRolling12M===null||ret<worstRolling12M)worstRolling12M=ret;
     }
   }
@@ -7887,8 +7916,9 @@ positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBa
   tradeLog.forEach(t=>{t.executionMode=executionMode;});
   return{
     executionModel:sameCloseExecution?'SHEET PARITY: signal → same-session CLOSE':'REALISTIC: signal → next-session OPEN (close fallback only when OPEN missing)',
-    equity,tradeLog,shortfallLog,dmRebalLog,histMap,
-    terminalState:{cash,slotSz,positions:JSON.parse(JSON.stringify(positions)),liqValue,liqSlots,liqEntryDate,liqTotalMs,nav:endNav,executionMode},
+    equity,equityDaily,tradeLog,shortfallLog,dmRebalLog,histMap,executionGaps,valuationGaps,
+    assumptions:{liquidReturnBasis:'PRICE_ONLY'},
+    terminalState:{cash,slotSz,positions:JSON.parse(JSON.stringify(positions)),liqValue,liqSlots,liqEntryDate,liqTotalMs,nav:endNav,executionMode,terminalEquity:equityDaily.length?equityDaily[equityDaily.length-1].nav:endNav,terminalDate:equityDaily.length?equityDaily[equityDaily.length-1].date:terminalDate,nextSigIndexDate:rebalSchedule[rebalSchedule.length-1].execDate},
     metrics:{cagr,afterTaxCAGR,maxDD:maxDD2,sharpe,calmar,winRate,liqMos,
       xirr:(()=>{const r=xirr([{date:fromDate,amount:-momCapital},{date:terminalDate,amount:endNav*momCapital/100}]);return r==null?null:r*100;})(),
       avgNav:equity.length?equity.reduce((a,e)=>a+e.nav,0)/equity.length:null,
@@ -8784,7 +8814,10 @@ async function fetchHistDaily(sym,yfSym,startTs,endTs,ctx){
 
 // ══ RUN CONTRACT · PREFLIGHT · MODES (A2b) ══════════════════════════════════════════════════════════
 // A run states what data it needs (roles), the preflight checks that against ONE pinned snapshot, and the result label is decided in one place.
-const ENGINE_CERTIFIABLE=Object.freeze({LIFO:false,DM:false,TENET:false});   // A4 flips an engine to true only when its A4 tests pass
+// A4-8: an engine is certifiable only while ALL of its A4 tests + invariants pass (tests a4.test.mjs / a4b.test.mjs, known-bug F09 F16 F18 F20 F21 F24 F25):
+//  LIFO: A4-1 F16 valuation/entry views, A4-2 execution gaps, A4-3 continuation, A4-7 determinism, invariants.  DM: A4-2 F18, A4-3 F20/F21 daily NAV + price-only liquid sleeve, A4-4 walk-forward, A4-7, invariants.
+//  TENET: A4-5 F09/F25 sessions + warm-up + terminal valuation + evidence, A4-6 explicit inputs, cash+openMV identity.
+const ENGINE_CERTIFIABLE=Object.freeze({LIFO:true,DM:true,TENET:true});
 const RUN_ROLES=Object.freeze(['CORE_REFERENCE','EXECUTION_REQUIRED','HELD_POSITION','LIQUID_SLEEVE','RANKING_CANDIDATE','BENCHMARK','OPTIONAL_DISPLAY']);
 const RUN_MODE={LIFO:'research',DM:'research',TENET:'research'};             // what the existing "Run" buttons do (certified is disabled until an engine is certifiable)
 const RUN_PREVIEW={active:false,until:0};                                    // set while a preview is shown (10 min): money-write handlers refuse
@@ -9287,6 +9320,10 @@ function getSpikeFilteredLow(histIndex,dateTs,thresh=0.08){
 // Used by: LIFO backtest, LIFO param sweep, walk-forward, stability score.
 // renderLifoSignals() must mirror its decision rules — see STRATEGY CONTRACT.
 async function runLifoBacktestCore(p){
+  // A4-7: state comes from params, never from hidden globals (wrapper fills the snapshots)
+  const _cfg=p.configSnapshot||S.config, _uni=p.universeSnapshot||S.universe, _lifoUni=p.lifoUniverseSnapshot||null;
+  const _bind=fn=>(...a)=>{const sc=S.config,su=S.universe;S.config=_cfg;S.universe=_uni;try{return fn(...a);}finally{S.config=sc;S.universe=su;}};
+  const _h={lifoFriction:_bind(lifoFriction),resolveMinProfit:_bind(resolveMinProfit),resolveTarget:_bind(resolveTarget),computeBtTax:_bind(computeBtTax),get52WLMethod:_bind(get52WLMethod)};
   // p = {startDate,endDate,capital,slots,avgFall,minProfit,minVol,maxLots,
   //       maxScan,maxBuysPerDay,btHighGuard,btHighGuardPct,btCompound,
   //       btLiquidRate,sellOnFall,buyOnRise,statusCb,progressCb,histMap,histIndex}
@@ -9301,36 +9338,37 @@ async function runLifoBacktestCore(p){
   const startDate=p.startDate, endDate=p.endDate;
   // Keep the backtest parameter contract identical to the live desk when a
   // caller omits a value. Explicit zero is preserved wherever it is meaningful.
-  const capital=finiteParam(p.capital,finiteParam(S.config.capital,100000,{min:0.01}),{min:0.01});
-  const slots=finiteParam(p.slots,finiteParam(S.config.slots,40,{min:1,integer:true}),{min:1,integer:true});
-  const avgFall=finiteParam(p.avgFall,finiteParam(S.config.avgFall,6,{min:0}),{min:0});
-  const minProfit=resolveMinProfit({minProfit:(p.minProfit!=null?p.minProfit:S.config.minProfit)});
-  const minVol=finiteParam(p.minVol,finiteParam(S.config.minVol,0,{min:0}),{min:0});
-  const maxLots=finiteParam(p.maxLots,finiteParam(S.config.maxLots,3,{min:1,integer:true}),{min:1,integer:true});
-  const maxScan=finiteParam(p.maxScan,finiteParam(S.config.maxScan,20,{min:1,integer:true}),{min:1,integer:true});
-  const maxBuysPerDay=finiteParam(p.maxBuysPerDay,finiteParam(S.config.maxBuysPerDay,3,{min:0,integer:true}),{min:0,integer:true});
+  const capital=finiteParam(p.capital,finiteParam(_cfg.capital,100000,{min:0.01}),{min:0.01});
+  const slots=finiteParam(p.slots,finiteParam(_cfg.slots,40,{min:1,integer:true}),{min:1,integer:true});
+  const avgFall=finiteParam(p.avgFall,finiteParam(_cfg.avgFall,6,{min:0}),{min:0});
+  const minProfit=_h.resolveMinProfit({minProfit:(p.minProfit!=null?p.minProfit:_cfg.minProfit)});
+  const minVol=finiteParam(p.minVol,finiteParam(_cfg.minVol,0,{min:0}),{min:0});
+  const maxLots=finiteParam(p.maxLots,finiteParam(_cfg.maxLots,3,{min:1,integer:true}),{min:1,integer:true});
+  const maxScan=finiteParam(p.maxScan,finiteParam(_cfg.maxScan,20,{min:1,integer:true}),{min:1,integer:true});
+  const maxBuysPerDay=finiteParam(p.maxBuysPerDay,finiteParam(_cfg.maxBuysPerDay,3,{min:0,integer:true}),{min:0,integer:true});
   // D2 — sheet rule 4.2: averaging is capped separately from new buys ("max 1 in a day").
   //      Configurable; defaults to the sheet's value of 1.
-  const maxAvgPerDay=finiteParam(p.maxAvgPerDay,(S.config.maxAvgPerDay!=null?S.config.maxAvgPerDay:1),{min:0,integer:true});
+  const maxAvgPerDay=finiteParam(p.maxAvgPerDay,(_cfg.maxAvgPerDay!=null?_cfg.maxAvgPerDay:1),{min:0,integer:true});
   // D4 — 'spike' (this app's filtered low) or 'raw' (sheet's plain MIN over 364d)
-  const wl52Method=p.wl52Method||get52WLMethod();
+  const wl52Method=p.wl52Method||_h.get52WLMethod();
   // Fixed-target mode — inherited from Settings so sweeps and walk-forward run
   // under exactly the same exit rule as the live desk.
-  const fixedTargetOn=(p.fixedTargetOn!=null?p.fixedTargetOn:!!S.config.fixedTargetOn);
-  const fixedTargetPct=finiteParam(p.fixedTargetPct!=null?p.fixedTargetPct:S.config.fixedTargetPct,8,{min:0.01});
+  const fixedTargetOn=(p.fixedTargetOn!=null?p.fixedTargetOn:!!_cfg.fixedTargetOn);
+  const fixedTargetPct=finiteParam(p.fixedTargetPct!=null?p.fixedTargetPct:_cfg.fixedTargetPct,8,{min:0.01});
   const btHighGuard=!!p.btHighGuard;
-  const btHighGuardPct=finiteParam(p.btHighGuardPct,finiteParam(S.config.highGuardPct,5,{min:0}),{min:0});
+  const btHighGuardPct=finiteParam(p.btHighGuardPct,finiteParam(_cfg.highGuardPct,5,{min:0}),{min:0});
   const btCompound=!!p.btCompound;
   const btLiquidRate=finiteParam(p.btLiquidRate,0,{min:0});
-  const sellOnFall=p.sellOnFall!==undefined?!!p.sellOnFall:!!S.config.sellOnFall;
-  const buyOnRise=p.buyOnRise!==undefined?!!p.buyOnRise:!!S.config.buyOnRise;
+  const sellOnFall=p.sellOnFall!==undefined?!!p.sellOnFall:!!_cfg.sellOnFall;
+  const buyOnRise=p.buyOnRise!==undefined?!!p.buyOnRise:!!_cfg.buyOnRise;
 
   rebuildUniverses();
-  if(!LIFO_ETF_UNIVERSE.length)return{error:'No LIFO-tagged ETFs in universe'};
+  if(!(_lifoUni||LIFO_ETF_UNIVERSE).length)return{error:'No LIFO-tagged ETFs in universe'};
 
   let slotSize=capital/slots;
   // baseSlotSize removed with the clamp it existed for.
   let totalLiqYield=0; // liqParked now initialized above with terminalState support
+  const valuationGaps=[],executionGaps=[];   // A4: held symbol without a bar (valuation) / execution price missing (never silently replaced)
 
   // histMap/histIndex may be pre-supplied or fetched fresh
   let histMap=p.histMap||null;
@@ -9342,7 +9380,7 @@ async function runLifoBacktestCore(p){
   if(!histMap){
     histMap={};histIndex={};
     let _done=0;
-    const _rows=await mapWithConcurrency(LIFO_ETF_UNIVERSE,2,async e=>{let h=null,err=null;try{h=await fetchHistDaily(e.sym,e.yf,startTs,endTs);}catch(ex){err=ex;} _done++;progressCb(Math.round(_done/LIFO_ETF_UNIVERSE.length*40),`Prepared ${e.sym}${err?' — FAILED':''}…`);return {sym:e.sym,h,err};});
+    const _rows=await mapWithConcurrency((_lifoUni||LIFO_ETF_UNIVERSE),2,async e=>{let h=null,err=null;try{h=await fetchHistDaily(e.sym,e.yf,startTs,endTs);}catch(ex){err=ex;} _done++;progressCb(Math.round(_done/(_lifoUni||LIFO_ETF_UNIVERSE).length*40),`Prepared ${e.sym}${err?' — FAILED':''}…`);return {sym:e.sym,h,err};});
     const _failed=_rows.filter(x=>x.err||!x.h||!Object.keys(x.h).length);
     if(_failed.length)return {error:`Historical data failed for ${_failed.map(x=>x.sym).join(', ')}. No backtest was run. Retry Data Center sync or check the market-data source.`};
     _rows.forEach(x=>{histMap[x.sym]=x.h;histIndex[x.sym]=buildHistIndex(x.h);});
@@ -9391,16 +9429,19 @@ async function runLifoBacktestCore(p){
     const dayTs=new Date(day).getTime();
     progressCb(40+Math.round(di/tradingDays.length*55),`Simulating ${day}…`);
 
-    const snapshot=LIFO_ETF_UNIVERSE.filter(e=>!DHC_EXCLUDED.has(e.sym)).map(etf=>{
-      const h=histMap[etf.sym];const today=h[day];if(!today?.close)return null;
-      if(minVol>0&&today.vol>0&&today.vol<minVol)return null;
+    // A4-1 (F16): snapshotAll = every symbol with a bar (SELL checks, marks, inventory); snapshotEntry = minVol-filtered (ranking/buys only)
+    const snapshotAll=(_lifoUni||LIFO_ETF_UNIVERSE).filter(e=>!DHC_EXCLUDED.has(e.sym)).map(etf=>{
+      const h=histMap[etf.sym];const today=h?.[day];if(!today?.close)return null;
       const low52=compute52WL(histIndex[etf.sym],dayTs,wl52Method);   // D4: sheet-parity toggle
       const high52=get52WHigh(histIndex[etf.sym],dayTs);
       const prox=low52>0?((today.close-low52)/low52)*100:999;
       const distHigh=high52>0?((high52-today.close)/high52)*100:null;
       const dailyChg=today.prev?((today.close-today.prev)/today.prev)*100:0;
-      return{sym:etf.sym,name:etf.name,close:today.close,low52,high52,prox,distHigh,dailyChg};
+      return{sym:etf.sym,name:etf.name,close:today.close,low52,high52,prox,distHigh,dailyChg,vol:today.vol};
     }).filter(Boolean);
+    const snapshotEntry=minVol>0?snapshotAll.filter(s=>!(s.vol>0&&s.vol<minVol)):snapshotAll;
+    // a held symbol with no bar today keeps its last mark; the gap is reported, never silently valued
+    Object.keys(openLots).forEach(sym=>{if((openLots[sym]||[]).some(l=>!l.closed)&&!snapshotAll.some(s=>s.sym===sym))valuationGaps.push({date:day,sym});});
 
     // ── EXECUTION QUEUE ────────────────────────────────────────────────────
     // Default: orders created from a completed close execute at the next session OPEN.
@@ -9412,12 +9453,12 @@ async function runLifoBacktestCore(p){
       for(const o of sellQueue){
         const ex=priceResolver(o.sym); const lots=openLots[o.sym]||[]; const lot=lots.find(l=>l.id===o.lotId);
         if(!lot||lot.closed)continue;
-        if(!ex.px){pendingSells.push(o);continue;}
+        if(!ex.px){pendingSells.push(o);executionGaps.push({date:day,sym:o.sym,side:'SELL',code:ex.gap?'MISSING_EXECUTION_OPEN':'MISSING_EXECUTION_PRICE'});continue;}   // A4-2: stays pending, reported, never filled at another price
         const qty=lot.qty,cost=qty*lot.price,curr=qty*ex.px;
-        const fr=lifoFriction('SELL',qty,ex.px).friction; const buyFr=lifoFriction('BUY',qty,lot.price).friction;
+        const fr=_h.lifoFriction('SELL',qty,ex.px).friction; const buyFr=_h.lifoFriction('BUY',qty,lot.price).friction;
         const grossPnl=curr-cost,netPnl=grossPnl-fr-buyFr;
         const holdDays=Math.round((new Date(day)-new Date(lot.date))/86400000);
-        trades.push({buyDate:lot.date,sym:o.sym,name:lot.name,assetClass:(LIFO_ETF_UNIVERSE.find(e=>e.sym===o.sym)?.assetClass)||'equity',buyPrice:lot.price,qty,invested:cost,sellDate:day,sellPrice:ex.px,holdDays,avgCount:lot.avgCount||0,grossPnl,netPnl,pnlPct:(netPnl/cost)*100,exitReason:o.exitReason||'Target Hit',executionFallback:ex.fallback,signalDate:o.signalDate,executionMode});
+        trades.push({buyDate:lot.date,sym:o.sym,name:lot.name,assetClass:((_lifoUni||LIFO_ETF_UNIVERSE).find(e=>e.sym===o.sym)?.assetClass)||'equity',buyPrice:lot.price,qty,invested:cost,sellDate:day,sellPrice:ex.px,holdDays,avgCount:lot.avgCount||0,grossPnl,netPnl,pnlPct:(netPnl/cost)*100,exitReason:o.exitReason||'Target Hit',executionFallback:ex.fallback,signalDate:o.signalDate,executionMode});
         usedCapital-=cost; cash+=curr-fr; reservedCash=Math.max(0,reservedCash-(o.reserved||0)); lot.closed=true;
         if(btCompound&&netPnl!==0)slotSize=Math.max(0,slotSize+netPnl/slots);
         dailyLog.push({date:day,sym:o.sym,signal:'SELL_EXEC',reason:o.exitReason||'Target Hit',price:ex.px,signalDate:o.signalDate,executionFallback:ex.fallback,executionMode:execLabel});
@@ -9425,8 +9466,8 @@ async function runLifoBacktestCore(p){
       // FIFO execution preserves the strategy ranking if overnight gaps make cash insufficient.
       const buyQueue=pendingBuys.splice(0,pendingBuys.length);
       for(const o of buyQueue){
-        const ex=priceResolver(o.sym); if(!ex.px){pendingBuys.push(o);continue;}
-        const buyCost=o.qty*ex.px+lifoFriction('BUY',o.qty,ex.px).friction;
+        const ex=priceResolver(o.sym); if(!ex.px){pendingBuys.push(o);executionGaps.push({date:day,sym:o.sym,side:'BUY',code:ex.gap?'MISSING_EXECUTION_OPEN':'MISSING_EXECUTION_PRICE'});continue;}
+        const buyCost=o.qty*ex.px+_h.lifoFriction('BUY',o.qty,ex.px).friction;
         const reserved=o.reserved||0;
         if(cash<buyCost){reservedCash=Math.max(0,reservedCash-reserved);dailyLog.push({date:day,sym:o.sym,signal:'BUY_FAIL',reason:'Insufficient cash at execution',price:ex.px,signalDate:o.signalDate,executionFallback:ex.fallback,executionMode:execLabel});continue;}
         reservedCash=Math.max(0,reservedCash-reserved);cash-=buyCost;usedCapital+=o.qty*ex.px;
@@ -9435,7 +9476,7 @@ async function runLifoBacktestCore(p){
         dailyLog.push({date:day,sym:o.sym,signal:o.avg?'AVG_EXEC':'BUY_EXEC',reason:o.reason,price:ex.px,signalDate:o.signalDate,executionFallback:ex.fallback,executionMode:execLabel});
       }
     };
-    const execOpen=(sym)=>{const b=histMap[sym]?.[day];return b&&b.open>0?{px:b.open,fallback:false}:{px:histMap[sym]?.[day]?.close||0,fallback:true};};
+    const execOpen=(sym)=>{const b=histMap[sym]?.[day];return b&&b.open>0?{px:b.open,fallback:false}:{px:0,fallback:false,gap:true};};   // A4-2: no fallback to the close
     const execClose=(sym)=>({px:histMap[sym]?.[day]?.close||0,fallback:false});
     if(!sameCloseExecution)executePending(execOpen,'next-open');
 
@@ -9466,19 +9507,19 @@ async function runLifoBacktestCore(p){
     const _equity=_effectiveEquity();
     // Shared resolver — same function the live desk uses, so the fixed-target
     // toggle cannot apply in one engine and not the other.
-    const targetPct=resolveTarget(usedCapital,_equity||capital,{
+    const targetPct=_h.resolveTarget(usedCapital,_equity||capital,{
       fixedTargetOn:fixedTargetOn, fixedTargetPct:fixedTargetPct, capital:capital
     });
 
     // SELL checks — BUG-1: enforce BOTH gainPct>=targetPct AND net>=minProfit at trailing exit
     Object.keys(openLots).forEach(sym=>{
       const lots=openLots[sym];if(!lots?.length)return;
-      const snap=snapshot.find(s=>s.sym===sym);if(!snap)return;
+      const snap=snapshotAll.find(s=>s.sym===sym);if(!snap)return;
       lots.forEach((lot,idx)=>{
         if(lot.closed)return;
         const cost=lot.qty*lot.price,curr=lot.qty*snap.close,gain=curr-cost,gainPct=(gain/cost)*100;
-        const frict=lifoFriction('SELL',lot.qty,snap.close).friction;
-        const buyFrict=lifoFriction('BUY',lot.qty,lot.price).friction;
+        const frict=_h.lifoFriction('SELL',lot.qty,snap.close).friction;
+        const buyFrict=_h.lifoFriction('BUY',lot.qty,lot.price).friction;
         const net=gain-frict-buyFrict;
         if(gainPct<targetPct||net<minProfit)return; // BUG-1: both conditions enforced here
         const canSell=sellOnFall?snap.dailyChg<0:true;
@@ -9519,13 +9560,13 @@ async function runLifoBacktestCore(p){
       // number the SELL decision actually used, or the card lies about why a
       // position closed.
       const currentEquity=_effectiveEquity();
-      const dynTgt=resolveTarget(usedCapital,currentEquity||capital,{
+      const dynTgt=_h.resolveTarget(usedCapital,currentEquity||capital,{
         fixedTargetOn:fixedTargetOn, fixedTargetPct:fixedTargetPct, capital:capital
       });
       Object.keys(openLots).forEach(sym=>{
         const activeLots=(openLots[sym]||[]).filter(l=>!l.closed);
         if(!activeLots.length)return;
-        const snap=snapshot.find(s=>s.sym===sym);
+        const snap=snapshotAll.find(s=>s.sym===sym);
         const close=snap?snap.close:null;
         const dailyChg=snap?snap.dailyChg:null;
         activeLots.forEach((lot,li)=>{
@@ -9559,7 +9600,7 @@ async function runLifoBacktestCore(p){
     // available — the opposite of the intended priority. Now: pass 1 fills
     // slots with new ETFs; pass 2 runs only if pass 1 bought nothing, and is
     // capped separately (sheet rule 4.2, "max 1 in a day" — configurable).
-    const rankedSnapshot=[...snapshot].filter(s=>!DHC_EXCLUDED.has(s.sym)).sort((a,b)=>a.prox-b.prox).slice(0,maxScan);
+    const rankedSnapshot=[...snapshotEntry].filter(s=>!DHC_EXCLUDED.has(s.sym)).sort((a,b)=>a.prox-b.prox).slice(0,maxScan);
     let buysToday=0, avgToday=0, capitalHalted=false;
 
     // Shared affordability step — identical for both passes.
@@ -9615,7 +9656,7 @@ async function runLifoBacktestCore(p){
       }
       // D6: sheet uses CEILING($B$3/U2,1) — round UP, not down
       const qty=Math.ceil(slotSize/close)||1;
-      const estCost=qty*close+lifoFriction('BUY',qty,close).friction;
+      const estCost=qty*close+_h.lifoFriction('BUY',qty,close).friction;
       if(!_afford(estCost+reservedCash)){
         dailyLog.push({date:day,sym,signal:'SKIP',reason:'Insufficient cash/reserved cash',price:close,dailyChg,prox});
         continue;
@@ -9661,7 +9702,7 @@ async function runLifoBacktestCore(p){
         if(_capitalExhausted(sym,close,dailyChg,prox)){capitalHalted=true;break;}
         // D6: CEILING here too
         const qty=Math.ceil(slotSize/close)||1;
-        const estCost=qty*close+lifoFriction('BUY',qty,close).friction;
+        const estCost=qty*close+_h.lifoFriction('BUY',qty,close).friction;
         if(!_afford(estCost+reservedCash)){
           dailyLog.push({date:day,sym,signal:'SKIP',reason:'Insufficient cash/reserved cash (avg)',price:close,dailyChg,prox});
           continue;
@@ -9687,7 +9728,7 @@ async function runLifoBacktestCore(p){
       if(freeCash>slotSize&&buysToday===0){liqParked+=freeCash;cash-=freeCash;totalLiqYield+=freeCash*dailyLiqRate;}
     }
 
-    snapshot.forEach(s=>lastPx[s.sym]=s.close);
+    snapshotAll.forEach(s=>lastPx[s.sym]=s.close);
     let mtm=0;
     Object.keys(openLots).forEach(sym=>openLots[sym].forEach(l=>{if(!l.closed)mtm+=l.qty*(lastPx[sym]||l.price);}));
     equity.push({d:day,eq:cash+mtm+liqParked});
@@ -9701,11 +9742,15 @@ async function runLifoBacktestCore(p){
   }
 
   const eq=equity, endEq=eq.length?eq[eq.length-1].eq:capital;
-  const years=Math.max((new Date(tradingDays[tradingDays.length-1])-new Date(tradingDays[0]))/(365.25*86400000),1/365);
-  const cagr=Math.pow(Math.max(endEq,1)/capital,1/years)-1;
-  let peak=-Infinity,maxDD=0;
+  // A4-3: a resumed segment is measured from the equity it inherited (terminalEquity at terminalDate), so day 1 includes the overnight move
+  const _rs=p.terminalState&&p.terminalState.terminalEquity>0?p.terminalState:null;
+  const _baseEq=_rs?_rs.terminalEquity:capital;
+  const years=Math.max((new Date(tradingDays[tradingDays.length-1])-new Date(_rs&&_rs.terminalDate?_rs.terminalDate:tradingDays[0]))/(365.25*86400000),1/365);
+  const cagr=Math.pow(Math.max(endEq,1)/_baseEq,1/years)-1;
+  let peak=_rs?_rs.terminalEquity:-Infinity,maxDD=0;
   eq.forEach(e=>{peak=Math.max(peak,e.eq);maxDD=Math.max(maxDD,(peak-e.eq)/peak);});
   const rets=[];
+  if(_rs&&eq.length)rets.push(eq[0].eq/_rs.terminalEquity-1);
   for(let i=1;i<eq.length;i++)rets.push(eq[i].eq/eq[i-1].eq-1);
   const mean=rets.reduce((s,r)=>s+r,0)/(rets.length||1);
   const sd=Math.sqrt(rets.reduce((s,r)=>s+(r-mean)**2,0)/(rets.length||1));
@@ -9773,15 +9818,15 @@ async function runLifoBacktestCore(p){
     };
   })();
 
-  const tax=computeBtTax(trades);
+  const tax=_h.computeBtTax(trades);
   const afterTaxEnd=endEq-tax.totalTax;
   const afterTaxCagr=Math.pow(Math.max(afterTaxEnd,1)/capital,1/years)-1;
 
   const unexecutedOrders={buys:pendingBuys.map(o=>({...o})),sells:pendingSells.map(o=>({...o})),reservedCash};
   return{
     executionModel:sameCloseExecution?'SHEET PARITY: EOD signal → same-session CLOSE':'REALISTIC: EOD signal → next-session OPEN (close fallback only when OPEN missing)',
-    trades,dailyLog,equity,utilization,histMap,histIndex,capitalSkipLog,inventoryLog,trailingLog,unexecutedOrders,
-    terminalState:{openLots,cash,usedCapital,liqParked,slotSize,pendingBuys,pendingSells,reservedCash,executionMode},
+    trades,dailyLog,equity,utilization,histMap,histIndex,capitalSkipLog,inventoryLog,trailingLog,unexecutedOrders,valuationGaps,executionGaps,
+    terminalState:{openLots,cash,usedCapital,liqParked,slotSize,pendingBuys,pendingSells,reservedCash,executionMode,terminalEquity:endEq,terminalDate:tradingDays[tradingDays.length-1]},
     metrics:{capital,endEq,years,cagr,maxDD,sharpe,bhCagr,afterTaxCagr,
       xirr:(()=>{const r=xirr([{date:startDate,amount:-capital},{date:endDate,amount:endEq}]);return r==null?null:r*100;})(),
       avgDeployed:utilization.length?utilization.reduce((a,u)=>a+Math.max(0,u.usedCapital||0),0)/utilization.length:0,
@@ -11412,6 +11457,7 @@ const TENET_NSE_HOLIDAYS_2026=[
 function tenetDefaults(){return{universeMode:'fixed',firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,signalAfterMinutes:15*60,requireVerifiedLive:true,extraHolidays:[],brokeragePerOrder:0};}
 // A2-3 (F03): transient scanner state. Never serialized, never part of S. Any pair/config/app-version change invalidates it.
 const TENET_RUNTIME={live:null,liveAt:0,fingerprint:'',metrics:{}};
+let TENET_RUN_STATE=null;    // A4-6: set only around the synchronous backtest loop (no awaits inside), so live UI code can never observe it
 function tenetFingerprint(){const t=S.tenet||{};return JSON.stringify({pairs:t.pairs||[],config:t.config||{},v:APP_VERSION});}
 function tenetLiveRows(){
   if(TENET_RUNTIME.live&&TENET_RUNTIME.fingerprint!==tenetFingerprint()){TENET_RUNTIME.live=null;TENET_RUNTIME.liveAt=0;TENET_RUNTIME.metrics={};}
@@ -11433,6 +11479,7 @@ function tenetScannerActionGate(underlying,etf,nowMs=Date.now()){
   return{ok:true,reason:'',row};
 }
 function tenetState(){
+  if(TENET_RUN_STATE)return TENET_RUN_STATE;
   if(!S.tenet)S.tenet={};const t=S.tenet;
   // S0-2: legacy migration must read RAW stored config. It previously ran after
   // the defaults merge, by which point selectionDistancePct was always present
@@ -11739,9 +11786,9 @@ function _tenetQuoteFreshness(q,sessionDate){return quoteFreshness({_observedAt:
 // live behaviour (read PRICES); a backtest passes that session's turnover map.
 function tenetCandidateSort(a,b,turnoverCtx=null){const ta=a.team==='GREEN'?0:1,tb=b.team==='GREEN'?0:1;if(ta!==tb)return ta-tb;return (Number.isFinite(b.distance)?b.distance:-999)-(Number.isFinite(a.distance)?a.distance:-999)||tenetEtfTurnover(b.etf,turnoverCtx)-tenetEtfTurnover(a.etf,turnoverCtx)||a.etf.localeCompare(b.etf);}
 function tenetPriceQuality(sym){const t=tenetState(),f=priceFreshStatus(sym),verified=f.source==='UPSTOX',allowed=f.ok&&(t.config.requireVerifiedLive===false||verified);return{...f,verified,allowed,reason:!f.price?'price unavailable':!f.ok?`stale/not refreshed this session (${f.source||'unknown'})`:t.config.requireVerifiedLive!==false&&!verified?`source ${f.source||'unknown'} is not verified Upstox`:'ready'};}
-function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=tenetState().holdings,weekKey=null,requireLiveQuality=false,turnoverCtx=null}={}){const t=tenetState(),buys=[],bids=[],diag=[];for(const p of pairs){if(p.error){diag.push({underlying:p.underlying,status:'DATA ERROR',reason:p.error,indexSource:p.indexSource||''});continue;}for(const side of ['green','red']){const etf=p[side],team=side==='green'?'GREEN':'RED';if(!etf)continue;const candleOk=(team==='GREEN'&&p.direction==='BULLISH')||(team==='RED'&&p.direction==='BEARISH');if(!candleOk){diag.push({underlying:p.underlying,etf,team,status:'NO',reason:`${p.direction||'NO'} index candle`,indexSource:p.indexSource||''});continue;}const price=+(priceMap[etf]?.cmp||priceMap[etf]?.close||0);if(!(price>0)){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:'ETF price unavailable',indexSource:p.indexSource||''});continue;}if(requireLiveQuality&&priceMap===PRICES){const q=tenetPriceQuality(etf);if(!q.allowed){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:q.reason,priceSource:q.source,indexSource:p.indexSource||''});continue;}}const lots=holdings.filter(x=>x.etf===etf),base={etf,team,price,underlying:p.underlying,distance:p.distance,direction:p.direction,indexSource:p.indexSource||'',priceSource:priceMap===PRICES?String(PRICES[etf]?._src||''):''};if(!lots.length){buys.push(base);diag.push({...base,status:actionable?'BUY':'PREVIEW',reason:'team candle matched · not currently held'});}else{const last=tenetLatestLot(etf,holdings),fall=(last.buyPrice-price)/last.buyPrice*100;if(fall>=t.config.avgTriggerPct){bids.push({...base,fall,last});diag.push({...base,status:actionable?'BID ELIGIBLE':'PREVIEW BID',reason:`down ${fall.toFixed(2)}% from latest lot`});}else diag.push({...base,status:'NO',reason:`holding exists · fall ${fall.toFixed(2)}% < ${t.config.avgTriggerPct.toFixed(2)}%`});}}}
+function tenetSignalsFromPairs(pairs,{actionable=true,priceMap=PRICES,holdings=tenetState().holdings,weekKey=null,requireLiveQuality=false,turnoverCtx=null,bidLocks=null}={}){const t=tenetState(),buys=[],bids=[],diag=[];for(const p of pairs){if(p.error){diag.push({underlying:p.underlying,status:'DATA ERROR',reason:p.error,indexSource:p.indexSource||''});continue;}for(const side of ['green','red']){const etf=p[side],team=side==='green'?'GREEN':'RED';if(!etf)continue;const candleOk=(team==='GREEN'&&p.direction==='BULLISH')||(team==='RED'&&p.direction==='BEARISH');if(!candleOk){diag.push({underlying:p.underlying,etf,team,status:'NO',reason:`${p.direction||'NO'} index candle`,indexSource:p.indexSource||''});continue;}const price=+(priceMap[etf]?.cmp||priceMap[etf]?.close||0);if(!(price>0)){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:'ETF price unavailable',indexSource:p.indexSource||''});continue;}if(requireLiveQuality&&priceMap===PRICES){const q=tenetPriceQuality(etf);if(!q.allowed){diag.push({underlying:p.underlying,etf,team,status:'BLOCKED',reason:q.reason,priceSource:q.source,indexSource:p.indexSource||''});continue;}}const lots=holdings.filter(x=>x.etf===etf),base={etf,team,price,underlying:p.underlying,distance:p.distance,direction:p.direction,indexSource:p.indexSource||'',priceSource:priceMap===PRICES?String(PRICES[etf]?._src||''):''};if(!lots.length){buys.push(base);diag.push({...base,status:actionable?'BUY':'PREVIEW',reason:'team candle matched · not currently held'});}else{const last=tenetLatestLot(etf,holdings),fall=(last.buyPrice-price)/last.buyPrice*100;if(fall>=t.config.avgTriggerPct){bids.push({...base,fall,last});diag.push({...base,status:actionable?'BID ELIGIBLE':'PREVIEW BID',reason:`down ${fall.toFixed(2)}% from latest lot`});}else diag.push({...base,status:'NO',reason:`holding exists · fall ${fall.toFixed(2)}% < ${t.config.avgTriggerPct.toFixed(2)}%`});}}}
   const _tc=turnoverCtx||null;
-  buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!t.bidWeeks[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
+  buys.sort((a,b)=>tenetCandidateSort(a,b,_tc));bids.sort((a,b)=>b.fall-a.fall||tenetCandidateSort(a,b,_tc));const wk=weekKey||tenetWeekKey(tenetISTNow().date),bidUsed=!!(bidLocks||t.bidWeeks)[wk],selectedBid=actionable&&!bidUsed&&bids.length?[bids[0]]:[];return{buys:actionable?buys:[],previewBuys:buys,bids,selectedBid,bidUsed,diag};}
 async function tenetRefreshSignals(){const t=tenetState(),st=document.getElementById('tenet-status'),gateEl=document.getElementById('tenet-live-gate');if(!t.pairs.length){if(st)st.textContent='Configure the separate Tenet scanner universe first.';return;}const errs=tenetValidatePairs();if(errs.length){if(st)st.textContent='Tenet universe invalid: '+errs.join(' · ');return;}if(st)st.textContent='Refreshing ETF prices + linked-index weekly candles…';await fetchAllPrices();const gate=tenetLiveGate(),rows=await mapWithConcurrency(t.pairs,2,async p=>{try{const snap=await tenetIndexSnapshot(p.underlying,gate.date,{live:true});if(!(snap.open>0&&snap.close>0))return{...p,error:'Index weekly open/close unavailable'};if(gate.actionable){if(!snap.liveFresh)return{...p,error:'Fresh final-session index quote unavailable'};if(t.config.requireVerifiedLive!==false&&!snap.verifiedLive)return{...p,error:`Index source ${snap.source||'unknown'} is not verified Upstox`};}TENET_RUNTIME.metrics[p.underlying]={distance:snap.distance,high52:snap.high52,price:snap.close,asOf:snap.weekEnd,source:snap.source};return{...p,direction:snap.direction,weekStart:snap.weekStart,weekEnd:snap.weekEnd,indexOpen:snap.open,indexClose:snap.close,distance:snap.distance,indexSource:snap.source,indexVerified:snap.verifiedLive,indexObservedMs:snap.quote&&snap.quote.asOf?Date.parse(snap.quote.asOf):null};}catch(e){return{...p,error:e?.message||String(e)}}});TENET_RUNTIME.live=rows;TENET_RUNTIME.liveAt=Date.now();TENET_RUNTIME.fingerprint=tenetFingerprint();const failed=rows.filter(x=>x.error),ready=rows.length-failed.length,mode=t.config.requireVerifiedLive===false?'fallback allowed':'verified Upstox';if(st)st.textContent=`${ready}/${rows.length} linked indexes ready · data mode: ${mode}${failed.length?' · '+failed.map(x=>`${x.underlying}: ${x.error}`).join(' · '):''}`;if(gateEl)gateEl.textContent=gate.actionable?`✓ WEEKLY ACTION WINDOW OPEN · ${gate.first} → ${gate.last} · live-data safety enforced`:`BUY/BID gate closed — ${gate.blockedReason||'outside the weekly action window'}. Directional preview may still show; SELL checks still require fresh price data.`;tenetRenderSignals();tenetRenderPairList();}
 async function tenetTestIndexMappings(){const t=tenetState(),msg=document.getElementById('tenet-pair-validation');if(!S.config.marketBridgeUrl)return toast('Configure Market Bridge first','warn');if(!t.pairs.length)return toast('Add Tenet scanner pairs first','warn');if(msg)msg.textContent='Testing Upstox index mappings…';const rows=await mapWithConcurrency(t.pairs,2,async p=>{const j=await marketBridgeFetch('/resolve',{symbol:p.underlying},10000);return{u:p.underlying,ok:!!j?.mapping,key:j?.mapping?.key||'',name:j?.mapping?.name||'',err:j?.error||''};});const bad=rows.filter(x=>!x.ok);if(msg){msg.style.color=bad.length?'var(--bad)':'var(--go)';msg.textContent=bad.length?`⚠ Mapping failed: ${bad.map(x=>x.u+' — '+(x.err||'no mapping')).join(' · ')}`:`✓ Upstox mappings verified: ${rows.map(x=>x.u+' → '+x.key).join(' · ')}`;}toast(bad.length?`${bad.length} Tenet index mapping(s) failed`:'All Tenet index mappings verified',bad.length?'warn':'ok');}
 async function tenetRecordBuy(etf,team,price,underlying,isBid=false,opts={}){if(previewRecordBlocked())return;const t=tenetState(),gate=tenetLiveGate();if(!gate.actionable)return toast(`Tenet BUY/BID is weekly only — action window opens after 3:00 PM IST on ${gate.last||'the final NSE session'}`,'warn');const ql=tenetPriceQuality(etf);if(!ql.allowed)return toast('Tenet live-data gate blocked order: '+ql.reason,'warn');const sg=tenetScannerActionGate(underlying,etf);if(!sg.ok)return toast('Tenet signal action blocked: '+sg.reason,'warn');const pair=(tenetLiveRows()||[]).find(p=>p.underlying===underlying&&!p.error);if(!pair)return toast('Tenet signal is not currently verified for this underlying — refresh scanner','warn');const current=tenetSignalsFromPairs(tenetLiveRows()||[],{actionable:true,weekKey:gate.weekKey,requireLiveQuality:true});if(isBid){if(current.selectedBid[0]?.etf!==etf)return toast('BID blocked: this ETF is not the current largest eligible fall','warn');}else if(!current.buys.some(x=>x.etf===etf))return toast('BUY blocked: this ETF is not a current verified Tenet buy signal','warn');const cap=tenetAllocatedCapital();if(!(cap>0))return toast('Add Tenet capital first','warn');const per=tenetPerBuy(cap,t.pairs),livePrice=+PRICES[etf]?.cmp||+price,q=Math.floor(per/livePrice);if(q<1)return toast('Tenet per-buy allocation is too small for one unit','warn');const cost=q*livePrice,usage=tenetPoolUsage(),cash=tenetCashAvailable(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,existing=t.holdings.filter(x=>x.etf===etf);if(cost>cash+1e-6)return toast('Tenet strategy cash exhausted','warn');if(!isBid&&existing.length)return toast('New buy blocked: ETF is already held','warn');if(isBid&&!existing.length)return toast('BID requires an existing Tenet holding','warn');if(!isBid&&usage.newUsed+cost>newMax+1e-6)return toast('Tenet 60% NEW BUY pool exhausted','warn');if(isBid){if(usage.bidUsed+cost>bidMax+1e-6)return toast('Tenet 40% BID reserve exhausted','warn');if(t.config.oneBidPerWeek&&t.bidWeeks[gate.weekKey])return toast('Tenet BID already used this week','warn');const last=tenetLatestLot(etf),fall=last?(last.buyPrice-livePrice)/last.buyPrice*100:-Infinity;if(!(fall>=t.config.avgTriggerPct))return toast(`BID requires at least ${t.config.avgTriggerPct.toFixed(2)}% fall from latest lot`,'warn');}const est=tenetFriction(cost,'BUY',tenetAssetClassOf(etf));
@@ -11763,7 +11810,7 @@ function tenetRenderSignals(){const t=tenetState(),host=document.getElementById(
   if(blockedSells.length)rows.push(`<div style="margin:6px 0;color:var(--gold)">⚠ ${blockedSells.length} target-hit SELL candidate(s) hidden because current price data is not verified/fresh. Refresh market data before acting.</div>`);const preview=!gate.actionable&&sig.previewBuys.length?`<div style="font-size:10px;color:var(--fog);margin-top:8px"><b>Directional preview only — NOT an order signal:</b> ${sig.previewBuys.map(x=>`${escapeHtml(x.etf)} ${x.team}`).join(' · ')}</div>`:'';const bidNote=sig.bidUsed?' · BID already used this week':'';const diag=`<details open style="margin-top:10px"><summary style="cursor:pointer;color:var(--fog);font-size:10px">Scanner diagnostics</summary><div class="tbl-wrap"><table><thead><tr><th>Index</th><th>ETF</th><th>Team</th><th>Status</th><th>Index src</th><th>Price src</th><th>Reason</th></tr></thead><tbody>${sig.diag.map(x=>`<tr><td>${escapeHtml(x.underlying||'')}</td><td>${escapeHtml(x.etf||'—')}</td><td>${escapeHtml(x.team||'—')}</td><td>${escapeHtml(x.status||'')}</td><td>${escapeHtml(x.indexSource||'—')}</td><td>${escapeHtml(x.priceSource||String(PRICES[x.etf]?._src||'—'))}</td><td>${escapeHtml(x.reason||'')}</td></tr>`).join('')}</tbody></table></div></details>`;
   const safety=t.config.requireVerifiedLive===false?'Fallback data allowed':'Verified Upstox required';host.innerHTML=`<div class="card"><div style="font-size:10px;color:var(--fog);margin-bottom:7px">Data safety: <b>${safety}</b> · BUY/BID gate: <b>${gate.actionable?'OPEN':'CLOSED'}</b></div><b>New buys:</b> ${sig.buys.length} · <b>Eligible BIDs:</b> ${sig.bids.length} · <b>Selected BID:</b> ${sig.selectedBid.length}${bidNote} · <b>Sells:</b> ${sells.length}<div style="margin-top:8px">${rows.join('')||'<span style="color:var(--fog)">No actionable Tenet order right now.</span>'}</div>${preview}${diag}</div>`;}
 function tenetRenderHoldings(){const t=tenetState(),host=document.getElementById('tenet-holdings-list');tenetPopulatePairBuilder();if(!host)return;const cap=tenetAllocatedCapital(),usage=tenetPoolUsage(),newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100,per=tenetPerBuy(),real=tenetRealizedProfit(),cash=tenetCashAvailable();host.innerHTML=`<div style="margin-bottom:8px"><button class="action-btn sm" onclick="tenetOpenFillModal({side:'BUY'})">＋ Record executed BUY</button></div><div class="stat-grid" style="margin-bottom:10px"><div class="stat-card"><div class="stat-label">Allocated</div><div class="stat-value">${fmtINR(cap)}</div></div><div class="stat-card"><div class="stat-label">Per Buy</div><div class="stat-value">${fmtINR(per)}</div></div><div class="stat-card"><div class="stat-label">NEW Pool</div><div class="stat-value">${fmtINR(usage.newUsed)} / ${fmtINR(newMax)}</div></div><div class="stat-card"><div class="stat-label">BID Pool</div><div class="stat-value">${fmtINR(usage.bidUsed)} / ${fmtINR(bidMax)}</div></div><div class="stat-card"><div class="stat-label">Strategy Cash</div><div class="stat-value">${fmtINR(cash)}</div></div><div class="stat-card"><div class="stat-label">Realized P/L</div><div class="stat-value">${fmtINR(real)}</div></div></div>`+(t.holdings.map(h=>`<div class="card" style="margin:6px 0">${escapeHtml(h.etf)} · ${escapeHtml(h.team)} · ${h.isBid?'BID':'NEW'} lot ${h.buySeq} · ${escapeHtml(h.buyDate)} · ${fmtINR(h.buyPrice)} × ${h.qty} · target ${h.targetPct.toFixed(2)}% (${fmtINR(h.targetPrice)}) ${tenetLatestLot(h.etf)?.id===h.id?'· LIFO ACTIVE <button class="action-btn sm" style="margin-left:6px" onclick="tenetOpenFillModal({side:\'SELL\',etf:'+htmlJsArg(h.etf)+',lotId:'+htmlJsArg(h.id)+',qty:'+h.qty+'})">Record executed SELL</button>':'· LIFO LOCKED'}</div>`).join('')||'<span style="color:var(--fog)">No Tenet holdings yet.</span>');}
-function tenetInitBacktestDates(){const a=document.getElementById('tenet-bt-from'),b=document.getElementById('tenet-bt-to'),hs=document.getElementById('tenet-hist-start'),he=document.getElementById('tenet-hist-end');if(a&&!a.value){const d=new Date();d.setFullYear(d.getFullYear()-5);a.value=localDate(d);}if(b&&!b.value)b.value=localDate();if(hs&&!hs.value){const gate=tenetLiveGate();hs.value=gate.first||gate.weekKey;}if(he&&!he.value){const gate=tenetLiveGate();he.value=gate.last||gate.date;}tenetFillConfigUI();}
+function tenetInitBacktestDates(){const a=document.getElementById('tenet-bt-from'),b=document.getElementById('tenet-bt-to'),hs=document.getElementById('tenet-hist-start'),he=document.getElementById('tenet-hist-end');if(a&&!a.value){const d=new Date();d.setFullYear(d.getFullYear()-5);a.value=fmt(d);}if(b&&!b.value)b.value=localDate();if(hs&&!hs.value){const gate=tenetLiveGate();hs.value=gate.first||gate.weekKey;}if(he&&!he.value){const gate=tenetLiveGate();he.value=gate.last||gate.date;}tenetFillConfigUI();}
 
 async function tenetRunHistoricalScanner(){
   const t=tenetState(),s=document.getElementById('tenet-hist-start')?.value,e=document.getElementById('tenet-hist-end')?.value;
@@ -11807,7 +11854,7 @@ async function tenetLoadUniverseHistory(from,to){const t=tenetState();if(!S.conf
 function tenetPairsForDate(date){const t=tenetState(),hist=t.config.universeMode==='historical'?(t.universeHistory||[]):[];if(!hist.length)return (TENET_RUN_PAIRS||t.pairs).map(x=>({...x}));const dates=[...new Set(hist.filter(r=>r.effectiveDate<=date).map(r=>r.effectiveDate))].sort(),latest=dates.at(-1);if(!latest)return t.pairs.map(x=>({...x}));const rows=hist.filter(r=>r.effectiveDate===latest),by={};for(const r of rows){const x=by[r.underlying]??={underlying:r.underlying,green:'',red:'',distance52w:r.distance52w,indexYf:r.indexYf};if(r.team==='RED')x.red=r.etf;else x.green=r.etf;if(r.counterETF&&!x.red)x.red=r.counterETF;if(Number.isFinite(r.distance52w))x.distance52w=r.distance52w;if(r.indexYf&&!x.indexYf)x.indexYf=r.indexYf;}return Object.values(by).filter(x=>x.green||x.red);}
 function tenetHistIndexStats(index,date,data){const h=data[index]||{},ds=Object.keys(h).filter(d=>d<=date).sort().slice(-260);if(!ds.length)return{distance:null};const last=h[ds.at(-1)],hi=Math.max(...ds.map(d=>(+h[d].high||0)||0));return{distance:hi>0?(hi-last.close)/hi*100:null};}
 function tenetGlobalWeeks(indexData,from,to){const by={};for(const h of Object.values(indexData)){for(const d of Object.keys(h||{}).filter(d=>d>=from&&d<=to&&!isSpecialSession(d))){const k=tenetWeekKey(d);(by[k]??=new Set()).add(d);}}return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([weekKey,set])=>{const dates=[...set].sort();return{weekKey,start:dates[0],end:dates.at(-1),dates};});}
-function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0&&!isSpecialSession(d)).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
+function tenetWeekCandleFromData(h,weekKey,decisionDate){const ds=Object.keys(h||{}).filter(d=>tenetWeekKey(d)===weekKey&&d<=decisionDate&&h[d]?.close>0&&!isSpecialSession(d)).sort();if(!ds.length)return null;const first=h[ds[0]],last=h[ds.at(-1)],open=+first.open,close=+last.close;if(!(first.open>0)||!(last.close>0))return{start:ds[0],end:ds.at(-1),open:null,close:last.close>0?close:null,direction:null,openMissing:true};return{start:ds[0],end:ds.at(-1),open,close,direction:close>open?'BULLISH':close<open?'BEARISH':'FLAT'};}
 function tenetExactBar(h,date){return h?.[date]?.close>0?h[date]:null;}
 // ── TENET COST MODEL ─────────────────────────────────────────────────────────
 // S1-3: the Tenet engine modelled ZERO friction. Delivery ETF trades on NSE pay
@@ -11841,6 +11888,7 @@ function tenetFriction(turnoverINR,side,assetClass){
   return +feePolicy(side,v,assetClass,undefined,{brokerage}).total.toFixed(2);
 }
 function tenetAssetClassOf(sym){
+  if(TENET_RUN_STATE&&TENET_RUN_STATE.assetClass)return TENET_RUN_STATE.assetClass[sym]||'equity';
   const e=(S.universe||[]).find(x=>x.sym===sym);
   const ac=e&&typeof e.assetClass==='string'&&e.assetClass?e.assetClass:'equity';   // unknown -> equity; no keyword guessing
   return ac;
@@ -11895,13 +11943,25 @@ function tenetSellDailyLifo(hold,trades,data,date,opts={}){
   return +proceeds.toFixed(2);
 }
 
-async function runTenetBacktestV3(){
+// A4-6 (F14): everything a Tenet backtest needs, collected ONCE into a deeply frozen object (no DOM / PRICES / Date.now / live book inside the engine loop)
+function _deepFreeze(o){if(o&&typeof o==='object'&&!Object.isFrozen(o)){Object.freeze(o);Object.values(o).forEach(_deepFreeze);}return o;}
+function collectTenetBacktestInputs(){
+  const t=tenetState(),g=id=>document.getElementById(id);
+  const pairs=(t.pairs||[]).map(p=>({...p})),hist=JSON.parse(JSON.stringify(t.universeHistory||[])),ac={};
+  pairs.forEach(p=>[p.green,p.red].filter(Boolean).forEach(sy=>{ac[sy]=tenetAssetClassOf(sy);}));
+  hist.forEach(r=>[r.etf,r.counterETF].filter(Boolean).forEach(sy=>{if(!ac[sy])ac[sy]=tenetAssetClassOf(sy);}));
+  return _deepFreeze({tenetInputs:true,from:g('tenet-bt-from')?.value,to:g('tenet-bt-to')?.value,initial:+g('tenet-bt-cap')?.value,conservative:g('tenet-bt-conservative')?.checked!==false,
+    config:JSON.parse(JSON.stringify(t.config)),pairs,universeHistory:hist,assetClass:ac,feePolicyVersion:FEE_POLICY_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256});
+}
+function tenetBacktestRunState(inp){return{config:JSON.parse(JSON.stringify(inp.config)),pairs:JSON.parse(JSON.stringify(inp.pairs)),universeHistory:JSON.parse(JSON.stringify(inp.universeHistory)),holdings:[],sold:[],capital:[],bidWeeks:{},fills:[],assetClass:inp.assetClass};}
+async function runTenetBacktestV3(inputsArg){
   const t=tenetState();
-  const from=document.getElementById('tenet-bt-from')?.value;
-  const to=document.getElementById('tenet-bt-to')?.value;
-  const initial=+document.getElementById('tenet-bt-cap')?.value;
+  const _in=(inputsArg&&inputsArg.tenetInputs===true)?inputsArg:collectTenetBacktestInputs();
+  const from=_in.from;
+  const to=_in.to;
+  const initial=_in.initial;
   const st=document.getElementById('tenet-bt-status');
-  if(!from||!to||from>to||!(initial>0)||!t.pairs.length){
+  if(!from||!to||from>to||!(initial>0)||!_in.pairs.length){
     if(st)st.textContent='Set dates/capital and configure the separate Tenet scanner universe first.';
     return;
   }
@@ -11929,10 +11989,10 @@ async function runTenetBacktestV3(){
       red:r.team==='RED'?r.etf:r.counterETF,
       indexYf:r.indexYf
     }));
-    const allPairs=[...(TENET_RUN_PAIRS||t.pairs),...histPairs];
+    const allPairs=[...(TENET_RUN_PAIRS||_in.pairs),...histPairs];
     const indexNames=[...new Set(allPairs.map(p=>sanIndexName(p.underlying)).filter(Boolean))];
     const etfSymbols=[...new Set(allPairs.flatMap(p=>[p.green,p.red]).map(sanSym).filter(Boolean))];
-    const warmStart=new Date(new Date(from+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10);
+    const warmStart=new Date(new Date(from+'T00:00:00Z').getTime()-420*86400000).toISOString().slice(0,10);   // A4-5: enough history for >=260 prior sessions
     const _toDate=new Date(to+'T00:00:00Z'),_toDow=_toDate.getUTCDay(),_addToFri=_toDow===0?5:_toDow===6?6:Math.max(0,5-_toDow),_calEnd=new Date(_toDate);_calEnd.setUTCDate(_toDate.getUTCDate()+_addToFri);const today=tenetISTNow().date,historyTo=_calEnd.toISOString().slice(0,10)<=today?_calEnd.toISOString().slice(0,10):to;
     const data={};
     const indexData={};
@@ -11976,6 +12036,27 @@ async function runTenetBacktestV3(){
 
     let weeks=tenetGlobalWeeks(indexData,from,historyTo).filter(w=>w.end<=to);
     if(to===today&&!tenetLiveGate().isFinal)weeks=weeks.filter(w=>w.weekKey!==tenetWeekKey(to));
+    // A4-5: (a) with a verified calendar a week is a decision week only if EVERY regular session in it has a bar for EVERY required index;
+    // (b) trading is disabled until >=260 prior sessions exist for every required index (firstTradableDate)
+    const _weekSkips=[];let firstTradableDate=null;
+    {
+      const lastOk=(EOD2Store&&NSE_CAL.loaded)?NSE_CAL.verifiedThrough:null;
+      const _prior=(u,dt)=>Object.keys(indexData[u]||{}).filter(x=>x<dt).length;
+      weeks=weeks.filter(w=>{
+        if(NSE_CAL.loaded){
+          const ws=weekSessions(w.weekKey);
+          if(ws.verified){
+            const need=ws.sessions.filter(x=>x>=from&&x<=to&&(!lastOk||x<=lastOk));
+            const miss=need.filter(x=>indexNames.some(u=>!indexData[u]||!indexData[u][x]));
+            if(miss.length){_weekSkips.push({date:w.end,etf:w.weekKey,reason:`WEEK_INCOMPLETE: ${miss.length} regular session(s) without an index bar (${miss.slice(0,3).join(', ')}${miss.length>3?'…':''})`});return false;}
+          }
+        }
+        const short=indexNames.find(u=>_prior(u,w.start)<260);
+        if(short){_weekSkips.push({date:w.end,etf:w.weekKey,reason:`WARMUP: ${short} has only ${_prior(short,w.start)} prior sessions (<260) — trading disabled`});return false;}
+        if(!firstTradableDate)firstTradableDate=w.end;
+        return true;
+      });
+    }
     const decisionByDate=new Map(weeks.map(w=>[w.end,w]));
     const allDates=[...new Set(etfSymbols.flatMap(sym=>Object.keys(data[sym]||{})).filter(d=>d>=from&&d<=to))].sort();
     let cash=initial;
@@ -11984,11 +12065,15 @@ async function runTenetBacktestV3(){
     const eq=[];
     const bidWeeks={};
     let maxInvested=0;
-    const skips=[];
+    const skips=[..._weekSkips];
     const lastMark={};                 // S1-4: last known close per ETF
     let staleValuationDays=0;          // S1-4: sessions with >=1 stale mark
-    const conservativeExits=document.getElementById('tenet-bt-conservative')?.checked!==false;
+    const conservativeExits=_in.conservative;
 
+    // A4-6: the synchronous loop runs against an isolated copy of the inputs (a re-collect after the async universe refresh picks up the loaded history)
+    const _rs=tenetBacktestRunState(inputsArg&&inputsArg.tenetInputs===true?inputsArg:collectTenetBacktestInputs());
+    TENET_RUN_STATE=_rs;
+    try{ (function(t){
     for(const d of allDates){
       // Selling is NOT weekly-gated. GTT/target exits can happen on any session.
       // S1-1: credit the proceeds. This line is the entire cash-recycling fix —
@@ -12002,6 +12087,7 @@ async function runTenetBacktestV3(){
         for(const p of effective){
           if(!indexData[p.underlying]?.[d]){skips.push({date:d,etf:p.green||p.red||p.underlying,reason:`index ${p.underlying} missing final-session bar`});continue;}
           const candle=tenetWeekCandleFromData(indexData[p.underlying],w.weekKey,d);
+          if(candle&&candle.openMissing){skips.push({date:d,etf:p.green||p.red||p.underlying,reason:`index ${p.underlying} OPEN/CLOSE missing (pair-week blocked)`});continue;}
           if(!candle||candle.end!==d){skips.push({date:d,etf:p.green||p.red||p.underlying,reason:`index ${p.underlying} week incomplete`});continue;}
           const snapDistance=Number.isFinite(p.distance52w)
             ? p.distance52w
@@ -12021,7 +12107,7 @@ async function runTenetBacktestV3(){
             // reaches outside the simulated timeline into today's PRICES.
             turnoverCtx[sym]=(+bar.close||0)*(+bar.volume||+bar.vol||0);}
         }
-        const sig=tenetSignalsFromPairs(pairRows,{actionable:true,priceMap,holdings:hold,weekKey:w.weekKey,turnoverCtx});
+        const sig=tenetSignalsFromPairs(pairRows,{actionable:true,priceMap,holdings:hold,weekKey:w.weekKey,turnoverCtx,bidLocks:bidWeeks});
 
         // New buys: all eligible, GREEN first, then RED; within team farthest 52W distance first.
         for(const c of sig.buys){
@@ -12089,10 +12175,17 @@ async function runTenetBacktestV3(){
       eq.push({date:d,value,invested,staleMark});
     }
 
+    })(_rs); }finally{TENET_RUN_STATE=null;}
+
+    // A4-5: terminal valuation needs a bar on the END date for every held ETF, else the run is refused as a result
+    const _endD=eq.at(-1)?.date;
+    const valuationGaps=_endD?hold.filter(h=>!tenetExactBar(data[h.etf],_endD)).map(h=>({date:_endD,sym:h.etf})):[];
+    if(valuationGaps.length){if(st)st.textContent=`Run refused — 0 execution / ${valuationGaps.length} valuation gaps: ${valuationGaps.map(g=>g.sym).join(', ')} ${valuationGaps.length>1?'have':'has'} no bar on ${_endD}`;const _eb=document.getElementById('tenet-bt-evidence');if(_eb)_eb.style.display='none';return;}
     const finalValue=eq.at(-1)?.value??initial;
-    const years=Math.max((new Date(to)-new Date(from))/31557600000,1/365);
+    const _first=eq[0]?.date||from,_last=eq.at(-1)?.date||to;
+    const years=Math.max((new Date(_last)-new Date(_first))/31557600000,1/365);
     const cagr=Math.pow(finalValue/initial,1/years)-1;
-    const xi=xirr([{date:from,amount:-initial},{date:to,amount:finalValue}]);
+    const xi=xirr([{date:_first,amount:-initial},{date:_last,amount:finalValue}]);
     let peak=initial,dd=0;
     for(const e of eq){peak=Math.max(peak,e.value);dd=Math.max(dd,1-e.value/peak);}
     const sells=trades.filter(x=>x.action==='SELL');
@@ -12125,12 +12218,15 @@ async function runTenetBacktestV3(){
     const sellFees=sellRows.reduce((a,x)=>a+(+x.sellFee||0),0);
     const allFees=buyFees+sellFees;
     const expectedCash=initial-buyNotional-buyFees+sellGross-sellFees;
-    const openMV=(eq.at(-1)?.value??initial)-cash;
+    const openMV=hold.reduce((a,h)=>a+(lastMark[h.etf]?lastMark[h.etf].px:h.buyPrice)*h.qty,0);      // A4-5: summed independently of the equity series
+    const equityIdentityOk=Math.abs(cash+openMV-finalValue)<=Math.max(1,initial*1e-6);
     const cashDrift=Math.abs(cash-expectedCash);
     const identityOk=cashDrift<=Math.max(1,initial*1e-6);
     const negCash=cash<-1e-6;
-    const certified=identityOk&&!negCash&&staleValuationDays===0&&!t._universeHistoryStale;
+    const certified=identityOk&&equityIdentityOk&&!negCash&&staleValuationDays===0&&!t._universeHistoryStale;
 
+    const _pfE=PREFLIGHT_LAST.TENET&&PREFLIGHT_LAST.TENET.pf,_cE=_pfE&&_pfE.counts;
+    const _dataLine=_pfE?('dataset '+(_pfE.datasetId||'—')+' ('+(_pfE.source||'')+') · candidates '+_cE.candidatesRetained+'/'+_cE.candidates+' · excluded '+_cE.excluded+' · '+resultLabel('TENET',_pfE,{mode:RUN_MODE.TENET||'research',executionGaps:[],valuationGaps})):'preflight not run';
     const evBox=document.getElementById('tenet-bt-evidence');
     if(evBox){
       const inr=v=>fmtINR(v||0);
@@ -12143,6 +12239,12 @@ async function runTenetBacktestV3(){
                   :'ACCOUNTING CHECK FAILED — do not interpret the performance numbers above until every failing line below is resolved.'}
       </div>
       <div style="font-size:10.5px;color:var(--fog);margin:-4px 0 8px 2px">Data/engine certification: NOT EVALUATED · build <span style="font-family:monospace;word-break:break-all">${escapeHtml(APP_BUILD)} · ${escapeHtml(APP_SOURCE_SHA256)}</span></div>
+      <div style="font-size:10.5px;margin:6px 0;padding:6px 8px;border:1px solid var(--wire);border-radius:5px">
+        <div>1 · <b>Accounting</b>: ${certified?'checks passed':'checks FAILED'} · cash + open MV = equity ${equityIdentityOk?'✓':'✗'}</div>
+        <div>2 · <b>Data (preflight)</b>: ${escapeHtml(_dataLine)}</div>
+        <div>3 · <b>Execution assumption</b>: weekly entries at the final-session CLOSE; target exits at the daily HIGH (${conservativeExits?'conservative':'canonical'}); charges per FEE_POLICY ${escapeHtml(FEE_POLICY_VERSION)}; no slippage</div>
+        <div>4 · <b>Universe mode</b>: ${t.config.universeMode==='historical'?'Historical snapshots ('+(t.universeHistory||[]).length+' rows)':'Fixed (current pairs)'} · report start ${escapeHtml(from)} · first tradable week ${escapeHtml(String(firstTradableDate||'—'))} · ${_weekSkips.length} week(s) skipped</div>
+      </div>
       <div style="font-size:10.5px">
         ${line(identityOk,'Cash identity',`terminal ${inr(cash)} vs expected ${inr(expectedCash)} · drift ${inr(cashDrift)}`)}
         ${line(!negCash,'No negative cash',`terminal cash ${inr(cash)}`)}
@@ -12343,6 +12445,7 @@ function switchStrategy(name,btn){
   if(!tabs.length){nav.innerHTML='';if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='risk'){renderRiskDashboard();renderBenchmarkCard();}if(name==='watchlist')renderWatchlist();return;}
   nav.innerHTML=tabs.map(t=>`<button class="nav-btn" onclick="switchTab('${name}','${t.id}',this)">${t.label}</button>`).join('');
   if(tabs.length)switchTab(name,tabs[0].id,null,true);
+  if(name==='tenet'){try{tenetInitBacktestDates();}catch(e){}}      // A4-5 (F25): silent tab switches skipped the date init
   // activate first nav btn
   const firstBtn=nav.querySelector('.nav-btn');if(firstBtn)firstBtn.classList.add('active');
 }
@@ -13706,8 +13809,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A3';
-const APP_SOURCE_SHA256='3e805403f9feb60b6d03248bb28e27642d9a3830a8b42f3929495e8eb7974e6a';
+const APP_BUILD='2026-09-20-v3.22-A4';
+const APP_SOURCE_SHA256='e40808acc6f6faadd908f64fe69fdda075766c87e724d8698d557f1f648229ca';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -13849,11 +13952,12 @@ function _reportInitFailures(){
 // V3.21 EOD2 run guards. Frozen cores are wrapped, never edited: their source
 // (and MD5) is unchanged; the originals remain reachable via .__frozen.
 runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};
+  p={...p,configSnapshot:p.configSnapshot||JSON.parse(JSON.stringify(S.config)),lifoUniverseSnapshot:p.lifoUniverseSnapshot||LIFO_ETF_UNIVERSE.map(e=>({...e})),universeSnapshot:p.universeSnapshot||JSON.parse(JSON.stringify(S.universe))};   // A4-7
   const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
   return eod2GuardRun('LIFO',p.startDate,p.endDate,async ctx=>{
     const startTs=Math.floor(new Date(p.startDate).getTime()/1000)-365*86400,endTs=Math.floor(new Date(p.endDate).getTime()/1000)+86400;
     const excl=new Set(p.excludeSyms||[]);      // A2b: candidates excluded by the research preflight (from the FIRST date, never mid-run)
-    const q=await eod2PrepareCoreParams(p,ctx,{syms:LIFO_ETF_UNIVERSE.map(e=>e.sym).filter(sy=>!excl.has(sy)),from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:true});
+    const q=await eod2PrepareCoreParams(p,ctx,{syms:(p.lifoUniverseSnapshot||LIFO_ETF_UNIVERSE).map(e=>e.sym).filter(sy=>!excl.has(sy)),from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:true});
     if(q.error)return q;
     if(!excl.size)return core(q);
     // the core rebuilds LIFO_ETF_UNIVERSE itself, but honours DHC_EXCLUDED: add the excluded symbols for the duration of this run only
@@ -13861,10 +13965,11 @@ runLifoBacktestCore=(function(core){const w=async function(p){p=p||{};
     try{return await core(q);}finally{added.forEach(sy=>DHC_EXCLUDED.delete(sy));}
   },{handle:own?own.snapshot:null});};w.__frozen=core;return w;})(runLifoBacktestCore);
 runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
+  p={...p,configSnapshot:p.configSnapshot||JSON.parse(JSON.stringify(S.config)),universeSnapshot:p.universeSnapshot||JSON.parse(JSON.stringify(S.universe))};   // A4-7
   const own=p.histMap&&LOADER_MAPS.has(p.histMap)?LOADER_META.get(p.histMap):null;
   return eod2GuardRun('DM',p.fromDate,p.toDate,async ctx=>{
     const lookback=finiteParam(p.lookback,182,{min:1,integer:true});
-    const etfs=[...(p.etfs||getMomUniverse().filter(sy=>!DHC_EXCLUDED.has(sy)))];if(!etfs.includes('NIFTYBEES'))etfs.push('NIFTYBEES');
+    const etfs=[...(p.etfs||(p.universeSnapshot?p.universeSnapshot.filter(e=>e.tag==='momentum'||e.tag==='both').map(e=>e.sym):getMomUniverse()).filter(sy=>!DHC_EXCLUDED.has(sy)))];if(!etfs.includes('NIFTYBEES'))etfs.push('NIFTYBEES');
     const endTs=Math.floor(new Date(p.toDate).getTime()/1000)+86400,startTs=Math.floor(new Date(p.fromDate).getTime()/1000)-(lookback+220)*86400;
     const q=await eod2PrepareCoreParams(p,ctx,{syms:etfs,from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:false});
     return q.error?q:core(q);
@@ -14364,7 +14469,7 @@ async function runLifoParamSweep() {
       sellOnFall: S.config.sellOnFall || false,
       buyOnRise:  S.config.buyOnRise  || false,
     };
-    await runLifoWalkForward(top5, startDate, endDate, baseParams, histMap, histIndex);
+    await runLifoWalkForward([...SWEEP_RESULTS], startDate, endDate, baseParams, histMap, histIndex);   // A4-4: selection happens on TRAIN inside; the full-period table above is exploratory only
     statusEl.textContent = '✅ Walk-forward complete.';
   } else if (wfEnabled && SWEEP_RESULTS.length === 0) {
     document.getElementById('sw-wf-results-card').style.display = 'none';
@@ -14399,8 +14504,7 @@ async function runLifoParamSweep() {
 }
 
 function _sweepDone(runBtn, cancelBtn, statusEl, progWrap, msg) {
-  SWEEP_RUNNING = false;
-  SWEEP_CANCEL  = false;
+  SWEEP_RUNNING = false;                       // A4-4: SWEEP_CANCEL is reset only when a NEW sweep starts
   runBtn.disabled          = false;
   cancelBtn.style.display  = 'none';
   statusEl.textContent     = msg;
@@ -14724,7 +14828,7 @@ async function runDmParamSweep() {
       executionMode: dmBacktestExecutionMode(),
       momCapital: capital,
     };
-    await runDmWalkForward(top5, startDate, endDate, baseParams, histMap, etfs);
+    await runDmWalkForward([...DM_SWEEP_RESULTS], startDate, endDate, baseParams, histMap, etfs);
     statusEl.textContent = '✅ Walk-forward complete.';
   } else if (wfEnabled && DM_SWEEP_RESULTS.length === 0) {
     document.getElementById('dsw-wf-results-card').style.display = 'none';
@@ -14757,8 +14861,7 @@ async function runDmParamSweep() {
 }
 
 function _dmSweepDone(runBtn, cancelBtn, statusEl, progWrap, msg) {
-  DM_SWEEP_RUNNING = false;
-  DM_SWEEP_CANCEL  = false;
+  DM_SWEEP_RUNNING = false;                    // A4-4: DM_SWEEP_CANCEL is reset only when a NEW sweep starts
   runBtn.disabled          = false;
   cancelBtn.style.display  = 'none';
   statusEl.textContent     = msg;
@@ -14939,13 +15042,16 @@ function splitDateRange(startDate, endDate, trainPct) {
 }
 
 // ── Helper: build a WF verdict card HTML ─────────────────────────────────────
-function _wfCardHtml(rank, params, trainCagr, testCagr) {
-  const ratio = trainCagr !== 0 ? testCagr / trainCagr : (testCagr >= 0 ? 1 : 0);
-  const robust = ratio >= 0.5;
-  const verdict = robust
-    ? `<span style="color:var(--go);font-weight:800">✅ Robust</span>`
-    : `<span style="color:var(--stop);font-weight:800">⚠️ Overfitted</span>`;
-
+// A4-4: never a fake 0%: FAILED / NO_DATA / CANCELLED are shown as such. Robust only if train>0, test>0, test >= 0.5 x train and >= 5 test trades.
+function wfVerdict(trainCagr, testCagr, opts) {
+  const o = opts || {}, status = o.status || 'OK';
+  if (status !== 'OK') return { key: status, html: `<span style="color:var(--fog);font-weight:800">${escapeHtml(status)}${o.detail ? ' — ' + escapeHtml(String(o.detail).slice(0, 120)) : ''}</span>` };
+  if (!(trainCagr > 0)) return { key: 'NOT_ROBUST_TRAIN', html: '<span style="color:var(--stop);font-weight:800">⚠️ Not robust (train unprofitable)</span>' };
+  if (testCagr > 0 && testCagr >= 0.5 * trainCagr && (o.testTrades || 0) >= 5) return { key: 'ROBUST', html: '<span style="color:var(--go);font-weight:800">✅ Robust</span>' };
+  return { key: 'NOT_ROBUST', html: '<span style="color:var(--stop);font-weight:800">⚠️ Not robust</span>' };
+}
+function _wfCardHtml(rank, params, trainCagr, testCagr, opts) {
+  const v = wfVerdict(trainCagr, testCagr, opts), verdict = v.html, okStatus = !(opts && opts.status && opts.status !== 'OK'), ratio = (trainCagr > 0 && Number.isFinite(testCagr)) ? testCagr / trainCagr : 0, robust = v.key === 'ROBUST';
   const trainCls = trainCagr >= 0 ? 'color:var(--go)' : 'color:var(--stop)';
   const testCls  = testCagr  >= 0 ? 'color:var(--go)' : 'color:var(--stop)';
 
@@ -14957,11 +15063,11 @@ function _wfCardHtml(rank, params, trainCagr, testCagr) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div style="background:var(--ink2);border-radius:var(--r6);padding:10px 14px;text-align:center">
         <div style="font-size:10px;color:var(--fog);margin-bottom:4px">Training CAGR</div>
-        <div style="font-size:20px;font-weight:900;${trainCls}">${trainCagr >= 0 ? '+' : ''}${trainCagr.toFixed(1)}%</div>
+        <div style="font-size:20px;font-weight:900;${trainCls}">${!okStatus && !(trainCagr || trainCagr === 0) ? '—' : (trainCagr >= 0 ? '+' : '') + trainCagr.toFixed(1) + '%'}</div>
       </div>
       <div style="background:var(--ink2);border-radius:var(--r6);padding:10px 14px;text-align:center">
         <div style="font-size:10px;color:var(--fog);margin-bottom:4px">Testing CAGR</div>
-        <div style="font-size:20px;font-weight:900;${testCls}">${testCagr >= 0 ? '+' : ''}${testCagr.toFixed(1)}%</div>
+        <div style="font-size:20px;font-weight:900;${testCls}">${!okStatus ? '—' : (testCagr >= 0 ? '+' : '') + testCagr.toFixed(1) + '%'}</div>
       </div>
     </div>
     <div style="margin-top:8px;font-size:10px;color:var(--fog)">
@@ -14972,48 +15078,40 @@ function _wfCardHtml(rank, params, trainCagr, testCagr) {
 }
 
 // ── LIFO Walk-Forward runner ──────────────────────────────────────────────────
-async function runLifoWalkForward(top5, startDate, endDate, baseParams, histMap, histIndex) {
+async function runLifoWalkForward(allResults, startDate, endDate, baseParams, histMap, histIndex) {
   const trainPct = parseInt(document.getElementById('sw-wf-train-pct').value) || 70;
   const testPct  = 100 - trainPct;
-  const { trainEnd, testStart } = splitDateRange(startDate, endDate, trainPct);
+  const { trainEnd, testStart } = splitDateRange(startDate, endDate, trainPct);      // 1) split the dates FIRST
 
   document.getElementById('sw-wf-train-pct-label').textContent = trainPct;
   document.getElementById('sw-wf-test-pct-label').textContent  = testPct;
 
+  const comboOf = r => ({ ...baseParams, avgFall: r.avgFall, minProfit: r.minProfit, maxScan: r.scanN, maxLots: r.maxLots, histMap, histIndex, statusCb: () => {}, progressCb: () => {} });
+  const label = r => `AF=${r.avgFall}% MP=₹${r.minProfit} N=${r.scanN} Lots=${r.maxLots}`;
+  // 2) the full grid on the TRAIN window ONLY: no bar after trainEnd is touched before the selection is final
+  const trained = [];
+  for (const r of allResults) {
+    if (SWEEP_CANCEL) break;
+    let tr = null, err = '';
+    try { const res = await runLifoBacktestCore({ ...comboOf(r), startDate, endDate: trainEnd }); if (res.error) err = res.error; else tr = res; }
+    catch (e) { err = String(e && e.message || e); swallowLoud('walkForward/train', e); }
+    trained.push({ r, tr, err });
+  }
+  // 3) top-5 by the TRAIN metric
+  const top = trained.filter(x => x.tr).sort((a, b) => b.tr.metrics.cagr - a.tr.metrics.cagr).slice(0, 5);
   const cards = [];
-
-  for (let i = 0; i < top5.length; i++) {
-    const r = top5[i];
-    const comboParams = {
-      ...baseParams,
-      avgFall:   r.avgFall,
-      minProfit: r.minProfit,
-      maxScan:   r.scanN,
-      maxLots:   r.maxLots,
-      histMap, histIndex,
-      statusCb:   () => {},
-      progressCb: () => {},
-    };
-
-    let trainCagr = 0, testCagr = 0;
-    let trainTerminalState = null;
-
+  if (!top.length) cards.push(_wfCardHtml(1, allResults.length ? 'no combination' : 'no combinations', NaN, NaN, { status: SWEEP_CANCEL ? 'CANCELLED' : (trained.length ? 'FAILED' : 'NO_DATA'), detail: (trained.find(x => x.err) || {}).err || 'nothing could be evaluated on the train window' }));
+  // 4) each selected combination runs ONCE on TEST, continuing from its own train terminal state
+  for (let i = 0; i < top.length; i++) {
+    const { r, tr } = top[i];
+    const trainCagr = +(tr.metrics.cagr * 100).toFixed(2);
+    if (SWEEP_CANCEL) { cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'CANCELLED' })); continue; }
     try {
-      const trRes = await runLifoBacktestCore({ ...comboParams, startDate, endDate: trainEnd });
-      if (!trRes.error) {
-        trainCagr = +(trRes.metrics.cagr * 100).toFixed(2);
-        // BUG7 FIX: carry terminal state from train into test so bags/cash are continuous
-        trainTerminalState = trRes.terminalState || null;
-      }
-    } catch(_) { swallowLoud('walkForward/train',_); }
-
-    try {
-      const tsRes = await runLifoBacktestCore({ ...comboParams, startDate: testStart, endDate, terminalState: trainTerminalState });
-      if (!tsRes.error) testCagr = +(tsRes.metrics.cagr * 100).toFixed(2);
-    } catch(_) { swallowLoud('walkForward/test(LIFO)',_); }
-
-    const paramStr = `AF=${r.avgFall}% MP=₹${r.minProfit} N=${r.scanN} Lots=${r.maxLots}`;
-    cards.push(_wfCardHtml(i + 1, paramStr, trainCagr, testCagr));
+      const ts = await runLifoBacktestCore({ ...comboOf(r), startDate: testStart, endDate, terminalState: tr.terminalState || null });
+      if (ts.error) cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'FAILED', detail: ts.error }));
+      else if (!ts.equity || !ts.equity.length) cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'NO_DATA', detail: 'no test-window sessions' }));
+      else cards.push(_wfCardHtml(i + 1, label(r), trainCagr, +(ts.metrics.cagr * 100).toFixed(2), { status: 'OK', testTrades: (ts.trades || []).length }));
+    } catch (e) { swallowLoud('walkForward/test(LIFO)', e); cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'FAILED', detail: String(e && e.message || e) })); }
   }
 
   document.getElementById('sw-wf-cards-wrap').innerHTML = cards.join('');
@@ -15021,142 +15119,43 @@ async function runLifoWalkForward(top5, startDate, endDate, baseParams, histMap,
 }
 
 // ── DM Walk-Forward runner ────────────────────────────────────────────────────
-async function runDmWalkForward(top5, startDate, endDate, baseParams, histMap, etfs) {
+async function runDmWalkForward(allResults, startDate, endDate, baseParams, histMap, etfs) {
   const trainPct = parseInt(document.getElementById('dsw-wf-train-pct').value) || 70;
   const testPct  = 100 - trainPct;
-  const { trainEnd, testStart } = splitDateRange(startDate, endDate, trainPct);
+  const { trainEnd, testStart } = splitDateRange(startDate, endDate, trainPct);      // 1) split FIRST
 
   document.getElementById('dsw-wf-train-pct-label').textContent = trainPct;
   document.getElementById('dsw-wf-test-pct-label').textContent  = testPct;
 
+  const comboOf = r => ({ ...baseParams, lookback: r.lookback, slots: r.slots, hurdle: r.hurdle, rebalDays: r.rebalDays, etfs: [...etfs], histMap, statusCb: () => {} });
+  const label = r => `LB=${r.lookback}d Slots=${r.slots} Hurdle=${r.hurdle}% Rebal=${r.rebalDays}d`;
+  const trained = [];
+  for (const r of allResults) {                                                    // 2) grid on TRAIN only
+    if (DM_SWEEP_CANCEL) break;
+    let tr = null, err = '';
+    try { const res = await runDMBacktestCore({ ...comboOf(r), fromDate: startDate, toDate: trainEnd }); if (res.error) err = res.error; else if (res.metrics) tr = res; else err = 'no metrics'; }
+    catch (e) { err = String(e && e.message || e); swallowLoud('walkForward/train', e); }
+    trained.push({ r, tr, err });
+  }
+  const top = trained.filter(x => x.tr).sort((a, b) => (b.tr.metrics.cagr || 0) - (a.tr.metrics.cagr || 0)).slice(0, 5);   // 3) top-5 by TRAIN metric
   const cards = [];
-
-  for (let i = 0; i < top5.length; i++) {
-    const r = top5[i];
-    const comboParams = {
-      ...baseParams,
-      lookback:  r.lookback,
-      slots:     r.slots,
-      hurdle:    r.hurdle,
-      rebalDays: r.rebalDays,
-      etfs: [...etfs],
-      histMap,
-      statusCb: () => {},
-    };
-
-    let trainCagr = 0, testCagr = 0;
-    let trainTerminalState = null;
-
+  if (!top.length) cards.push(_wfCardHtml(1, allResults.length ? 'no combination' : 'no combinations', NaN, NaN, { status: DM_SWEEP_CANCEL ? 'CANCELLED' : (trained.length ? 'FAILED' : 'NO_DATA'), detail: (trained.find(x => x.err) || {}).err || 'nothing could be evaluated on the train window' }));
+  for (let i = 0; i < top.length; i++) {                                           // 4) each ONCE on TEST from its own train terminal state
+    const { r, tr } = top[i];
+    const trainCagr = +(tr.metrics.cagr || 0).toFixed(2);                          // DM cagr is already percent
+    if (DM_SWEEP_CANCEL) { cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'CANCELLED' })); continue; }
     try {
-      const trRes = await runDMBacktestCore({ ...comboParams, fromDate: startDate, toDate: trainEnd });
-      if (!trRes.error && trRes.metrics) {
-        // FIX BUG-DM-WF1: DM metrics.cagr is already percent — do NOT multiply by 100
-        // (LIFO cagr is a ratio so needs *100; DM cagr is percent and would become 1000%+)
-        trainCagr = +(trRes.metrics.cagr || 0).toFixed(2);
-        // BUG1 FIX: carry terminal state from train into test so cash/positions/liq are continuous
-        trainTerminalState = trRes.terminalState || null;
-      }
-    } catch(_) { swallowLoud('walkForward/train',_); }
-
-    try {
-      const tsRes = await runDMBacktestCore({ ...comboParams, fromDate: testStart, toDate: endDate, terminalState: trainTerminalState });
-      // FIX BUG-DM-WF1: same — DM cagr already percent
-      if (!tsRes.error && tsRes.metrics) testCagr = +(tsRes.metrics.cagr || 0).toFixed(2);
-    } catch(_) { swallowLoud('walkForward/test(DM)',_); }
-
-    const paramStr = `LB=${r.lookback}d Slots=${r.slots} Hurdle=${r.hurdle}% Rebal=${r.rebalDays}d`;
-    cards.push(_wfCardHtml(i + 1, paramStr, trainCagr, testCagr));
+      const ts = await runDMBacktestCore({ ...comboOf(r), fromDate: testStart, toDate: endDate, terminalState: tr.terminalState || null });
+      if (ts.error) cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'FAILED', detail: ts.error }));
+      else if (!ts.metrics) cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'NO_DATA', detail: 'no test metrics' }));
+      else cards.push(_wfCardHtml(i + 1, label(r), trainCagr, +(ts.metrics.cagr || 0).toFixed(2), { status: 'OK', testTrades: (ts.tradeLog || []).filter(t => t.pnl != null && t.action !== 'BUY').length }));
+    } catch (e) { swallowLoud('walkForward/test(DM)', e); cards.push(_wfCardHtml(i + 1, label(r), trainCagr, NaN, { status: 'FAILED', detail: String(e && e.message || e) })); }
   }
 
   document.getElementById('dsw-wf-cards-wrap').innerHTML = cards.join('');
   document.getElementById('dsw-wf-results-card').style.display = 'block';
 }
 
-// ── END STEP-5: WALK-FORWARD VALIDATION ──────────────────────────────────────
-
-// ══════════════════════════════════════════════════════════════════════════════
-// STEP-6: PARAMETER STABILITY SCORE
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ── Badge thresholds ──────────────────────────────────────────────────────────
-// worstDrop = worst neighbour CAGR degradation relative to best CAGR
-// 🟢 Stable   : all neighbours within 20% drop  (worstDrop <= 0.20)
-// 🟡 Moderate : worst neighbour within 40% drop (worstDrop <= 0.40)
-// 🔴 Fragile  : any neighbour drops > 40%       (worstDrop >  0.40)
-
-function _stabilityBadge(worstDrop) {
-  if (worstDrop <= 0.20) return { icon: '🟢', label: 'Stable',   cls: 'go'  };
-  if (worstDrop <= 0.40) return { icon: '🟡', label: 'Moderate', cls: 'gold'};
-  return                        { icon: '🔴', label: 'Fragile',  cls: 'stop'};
-}
-
-function _stabilityExplain(badge, bestCagr, neighbourCagrs) {
-  const min  = Math.min(...neighbourCagrs);
-  const max  = Math.max(...neighbourCagrs);
-  const n    = neighbourCagrs.length;
-  const base = {
-    Stable:   `All ${n} ±1-step neighbours produce CAGR within 20% of the best combo (${bestCagr.toFixed(1)}%). This parameter set sits in a flat plateau — safe to deploy.`,
-    Moderate: `Some neighbours degrade between 20–40% vs the best CAGR (${bestCagr.toFixed(1)}%). Results are reasonable but the combo is somewhat sensitive to parameter choice. Verify with walk-forward before deploying.`,
-    Fragile:  `At least one neighbour loses >40% of the best CAGR (${bestCagr.toFixed(1)}%). The combo sits on a sharp spike — slight mistuning collapses performance. Do not deploy without further validation.`,
-  }[badge.label];
-  return `${base} Neighbour CAGR range: ${min.toFixed(1)}% – ${max.toFixed(1)}%.`;
-}
-
-function _renderStabilityCard(cardId, bodyId, bestCombo, bestCagr, neighbourResults, paramLabels) {
-  const card = document.getElementById(cardId);
-  const body = document.getElementById(bodyId);
-  if (!card || !body) return;
-
-  if (!neighbourResults.length) {
-    body.innerHTML = '<div style="color:var(--fog);font-size:11px">Not enough neighbours to score (single-value params).</div>';
-    card.style.display = 'block';
-    return;
-  }
-
-  const neighbourCagrs = neighbourResults.map(r => r.cagr);
-  const worstDrop = bestCagr > 0
-    ? Math.max(...neighbourCagrs.map(c => (bestCagr - c) / bestCagr))
-    : 0;
-
-  const badge   = _stabilityBadge(worstDrop);
-  const explain = _stabilityExplain(badge, bestCagr, neighbourCagrs);
-
-  // neighbour table rows
-  const rows = neighbourResults.map(r =>
-    `<tr>
-      <td style="padding:4px 8px;font-size:10px;color:var(--fog)">${r.label}</td>
-      <td style="padding:4px 8px;font-size:10px;font-family:monospace;text-align:right;color:${r.cagr >= 0 ? 'var(--go)' : 'var(--stop)'}">${r.cagr >= 0 ? '+' : ''}${r.cagr.toFixed(1)}%</td>
-      <td style="padding:4px 8px;font-size:10px;text-align:right;color:var(--fog)">${r.drop >= 0 ? '−' : '+'}${Math.abs(r.drop * 100).toFixed(0)}% vs best</td>
-    </tr>`
-  ).join('');
-
-  body.innerHTML = `
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <span style="font-size:28px">${badge.icon}</span>
-      <div>
-        <div style="font-size:16px;font-weight:900;color:var(--${badge.cls})">${badge.label}</div>
-        <div style="font-size:10px;color:var(--fog)">Best CAGR: <b style="color:var(--sky)">${bestCagr.toFixed(1)}%</b> · ${paramLabels}</div>
-      </div>
-    </div>
-    <div style="font-size:11px;color:var(--mist);background:var(--ink3);border-radius:var(--r6);padding:10px 14px;margin-bottom:12px;line-height:1.6">${explain}</div>
-    <details style="font-size:11px">
-      <summary style="cursor:pointer;color:var(--fog);margin-bottom:8px">▸ Show all ${neighbourResults.length} neighbours</summary>
-      <div style="overflow-x:auto">
-        <table style="border-collapse:collapse;width:100%">
-          <thead><tr>
-            <th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--fog)">Changed param</th>
-            <th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--fog)">CAGR</th>
-            <th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--fog)">vs best</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </details>`;
-
-  card.style.display = 'block';
-}
-
-// ── LIFO Stability scorer ─────────────────────────────────────────────────────
 async function runLifoStabilityScore(bestCombo, startDate, endDate, baseParams, histMap, histIndex, steps) {
   // steps = { avgFall, minProfit, scanN, maxLots } — the step values used in sweep
   const { avgFall, minProfit, scanN, maxLots } = bestCombo;
