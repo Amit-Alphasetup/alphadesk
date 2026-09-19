@@ -1748,6 +1748,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <input class="form-input" id="uni-search" oninput="renderUniverse()" placeholder="Search…" style="margin-bottom:10px"/>
 <div id="uni-list"></div>
 <div id="holdings-by-etf"></div>
+<div id="corp-actions-card"></div>
 <div style="margin-top:8px"><button class="action-btn sm" onclick="importEnginesFromMarketData()">⇩ Import engines from market-data</button></div>
 <div id="uni-sync-status" style="font-size:11px;color:var(--fog);margin-top:10px"></div>
 <button class="save-btn" onclick="syncUniverseToSB()" style="margin-top:8px">Sync to Supabase</button>
@@ -2171,7 +2172,8 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="strategy-pane" id="strategy-tax">
 <!-- P13 FIX 19: back row — mobile only -->
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Tax</span></div>
-<div id="tax-dm-basis-banner" class="alert-banner alert-warn" style="margin-bottom:8px"><div><span class="ab-badge ab-warn">PROVISIONAL</span><div class="ab-sub">DM holding periods provisional until lot-level FIFO (A6)</div></div></div>
+<div style="font-size:14px;font-weight:800;margin:0 0 6px" id="tax-title">Tax (FIFO — demat rule)</div>
+<div id="tax-warnings"></div>
 <div class="stat-grid" id="tax-summary-cards"></div>
 <div class="card" style="margin-bottom:14px"><div id="fifo-compare-zone"></div></div>
 <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
@@ -2179,7 +2181,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <span style="font-size:11px;color:var(--fog)">Per-trade STCG/LTCG classification for your accountant</span>
 </div>
 <div class="card">
-<div class="card-title" style="margin-bottom:14px">FY-wise P&amp;L, Friction &amp; Tax Audit <span style="font-size:10px;color:var(--fog)">(covers both strategies · LIFO cost basis · LTCG 12.5% / STCG 20% · loss carryforward)</span></div>
+<div class="card-title" style="margin-bottom:14px">FY-wise P&amp;L, Friction &amp; Tax Audit <span style="font-size:10px;color:var(--fog)">(all engines · FIFO lots per ETF across engines (demat rule) · LTCG 12.5% / STCG 20% · loss carryforward)</span></div>
 <div class="tbl-wrap">
 <table>
 <thead><tr>
@@ -2846,6 +2848,7 @@ let S = {
   dividends: [], // Phase5: {id,sym,amount,date,note} — manual dividend receipts, not auto-fetched
   tenet: {config:{firstTargetPct:3.14,targetStepPct:1.5,avgTriggerPct:3.14,newBuyAllocPct:60,bidAllocPct:40,selectionDistancePct:5,oneBidPerWeek:true,maxGreen:20,extraHolidays:[]},capital:[],pairs:[],holdings:[],sold:[],bidWeeks:{},universeHistory:[]},
   corpActions: [], // Phase5: {id,sym,kind:'split'|'bonus',ratioFrom,ratioTo,date,note} — audit log of applied corporate actions
+  corporateActions: [], // A6-3: events {id,symbol,type:'SPLIT'|'BONUS'|'CONSOLIDATION',ratioNum,ratioDen,exDate,evidence,createdAt,status,reversedBy} + {type:'REVERSAL',refId}; fills are never modified
   config: {
     capital:157731, slots:40, avgFall:6.0, minProfit:200,
     incentive:0, brokerage:25, buyOnRise:false, sellOnFall:true,
@@ -2873,8 +2876,9 @@ let S = {
 const STATE_KEYS=Object.freeze([
   'lifoLedger','momTrades','momPositions','momFyData','momFyLossCf','momPrices','momUniverse',
   'universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','tenet',
-  'corpActions','config'
+  'corpActions','corporateActions','config'
 ]);
+const OPTIONAL_STATE_KEYS=Object.freeze(['corporateActions']);   // A6-3: backups made before A6 do not have it and still restore
 function serializeState(){
   const out={};
   STATE_KEYS.forEach(k=>{out[k]=S[k];});
@@ -2884,17 +2888,17 @@ function _plainObject(v){return !!v&&typeof v==='object'&&!Array.isArray(v);}
 function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
   const errs=[];
   if(!_plainObject(st))return ['State must be an object'];
-  const arrayKeys=['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions'];
+  const arrayKeys=['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions',...(('corporateActions' in st)?['corporateActions']:[])];
   const objectKeys=['momPositions','momFyData','momPrices','config','tenet'];
   if(requireExactKeys){
-    const actual=Object.keys(st).sort(), expected=STATE_KEYS.slice().sort();
+    const actual=Object.keys(st).sort(), expected=STATE_KEYS.filter(k=>!OPTIONAL_STATE_KEYS.includes(k)||k in st).sort();
     if(actual.length!==expected.length||actual.some((k,i)=>k!==expected[i]))
       errs.push('State schema mismatch — backup must contain exactly the current canonical state keys');
-  }else STATE_KEYS.forEach(k=>{if(!(k in st))errs.push(`Missing state key: ${k}`);});
+  }else STATE_KEYS.forEach(k=>{if(!(k in st)&&!OPTIONAL_STATE_KEYS.includes(k))errs.push(`Missing state key: ${k}`);});
   arrayKeys.forEach(k=>{if(!Array.isArray(st[k]))errs.push(`${k} must be an array`);});
   objectKeys.forEach(k=>{if(!_plainObject(st[k]))errs.push(`${k} must be an object`);});
   if(!Number.isFinite(+st.momFyLossCf))errs.push('momFyLossCf must be a finite number');
-  const objectArrayKeys=['lifoLedger','momTrades','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions'];
+  const objectArrayKeys=['lifoLedger','momTrades','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions'];
   objectArrayKeys.forEach(k=>{if(Array.isArray(st[k])&&st[k].some(x=>!_plainObject(x)))errs.push(`${k} entries must be objects`);});
   if(Array.isArray(st.momUniverse)&&st.momUniverse.some(x=>typeof x!=='string'))errs.push('momUniverse entries must be strings');
   // Reject unsafe/corrupt symbol-like fields before overwrite. Render paths also escape,
@@ -2914,7 +2918,7 @@ function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
 }
 function applyStateSnapshot(d,{mergeConfig=true}={}){
   if(!d||typeof d!=='object')return;
-  const arrKeys=new Set(['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions']);
+  const arrKeys=new Set(['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions']);
   STATE_KEYS.forEach(k=>{
     if(!(k in d))return; // legacy snapshots may be missing newly-added fields; current default survives.
     if(k==='config'){
@@ -2953,6 +2957,7 @@ function sanitizeStateStringsInPlace(st){
   (st.watchlist||[]).forEach(w=>{w.sym=sanSym(w.sym);w.yf=sanTicker(w.yf);w.name=sanNote(w.name,100);w.note=sanNote(w.note,300);});
   (st.brokerImportCandidates||[]).forEach(c=>{c.sym=sanSym(c.sym);c.broker=sanNote(c.broker,40);});
   (st.dividends||[]).forEach(d=>{d.id=sanIdToken(d.id);d.sym=sanSym(d.sym);d.date=sanIsoDate(d.date);d.note=sanNote(d.note,500);});
+  (st.corporateActions||[]).forEach(a=>{if(!a||typeof a!=='object')return;a.id=sanIdToken(a.id);if(a.symbol!=null)a.symbol=sanSym(a.symbol);a.exDate=a.exDate==null?a.exDate:sanIsoDate(a.exDate);a.evidence=a.evidence==null?a.evidence:sanNote(a.evidence,500);if(a.refId!=null)a.refId=sanIdToken(a.refId);if(a.reversedBy!=null)a.reversedBy=sanIdToken(a.reversedBy);});
   (st.corpActions||[]).forEach(a=>{a.id=sanIdToken(a.id);a.sym=sanSym(a.sym);a.kind=['split','bonus'].includes(a.kind)?a.kind:'';a.date=sanIsoDate(a.date);a.note=sanNote(a.note,500);});
   (st.trash||[]).forEach(t=>{t.id=sanIdToken(t.id);t.kind=t.kind==='mom'?'mom':'lifo';if(t.data)cleanTrade(t.data,t.kind==='mom');});
   const tt=st.tenet;if(tt&&typeof tt==='object'){
@@ -2992,6 +2997,7 @@ function loadState(){
     if(!Array.isArray(S.brokerImportCandidates)) S.brokerImportCandidates=[];
     if(!Array.isArray(S.dividends)) S.dividends=[];
     if(!Array.isArray(S.corpActions)) S.corpActions=[];
+    if(!Array.isArray(S.corporateActions)) S.corporateActions=[];
     { const cutoff=Date.now()-30*86400000; S.trash=S.trash.filter(t=>t.deletedAt>=cutoff); } // Phase5: auto-purge trash >30d old
     GH_TOKEN=localStorage.getItem('ad_gh_token')||'';
     SB.url=localStorage.getItem('ad_sb_url')||S.config.sbUrl||'';
@@ -4771,17 +4777,14 @@ function computeFifoRealizedGains(){
   return {stcg:totalStcg,ltcg:totalLtcg,total:totalStcg+totalLtcg,byClass};
 }
 
+// A6-1: "Strategy vs Tax" — each engine's own P&L next to the FIFO tax P&L of that engine's sells (tax lots are matched across engines)
 function renderFifoComparison(){
   const zone=document.getElementById('fifo-compare-zone');
   if(!zone) return;
-  const fifo=computeFifoRealizedGains();
-  zone.innerHTML=`
-    <div style="font-size:11px;color:var(--fog);margin-bottom:6px">FIFO-matched realized gains, friction-adjusted (for CA comparison — the app's own tax/P&L above uses LIFO, matching its trading logic):</div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap">
-      <div><div style="font-size:9px;color:var(--fog)">STCG (FIFO)</div><div style="font-weight:700;color:var(--paper)">₹${fifo.stcg.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>
-      <div><div style="font-size:9px;color:var(--fog)">LTCG (FIFO)</div><div style="font-weight:700;color:var(--paper)">₹${fifo.ltcg.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>
-      <div><div style="font-size:9px;color:var(--fog)">Total (FIFO)</div><div style="font-weight:700;color:var(--paper)">₹${fifo.total.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>
-    </div>`;
+  const rows=strategyVsTax();
+  const tbl=rows.length?`<div class="tbl-wrap"><table><thead><tr><th>FY</th><th>Engine</th><th class="r">Strategy P&L</th><th class="r">Tax P&L (FIFO)</th><th class="r">Difference</th></tr></thead><tbody>${rows.map(r=>`<tr><td>FY${r.fy}–${r.fy+1}</td><td>${escapeHtml(r.strategy)}</td><td class="r mono">${fmtINR(r.strategyPnl)}</td><td class="r mono">${fmtINR(r.taxPnl)}</td><td class="r mono ${r.diff===0?'neutral':r.diff>0?'profit':'loss'}">${fmtINR(r.diff)}</td></tr>`).join('')}</tbody></table></div>`:'<span style="color:var(--fog);font-size:11px">No closed trades yet.</span>';
+  zone.innerHTML=`<div style="font-size:12px;font-weight:700;margin-bottom:4px">Strategy vs Tax</div>
+    <div style="font-size:10.5px;color:var(--fog);margin-bottom:6px">Strategy P&L = each engine's own accounting (unchanged). Tax P&L = FIFO lots per ETF across all engines (demat rule), attributed to the engine that made the sale.</div>${tbl}`;
 }
 
 // ── PHASE 7.2: SELF-TEST (regression guard) ─────────────────────────────────
@@ -4796,7 +4799,7 @@ function runSelfTest(){
   const realS=S,results=[];let pass=true;
   const check=(name,cond,detail='')=>{const ok=!!cond;results.push({name,ok,detail});if(!ok)pass=false;};
   try{
-    S={lifoLedger:[],momTrades:[],momPositions:{},momFyData:{},momFyLossCf:0,momPrices:{},momUniverse:[],universe:[],priceAlerts:[],watchlist:[],trash:[],brokerImportCandidates:[],dividends:[],corpActions:[],tenet:{pairs:[],holdings:[],sold:[],capital:[],bidWeeks:{},config:{}},config:JSON.parse(JSON.stringify(realS.config))};
+    S={lifoLedger:[],momTrades:[],momPositions:{},momFyData:{},momFyLossCf:0,momPrices:{},momUniverse:[],universe:[],priceAlerts:[],watchlist:[],trash:[],brokerImportCandidates:[],dividends:[],corpActions:[],corporateActions:[],tenet:{pairs:[],holdings:[],sold:[],capital:[],bidWeeks:{},config:{}},config:JSON.parse(JSON.stringify(realS.config))};
 
     // LIFO economic P&L: buy and sell friction exactly once each.
     S.config.brokerage=25;S.config.slippage=0.05;
@@ -6264,6 +6267,8 @@ function _showConfirmCard(type,qty,sym,price,turn,friction,txId){
 function _undoLastLifoLog(txId){
   const idx=S.lifoLedger.findIndex(t=>t.id===txId);
   if(idx<0){toast('Cannot undo — transaction not found','err');return;}
+  const _why=lifoDeleteBlockReason(txId);          // A6-2 (F28): the same dependency check as deleteLifoTx
+  if(_why){toast(_why,'err');return;}
   S.lifoLedger.splice(idx,1);
   saveState();renderLifo();
   if(_undoTimer)clearTimeout(_undoTimer);
@@ -6336,18 +6341,17 @@ function stageSell(sym,cmp,qty,linkedBuyId){
   setTimeout(()=>{const b=document.getElementById('staged-banner');if(b)b.scrollIntoView({behavior:'smooth',block:'center'});},120);
 }
 
-async function deleteLifoTx(id){
+// A6-2: the dependency check of deleteLifoTx as a pure function: returns the refusal message, or '' when the transaction may be removed
+function lifoDeleteBlockReason(id){
   const tx=S.lifoLedger.find(t=>t.id===id);
-  if(!tx){toast('Transaction not found','err');return;}
-
+  if(!tx)return 'Transaction not found';
   // B1 FIX: if deleting a BUY, check if any SELL has consumed units from this lot.
   // Deleting the BUY would leave the SELL with no cost basis → phantom profit.
   if(tx.type==='BUY'){
     // Direct link: a SELL that explicitly targets this lot
     const directDep=S.lifoLedger.find(t=>t.type==='SELL'&&t.linkedBuyId===id);
     if(directDep){
-      toast(`⛔ Cannot delete — SELL on ${directDep.date} (${directDep.qty} units) is linked to this BUY lot. Delete the SELL first.`,'err');
-      return;
+      return `⛔ Cannot delete — SELL on ${directDep.date} (${directDep.qty} units) is linked to this BUY lot. Delete the SELL first.`;
     }
     // Indirect: run computeLifoPortfolio without this BUY and see if any SELL loses its cost basis
     const ledgerWithout=S.lifoLedger.filter(t=>t.id!==id);
@@ -6378,10 +6382,16 @@ async function deleteLifoTx(id){
       }
     }
     if(phantomRisk){
-      toast(`⛔ Cannot delete — SELL on ${phantomRisk.date} (${phantomRisk.qty} units of ${tx.sym}) would have no cost basis. Delete that SELL first.`,'err');
-      return;
+      return `⛔ Cannot delete — SELL on ${phantomRisk.date} (${phantomRisk.qty} units of ${tx.sym}) would have no cost basis. Delete that SELL first.`;
     }
   }
+
+  return '';
+}
+async function deleteLifoTx(id){
+  const tx=S.lifoLedger.find(t=>t.id===id);
+  if(!tx){toast('Transaction not found','err');return;}
+  { const _why=lifoDeleteBlockReason(id); if(_why){toast(_why,'err');return;} }
 
   if(!confirm('Delete this transaction? You can restore it from Trash within 30 days.'))return;
   const _okl=await commitState(()=>{S.lifoLedger=S.lifoLedger.filter(t=>t.id!==id);pushTrash('lifo',tx);},{label:'Delete transaction'});
@@ -6996,7 +7006,7 @@ function momExecuteTrade(etf,action,units,price,charges,date,reason){
     }
   }
   const trade={id:'mx'+Date.now()+Math.random(),date:sanIsoDate(date)||date,etf,type:action,units,price,value:units*price,friction,pnl,holdDays,entryDate,reason:sanNote(reason||'')};
-  if(action!=='BUY')trade.taxBasis='PROVISIONAL_EARLIEST_BUY';     // A1-5: lot-level FIFO arrives in A6
+  if(action!=='BUY')trade.taxBasis='FIFO_LOT';     // A6-1
   S.momTrades.unshift(trade);
   return trade;
 }
@@ -7352,6 +7362,7 @@ async function deleteMomTrade(id){
 function momRebuildState(){
   S.momPositions={};S.momFyData={};S.momFyLossCf=0;
   const sorted=[...S.momTrades].sort((a,b)=>a.date.localeCompare(b.date));
+  MOM_LOT_RECORDS=dmLotRecordsFrom(sorted);   // A6-1: per-lot records for the tax layer (FIFO across engines); the average-cost P&L below is unchanged
   sorted.forEach(tr=>{
     let pnl=0,holdDays=0;
     if(tr.type==='BUY'){
@@ -7383,7 +7394,7 @@ function momRebuildState(){
       }
     }
     tr.pnl=pnl;tr.holdDays=holdDays;
-    if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM')tr.taxBasis='PROVISIONAL_EARLIEST_BUY';
+    if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM')tr.taxBasis='FIFO_LOT';   // A6-1: tax lots are matched FIFO per ETF across all engines (collectLiveTaxRecords)
   });
 }
 
@@ -10843,7 +10854,147 @@ function computeCanonicalTaxLedger(records){
   }
   return{rows,totalTax:+totalTax.toFixed(2),recordTax,records:rr,assumptions:{lossCarryForwardYears:8,lossCarryForwardRequiresTimelyReturn:true,sttNotDeductible:true,preJul2024ListedNonEquityUsesCiiAnd10PctCap:true,noSurchargeOrBasicExemptionAdjustment:true}};
 }
-function collectLiveTaxRecords(){
+
+// ══ TAX (FIFO — DEMAT RULE) · CORPORATE ACTIONS (A6-1, A6-3) ═══════════════════════════════════════
+// Tax lots are matched FIFO PER ETF across ALL engines (a demat account has one holding per ISIN). Engine P&L stays engine-internal
+// (collectEngineTaxRecords); the two are shown side by side ("Strategy vs Tax"). Corporate actions are EVENTS: fills are never modified;
+// units and prices are derived by chronological replay (events apply at the start of exDate, before that day's fills).
+let MOM_LOT_RECORDS=[];
+function dmLotRecordsFrom(trades){
+  return (trades||[]).filter(t=>t&&t.type==='BUY'&&(+t.units||0)>0).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)))
+    .map((t,i)=>({id:t.id||('dm-lot:'+i),etf:t.etf,date:String(t.date).slice(0,10),units:+t.units,price:+t.price,fee:+t.friction||0}));
+}
+function activeCorpActions(st){return ((st||S).corporateActions||[]).filter(a=>a&&a.type!=='REVERSAL'&&a.status==='ACTIVE'&&a.symbol&&a.exDate&&(+a.ratioNum)>0&&(+a.ratioDen)>0);}
+// one chronological stream of every fill of every engine (+ ACTIVE corporate actions). Same day: corporate action, then BUY, then SELL.
+function taxEventStream(st,{skipCa=null,extraCa=null}={}){
+  st=st||S;const ev=[];let n=0;const push=e=>{e.ord=n++;ev.push(e);};
+  (st.lifoLedger||[]).forEach(tx=>{if(!tx||!tx.sym||!tx.date)return;const k=tx.type==='BUY'?'BUY':tx.type==='SELL'?'SELL':null;if(!k)return;
+    push({kind:k,engine:'LIFO',sym:tx.sym,date:String(tx.date).slice(0,10),qty:+tx.qty||0,price:+tx.price||0,fee:+tx.friction||0,id:tx.id||('lifo:'+n)});});
+  const dmBuys=(st.momTrades||[]).filter(t=>t&&t.type==='BUY'&&(+t.units||0)>0).length;
+  const lots=(st===S&&MOM_LOT_RECORDS.length===dmBuys)?MOM_LOT_RECORDS:dmLotRecordsFrom(st.momTrades);
+  lots.forEach(l=>push({kind:'BUY',engine:'DM',sym:l.etf,date:l.date,qty:l.units,price:l.price,fee:l.fee,id:l.id}));
+  (st.momTrades||[]).forEach(t=>{if(t&&(t.type==='EXIT'||t.type==='SELL'||t.type==='SKIM')&&(+t.units||0)>0)push({kind:'SELL',engine:'DM',sym:t.etf,date:String(t.date).slice(0,10),qty:+t.units,price:+t.price||0,fee:+t.friction||0,id:t.id||('dm:'+n)});});
+  const tt=st.tenet||{},tl=new Map();
+  const addLot=x=>{if(!x||!x.etf)return;const key=x.lotId||x.id;let l=tl.get(key);if(!l){l={id:key,etf:x.etf,date:x.buyDate,price:+x.buyPrice||0,qty:0,fee:0};tl.set(key,l);}l.qty+=+x.qty||0;l.fee+=+x.buyFee||0;};
+  (tt.holdings||[]).forEach(addLot);(tt.sold||[]).forEach(addLot);
+  tl.forEach(l=>push({kind:'BUY',engine:'TENET',sym:l.etf,date:l.date,qty:l.qty,price:l.price,fee:l.fee,id:l.id}));
+  (tt.sold||[]).forEach(x=>{if(x&&x.etf&&x.sellDate)push({kind:'SELL',engine:'TENET',sym:x.etf,date:x.sellDate,qty:+x.qty||0,price:+x.sellPrice||0,fee:+x.sellFee||0,id:x.id});});
+  [...activeCorpActions(st).filter(a=>!(skipCa&&skipCa.has(a.id))),...(extraCa||[])].forEach(a=>push({kind:'CA',sym:a.symbol,date:a.exDate,num:+a.ratioNum,den:+a.ratioDen,id:a.id}));
+  const rank={CA:0,BUY:1,SELL:2};
+  return ev.filter(e=>e.sym&&e.date).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(rank[a.kind]-rank[b.kind])||(a.ord-b.ord));
+}
+const _taxAc=sym=>((S.universe||[]).find(e=>e.sym===sym)||{}).assetClass||'equity';
+// FIFO matching across engines. Returns per-slice tax records (taxBasis FIFO_LOT) and the sells that found no buy lot (never invented).
+function taxFifoMatch(events){
+  const lots={},records=[],unmatched=[];
+  for(const e of events){
+    if(e.kind==='CA'){(lots[e.sym]||[]).forEach(l=>{l.units*=e.num/e.den;l.f*=e.num/e.den;});continue;}
+    if(e.kind==='BUY'){(lots[e.sym]=lots[e.sym]||[]).push({engine:e.engine,id:e.id,date:e.date,units:e.qty,price0:e.price,f:1,fee:e.fee||0});continue;}
+    const q=lots[e.sym]||[],total=e.qty,ac=_taxAc(e.sym);let rem=e.qty,part=0;
+    while(rem>1e-9&&q.length){
+      const lot=q[0],take=Math.min(rem,lot.units),frac=take/lot.units,buyF=lot.fee*frac,sellF=(e.fee||0)*(take/total),buyPrice=lot.price0/lot.f;
+      const gross=(e.price-buyPrice)*take,stt=e.engine==='LIFO'?lifoFriction('SELL',take,e.price).stt:(e.engine==='DM'&&ac==='equity'?take*e.price*0.00001:0);
+      records.push({id:e.id+':'+(part++),strategy:e.engine,lotEngine:lot.engine,lotId:lot.id,taxBasis:'FIFO_LOT',sym:e.sym,sellDate:e.date,buyDate:lot.date,
+        holdDays:Math.round((new Date(e.date)-new Date(lot.date))/86400000),assetClass:ac,netPnl:gross-buyF-sellF,grossPnl:gross,friction:buyF+sellF,buyFriction:buyF,sellFriction:sellF,stt,qty:take,buyPrice,sellPrice:e.price});
+      lot.units-=take;lot.fee-=buyF;rem-=take;if(lot.units<=1e-9)q.shift();
+    }
+    if(rem>1e-6)unmatched.push({engine:e.engine,sym:e.sym,date:e.date,qty:+rem.toFixed(6),id:e.id});
+  }
+  return{records,unmatched};
+}
+let TAX_LAST_UNMATCHED=[];
+function collectLiveTaxRecords(){const r=taxFifoMatch(taxEventStream());TAX_LAST_UNMATCHED=r.unmatched;return r.records;}
+// Strategy vs Tax per FY and engine: the engine's own P&L against the FIFO tax P&L of the sells that engine made
+function strategyVsTax(){
+  const rows={};const k=r=>taxFyStart(r.sellDate)+'|'+r.strategy;
+  const at=r=>(rows[k(r)]=rows[k(r)]||{fy:taxFyStart(r.sellDate),strategy:r.strategy,strategyPnl:0,taxPnl:0});
+  collectEngineTaxRecords().forEach(r=>{at(r).strategyPnl+=r.netPnl;});collectLiveTaxRecords().forEach(r=>{at(r).taxPnl+=r.netPnl;});
+  return Object.values(rows).filter(x=>x.fy!=null).sort((a,b)=>a.fy-b.fy||a.strategy.localeCompare(b.strategy)).map(x=>({...x,strategyPnl:+x.strategyPnl.toFixed(2),taxPnl:+x.taxPnl.toFixed(2),diff:+(x.taxPnl-x.strategyPnl).toFixed(2)}));
+}
+// chronological replay per ETF and engine: derived (adjusted) units and lots. Sell rule per engine: LIFO/TENET newest lot first, DM oldest first.
+function corpActionReplay({st=null,skipCa=null,extra=null}={}){
+  const ev=taxEventStream(st||S,{skipCa,extraCa:extra}),by={},conflicts=[];
+  for(const e of ev){
+    if(e.kind==='CA'){const m=by[e.sym];if(m)Object.values(m).forEach(ls=>ls.forEach(l=>{l.units*=e.num/e.den;l.f*=e.num/e.den;}));continue;}
+    const m=(by[e.sym]=by[e.sym]||{}),ls=(m[e.engine]=m[e.engine]||[]);
+    if(e.kind==='BUY'){ls.push({id:e.id,date:e.date,units:e.qty,price0:e.price,f:1,fee:e.fee});continue;}
+    const avail=ls.reduce((a,l)=>a+l.units,0);
+    if(e.qty>avail+1e-6)conflicts.push({id:e.id,engine:e.engine,sym:e.sym,date:e.date,needed:e.qty,available:+avail.toFixed(6)});
+    let rem=Math.min(e.qty,avail);const newest=e.engine!=='DM';
+    while(rem>1e-9&&ls.length){const i=newest?ls.length-1:0,l=ls[i],take=Math.min(rem,l.units);l.units-=take;rem-=take;if(l.units<=1e-9)ls.splice(i,1);}
+  }
+  return{by,conflicts};
+}
+// original vs adjusted view of the open holdings of the symbols that have an ACTIVE action
+function corpAdjustedHoldings(){
+  const syms=new Set(activeCorpActions().map(a=>a.symbol)),rp=corpActionReplay(),out=[];
+  for(const sym of [...syms].sort())for(const [eng,ls] of Object.entries(rp.by[sym]||{})){
+    const adj=ls.reduce((a,l)=>a+l.units,0);if(adj<=1e-9)continue;
+    const orig=ls.reduce((a,l)=>a+l.units/l.f,0),cost=ls.reduce((a,l)=>a+(l.units/l.f)*l.price0,0);
+    out.push({sym,engine:eng,originalUnits:+orig.toFixed(6),adjustedUnits:+adj.toFixed(6),originalAvgPrice:orig>0?+(cost/orig).toFixed(4):0,adjustedAvgPrice:adj>0?+(cost/adj).toFixed(4):0});
+  }
+  return out;
+}
+const _newConflicts=(before,after)=>{const seen=new Set(before.map(c=>c.engine+'|'+c.id));return after.filter(c=>!seen.has(c.engine+'|'+c.id));};
+async function corpActionAdd(spec){
+  const s0=spec||{},errors=[],symbol=sanSym(s0.symbol),type=String(s0.type||'').toUpperCase(),num=+s0.ratioNum,den=+s0.ratioDen,exDate=s0.exDate,evidence=String(s0.evidence||'').trim();
+  if(!symbol)errors.push('symbol is required');
+  if(!['SPLIT','BONUS','CONSOLIDATION'].includes(type))errors.push('type must be SPLIT, BONUS or CONSOLIDATION');
+  if(!(Number.isInteger(num)&&num>=1&&Number.isInteger(den)&&den>=1))errors.push('ratio must be two positive whole numbers');
+  else if(num===den)errors.push('a 1:1 ratio changes nothing');
+  else if((type==='SPLIT'||type==='BONUS')&&num<den)errors.push(type+' must increase the units (ratio num > den)');
+  else if(type==='CONSOLIDATION'&&num>den)errors.push('CONSOLIDATION must reduce the units (ratio num < den)');
+  if(!_isoDate(exDate))errors.push('exDate must be a real YYYY-MM-DD date');
+  if(!evidence)errors.push('evidence is required (never a placeholder)');
+  if(errors.length)return{ok:false,errors};
+  const rec={id:'ca_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),symbol,type,ratioNum:num,ratioDen:den,exDate,evidence:sanNote(evidence,500),createdAt:new Date().toISOString(),status:'ACTIVE',reversedBy:null};
+  const bad=_newConflicts(corpActionReplay().conflicts,corpActionReplay({extra:[rec]}).conflicts);
+  if(bad.length)return{ok:false,errors:['this action would leave later sales without enough units'],conflicts:bad};
+  const ok=await commitState(()=>{S.corporateActions=Array.isArray(S.corporateActions)?S.corporateActions:[];S.corporateActions.push(rec);},{label:'Corporate action'});
+  if(!ok)return{ok:false,errors:['not saved']};
+  try{renderCorpActions();renderHoldingsByEtf();renderTax();}catch(e){}
+  return{ok:true,action:rec};
+}
+// Reversal = a NEW record; refused (with the conflicting transactions) when a later sale needs the adjusted units.
+async function corpActionReverse(id,{evidence=''}={}){
+  const a=(S.corporateActions||[]).find(x=>x&&x.id===id&&x.type!=='REVERSAL');
+  if(!a)return{ok:false,errors:['corporate action not found']};
+  if(a.status==='REVERSED')return{ok:false,errors:['already reversed']};
+  const bad=_newConflicts(corpActionReplay().conflicts,corpActionReplay({skipCa:new Set([id])}).conflicts);
+  if(bad.length)return{ok:false,errors:['reversal refused: later transactions need the adjusted units'],conflicts:bad};
+  const rev={id:'car_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),type:'REVERSAL',refId:id,createdAt:new Date().toISOString(),evidence:sanNote(String(evidence||''),500)};
+  const ok=await commitState(()=>{const x=S.corporateActions.find(y=>y.id===id&&y.type!=='REVERSAL');x.status='REVERSED';x.reversedBy=rev.id;S.corporateActions.push(rev);},{label:'Reverse corporate action'});
+  if(!ok)return{ok:false,errors:['not saved']};
+  try{renderCorpActions();renderHoldingsByEtf();renderTax();}catch(e){}
+  return{ok:true,reversal:rev};
+}
+const _caConflictHtml=r=>escapeHtml(r.errors.join(' · '))+(r.conflicts?'<br>'+r.conflicts.map(c=>escapeHtml(`${c.engine} ${c.sym} ${c.date} (${c.id}): needs ${c.needed}, has ${c.available}`)).join('<br>'):'');
+async function corpActionAddUI(){
+  const v=id=>(document.getElementById(id)||{}).value;
+  const r=await corpActionAdd({symbol:v('ca-sym'),type:v('ca-type'),ratioNum:v('ca-num'),ratioDen:v('ca-den'),exDate:v('ca-date'),evidence:v('ca-evidence')});
+  const st=document.getElementById('ca-status');
+  if(st)st.innerHTML=r.ok?'<span style="color:var(--gain)">Recorded — units and prices are derived; fills unchanged.</span>':'<span style="color:var(--loss)">'+_caConflictHtml(r)+'</span>';
+}
+async function corpActionReverseUI(id){
+  const ev=typeof prompt==='function'?prompt('Reason / evidence for reversing this corporate action (optional)','')||'':'';
+  const r=await corpActionReverse(id,{evidence:ev});
+  const st=document.getElementById('ca-status');
+  if(st)st.innerHTML=r.ok?'<span style="color:var(--gain)">Reversed (new REVERSAL record); holdings re-derived.</span>':'<span style="color:var(--loss)">'+_caConflictHtml(r)+'</span>';
+}
+function renderCorpActions(){
+  const host=document.getElementById('corp-actions-card');if(!host)return;
+  const acts=(S.corporateActions||[]).filter(a=>a&&a.type!=='REVERSAL').slice().sort((a,b)=>String(b.exDate).localeCompare(String(a.exDate))),adj=corpAdjustedHoldings();
+  const list=acts.length?`<div class="tbl-wrap"><table><thead><tr><th>Ex-date</th><th>ETF</th><th>Type</th><th>Ratio</th><th>Status</th><th>Evidence</th><th></th></tr></thead><tbody>${acts.map(a=>`<tr><td class="mono">${escapeHtml(a.exDate)}</td><td>${escapeHtml(a.symbol)}</td><td>${escapeHtml(a.type)}</td><td class="mono">${a.ratioNum}:${a.ratioDen}</td><td>${escapeHtml(a.status)}</td><td>${escapeHtml(a.evidence||'')}</td><td>${a.status==='ACTIVE'?`<button class="icon-btn" data-id="${escapeHtml(a.id)}" onclick="corpActionReverseUI(this.dataset.id)">Reverse</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<span style="color:var(--fog);font-size:11px">No corporate actions recorded.</span>';
+  const adjT=adj.length?`<div style="font-size:11px;font-weight:700;margin:8px 0 4px">Original vs adjusted holdings</div><div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Engine</th><th>Units (original)</th><th>Units (adjusted)</th><th>Avg price (original)</th><th>Avg price (adjusted)</th></tr></thead><tbody>${adj.map(r=>`<tr><td>${escapeHtml(r.sym)}</td><td>${escapeHtml(r.engine)}</td><td class="mono">${r.originalUnits}</td><td class="mono">${r.adjustedUnits}</td><td class="mono">${r.originalAvgPrice}</td><td class="mono">${r.adjustedAvgPrice}</td></tr>`).join('')}</tbody></table></div>`:'';
+  host.innerHTML=`<div class="card" style="margin-top:10px"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Corporate actions (events — fills are never modified)</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      <input class="form-input" id="ca-sym" placeholder="ETF" style="width:100px"><select class="form-input" id="ca-type" style="width:150px"><option>SPLIT</option><option>BONUS</option><option>CONSOLIDATION</option></select>
+      <input class="form-input" id="ca-num" type="number" min="1" placeholder="num" style="width:70px"><span>:</span><input class="form-input" id="ca-den" type="number" min="1" placeholder="den" style="width:70px">
+      <input class="form-input" id="ca-date" type="date" style="width:140px"><input class="form-input" id="ca-evidence" placeholder="evidence (required)" style="flex:1;min-width:160px">
+      <button class="action-btn sm" id="ca-add" onclick="corpActionAddUI()">Add</button></div>
+    <div id="ca-status" style="font-size:10.5px;margin-bottom:6px"></div>${list}${adjT}</div>`;
+}
+function collectEngineTaxRecords(){    // engine-internal records (each engine's own accounting) — the "Strategy" side of Strategy vs Tax
   computeLifoPortfolio();const out=[],lots={};
   [...(S.lifoLedger||[])].sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(tx=>{
     const sym=tx.sym;if(!sym)return;
@@ -10856,7 +11007,7 @@ function collectLiveTaxRecords(){
   (S.momTrades||[]).filter(t=>t.type!=='BUY'&&t.pnl!=null).forEach((tx,i)=>{
     let buyDate=tx.entryDate||'';if(!buyDate&&tx.holdDays>0){const d=new Date(tx.date);d.setDate(d.getDate()-tx.holdDays);buyDate=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
     const ac=(S.universe.find(e=>e.sym===tx.etf)?.assetClass)||'equity',stt=ac==='equity'?(+tx.units||0)*(+tx.price||0)*0.00001:0;
-    out.push({id:tx.id||`dm:${i}`,strategy:'DM',taxBasis:'PROVISIONAL_EARLIEST_BUY',sym:tx.etf,sellDate:tx.date,buyDate,holdDays:+tx.holdDays||0,assetClass:ac,netPnl:+tx.pnl||0,grossPnl:(+tx.pnl||0)+(+tx.friction||0),friction:+tx.friction||0,stt,qty:+tx.units||0,buyPrice:0,sellPrice:+tx.price||0});
+    out.push({id:tx.id||`dm:${i}`,strategy:'DM',taxBasis:'ENGINE_AVG_COST',sym:tx.etf,sellDate:tx.date,buyDate,holdDays:+tx.holdDays||0,assetClass:ac,netPnl:+tx.pnl||0,grossPnl:(+tx.pnl||0)+(+tx.friction||0),friction:+tx.friction||0,stt,qty:+tx.units||0,buyPrice:0,sellPrice:+tx.price||0});
   });
   const tt=tenetState();(tt.sold||[]).forEach((x,i)=>{const sym=sanSym(x.etf),buyDate=sanIsoDate(x.buyDate),sellDate=sanIsoDate(x.sellDate);if(!sym||!buyDate||!sellDate)return;out.push({id:`tenet:${x.id||i}`,strategy:'TENET',sym,sellDate,buyDate,holdDays:+x.holdingDays||Math.max(0,tenetDaysBetween(buyDate,sellDate)),assetClass:(S.universe.find(e=>e.sym===sym)?.assetClass)||'equity',netPnl:Number(x.profit)||0,grossPnl:Number(x.profit)||0,friction:0,stt:0,qty:+x.qty||0,buyPrice:+x.buyPrice||0,sellPrice:+x.sellPrice||0,buyFriction:0,sellFriction:0});});
   return out;
@@ -10880,6 +11031,7 @@ function renderTax(){
   document.getElementById('tax-summary-cards').innerHTML=`<div class="stat-card"><div class="stat-label">Total Net Realised</div><div class="stat-val ${totalNet>=0?'go':'stop'}">${fmtINR(totalNet)}</div><div class="stat-sub">LIFO + DM + Tenet</div></div><div class="stat-card violet"><div class="stat-label">Estimated Tax</div><div class="stat-val violet">${fmtINR(calc.totalTax)}</div><div class="stat-sub">Shared engine · 4% cess · no surcharge</div></div><div class="stat-card"><div class="stat-label">Total Friction</div><div class="stat-val neutral">${fmtINR(totalFriction)}</div></div><div class="stat-card"><div class="stat-label">After-Tax Profit</div><div class="stat-val ${(totalNet-calc.totalTax)>=0?'go':'stop'}">${fmtINR(totalNet-calc.totalTax)}</div></div>`;
   const fyFilter=document.getElementById('tax-fy-filter');if(fyFilter){const existing=new Set([...fyFilter.options].map(o=>o.value).filter(Boolean));fyYears.forEach(fy=>{if(!existing.has(String(fy))){const o=document.createElement('option');o.value=fy;o.textContent=`FY${fy}–${fy+1}`;fyFilter.appendChild(o);}});}
   renderTaxTradeBreakdown(records,calc);
+  { const w=document.getElementById('tax-warnings');if(w)w.innerHTML=TAX_LAST_UNMATCHED.length?`<div class="alert-banner alert-warn" style="margin-bottom:8px"><div><span class="ab-badge ab-warn">DATA GAP</span><div class="ab-sub">${TAX_LAST_UNMATCHED.length} sale(s) have no earlier buy lot and are NOT in the tax figures: ${TAX_LAST_UNMATCHED.slice(0,5).map(u=>escapeHtml(`${u.engine} ${u.sym} ${u.date} ${u.qty}u`)).join(' · ')}</div></div></div>`:''; }
 }
 function renderTaxTradeBreakdown(preRecords=null,preCalc=null){
   const body=document.getElementById('tax-trade-body');if(!body)return;
@@ -10894,7 +11046,7 @@ function renderTaxTradeBreakdown(preRecords=null,preCalc=null){
 // ── UNIVERSE MANAGEMENT ───────────────────────────────────────────────────────
 function getMomUniverse(){rebuildUniverses();return S.universe.filter(e=>e.tag==='momentum'||e.tag==='both').map(e=>e.sym);}
 
-function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}
+function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}try{renderCorpActions();}catch(_e){}
   rebuildUniverses();
   const uni=S.universe;
   const search=(document.getElementById('uni-search')?.value||'').toUpperCase().trim();
@@ -11024,6 +11176,11 @@ function openUnitsByEngine(st){
   Object.entries(net).forEach(([s,u])=>add(s,'LIFO',u));
   Object.entries(st.momPositions||{}).forEach(([s,p])=>add(s,'DM',+(p&&p.units)||0));
   ((st.tenet&&st.tenet.holdings)||[]).forEach(h=>add(h&&h.etf,'TENET',+h.qty||0));
+  const _act=activeCorpActions(st);
+  if(_act.length){                                    // A6-3: adjusted units (fills stay as recorded)
+    const rp=corpActionReplay({st});
+    for(const sy of new Set(_act.map(a=>a.symbol))){delete out[sy];for(const [eng,ls] of Object.entries(rp.by[sy]||{})){const u=ls.reduce((a,l)=>a+l.units,0);if(u>1e-9)add(sy,eng,u);}}
+  }
   return out;
 }
 // A3-4: may this universe exist given the pairs and the open positions? (never mutates)
@@ -11157,7 +11314,24 @@ async function syncUniverseToSB(){
   }catch(e){if(el){el.style.color='var(--stop)';el.textContent=`❌ ${e.message}`;}}
 }
 
-let UNIVERSE_REMOTE_CONFLICT=null;
+let UNIVERSE_REMOTE_CONFLICT=null,UNIVERSE_REMOTE_PENDING=null,MOM_TRADES_REMOTE_CONFLICT=null,MOM_TRADES_REMOTE_PENDING=null;
+// A6-4 (F28): a cloud load never replaces local data silently. Invalid data or a real difference is shown here; the user decides.
+function showRemoteConflict(id,title,lines,{applyLabel='',applyFn=''}={}){
+  try{
+    let el=document.getElementById('remote-conflict-'+id);
+    if(!lines||!lines.length){if(el)el.remove();return;}
+    if(!el){el=document.createElement('div');el.id='remote-conflict-'+id;el.className='alert-banner alert-warn';el.setAttribute('data-remote-conflict',id);el.style.margin='6px 10px';(document.getElementById('remote-conflict-host')||document.body).prepend(el);}
+    el.innerHTML='<div><span class="ab-badge ab-warn">CLOUD CONFLICT</span><div class="ab-sub"><b>'+escapeHtml(title)+'</b> — local data kept.<br>'+lines.slice(0,6).map(l=>escapeHtml(l)).join('<br>')+(lines.length>6?'<br>…and '+(lines.length-6)+' more':'')+'</div>'+(applyLabel?'<button class="icon-btn" onclick="'+applyFn+'">'+escapeHtml(applyLabel)+'</button> ':'')+'<button class="icon-btn" onclick="this.closest(\'.alert-banner\').remove()">Dismiss</button></div>';
+  }catch(e){}
+}
+function universeSig(u){return JSON.stringify((u||[]).map(e=>[String(e.sym||'').toUpperCase(),[...(Array.isArray(e.engines)?e.engines:enginesFromTag(e.tag))].sort(),e.assetClass||'',e.linkedIndex||'']).sort());}
+async function applyRemoteUniverse(){
+  const r=UNIVERSE_REMOTE_PENDING;if(!r)return false;
+  const v=validateUniverseChange(r);if(!v.ok){showRemoteConflict('universe','Universe (cloud) cannot be loaded',v.errors);return false;}
+  const ok=await commitState(()=>{S.universe=r;rebuildUniverses();},{label:'Load universe'});
+  if(ok){UNIVERSE_REMOTE_PENDING=null;UNIVERSE_REMOTE_CONFLICT=null;TENET_RUNTIME.live=null;showRemoteConflict('universe','',[]);try{renderUniverse();}catch(e){}}
+  return ok;
+}
 async function loadUniverseFromSB(){
   const rows=await sbFetch('etf_universe?user_id=eq.default&select=symbols');
   if(rows?.length&&rows[0].symbols){
@@ -11166,11 +11340,16 @@ async function loadUniverseFromSB(){
       if(Array.isArray(s)&&s.length){
         const _remote=(typeof s[0]==='string'?s.map(sym=>({sym,yf:sym+'.NS',name:sym,tag:DEFAULT_LIFO_UNIVERSE.some(e=>e.sym===sym)?'both':'momentum'})):s).map(e=>({...e,engines:Array.isArray(e.engines)?e.engines:enginesFromTag(e.tag)}));
         const _v=validateUniverseChange(_remote);
-        if(!_v.ok){UNIVERSE_REMOTE_CONFLICT=_v.errors;_universeBlocked(_v.errors);rebuildUniverses();return false;}     // remote load keeps the LOCAL universe + banner
+        if(!_v.ok){UNIVERSE_REMOTE_CONFLICT=_v.errors;UNIVERSE_REMOTE_PENDING=null;_universeBlocked(_v.errors);showRemoteConflict('universe','Universe (cloud) cannot be loaded',_v.errors);rebuildUniverses();return false;}     // remote load keeps the LOCAL universe + banner
         UNIVERSE_REMOTE_CONFLICT=null;
-        const _ok=await commitState(()=>{S.universe=_remote;rebuildUniverses();},{label:'Load universe'});
-        if(_ok)TENET_RUNTIME.live=null;
-        return _ok;
+        if((S.universe||[]).length&&universeSig(S.universe)!==universeSig(_remote)){
+          UNIVERSE_REMOTE_PENDING=_remote;
+          const a=new Set(S.universe.map(e=>e.sym)),b=new Set(_remote.map(e=>e.sym));
+          const lines=[`cloud has ${_remote.length} ETFs, this device ${S.universe.length}`,..._remote.map(e=>e.sym).filter(x=>!a.has(x)).slice(0,5).map(x=>'only in the cloud: '+x),...S.universe.map(e=>e.sym).filter(x=>!b.has(x)).slice(0,5).map(x=>'only on this device: '+x)];
+          showRemoteConflict('universe','Universe differs from the cloud copy',lines,{applyLabel:'Use the cloud universe',applyFn:'applyRemoteUniverse()'});
+          rebuildUniverses();return false;
+        }
+        return true;                                   // identical: nothing to do
       }
     }catch(e){swallowLoud('loadUniverseFromSB',e);}
   }
@@ -11186,9 +11365,45 @@ async function syncMomPortfolioToSB(){
   if(!SB.url||!SB.key)return;
   await sbFetch('portfolio',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({user_id:'default',positions:JSON.stringify(S.momPositions),updated_at:new Date().toISOString()})});
 }
+// restore validators for cloud DM trades (shape + no negative position); returns a list of problems
+function validateRemoteMomRows(rows){
+  const errs=[];
+  if(!Array.isArray(rows))return['cloud trades are not a list'];
+  rows.forEach((t,i)=>{const w='row '+(i+1)+(t&&t.id?' ('+t.id+')':'');
+    if(!t||typeof t!=='object'){errs.push(w+': not an object');return;}
+    if(!t.etf||String(t.etf)!==sanSym(t.etf))errs.push(w+': invalid ETF symbol');
+    if(!['BUY','SELL','EXIT','SKIM'].includes(String(t.type).toUpperCase()))errs.push(w+': unsupported type '+t.type);
+    if(!(Number(t.units)>0))errs.push(w+': units must be positive');
+    if(!(Number(t.price)>0))errs.push(w+': price must be positive');
+    if(!_isoDate(String(t.date)))errs.push(w+': date is not a real date');});
+  if(!errs.length){const neg=validateRescaledDmRows(rows);if(neg)errs.push(neg);}
+  return errs;
+}
+const _momSig=r=>[r.id,r.date,String(r.type).toUpperCase(),r.etf,+r.units,+r.price,+r.friction||0].join('|');
+function diffMomTrades(local,remote){
+  const L=new Map((local||[]).map(t=>[t.id,_momSig(t)])),R=new Map((remote||[]).map(t=>[t.id,_momSig(t)]));
+  return{onlyLocal:[...L.keys()].filter(k=>!R.has(k)),onlyRemote:[...R.keys()].filter(k=>!L.has(k)),changed:[...L.keys()].filter(k=>R.has(k)&&L.get(k)!==R.get(k))};
+}
+async function applyRemoteMomTrades(){
+  const rows=MOM_TRADES_REMOTE_PENDING;if(!rows)return false;
+  if(typeof confirm==='function'&&!confirm('Replace the '+(S.momTrades||[]).length+' local DM trades with the '+rows.length+' from the cloud?'))return false;
+  const ok=await commitState(()=>{S.momTrades=rows;momRebuildState();},{label:'Load DM trades'});
+  if(ok){MOM_TRADES_REMOTE_PENDING=null;MOM_TRADES_REMOTE_CONFLICT=null;showRemoteConflict('momtrades','',[]);}
+  return ok;
+}
 async function loadMomTradesFromSB(){
   const rows=await sbFetch('trades?order=date.asc&select=*');
-  if(rows?.length){S.momTrades=rows;momRebuildState();}
+  if(!Array.isArray(rows)||!rows.length)return false;
+  const errs=validateRemoteMomRows(rows);
+  if(errs.length){MOM_TRADES_REMOTE_CONFLICT={kind:'invalid',errors:errs};MOM_TRADES_REMOTE_PENDING=null;showRemoteConflict('momtrades','DM trades in the cloud are invalid',errs);return false;}
+  if(!(S.momTrades||[]).length){                       // nothing local to lose
+    return await commitState(()=>{S.momTrades=rows;momRebuildState();},{label:'Load DM trades'});
+  }
+  const d=diffMomTrades(S.momTrades,rows);
+  if(!d.onlyLocal.length&&!d.onlyRemote.length&&!d.changed.length){MOM_TRADES_REMOTE_CONFLICT=null;return true;}
+  MOM_TRADES_REMOTE_CONFLICT={kind:'differs',...d};MOM_TRADES_REMOTE_PENDING=rows;
+  showRemoteConflict('momtrades','DM trades differ from the cloud copy',[`${d.onlyLocal.length} only on this device, ${d.onlyRemote.length} only in the cloud, ${d.changed.length} changed`,...d.changed.slice(0,3).map(x=>'changed: '+x)],{applyLabel:'Replace with the cloud trades',applyFn:'applyRemoteMomTrades()'});
+  return false;
 }
 
 // ── B2 FIX: LIFO LEDGER SUPABASE SYNC ────────────────────────────────────────
@@ -11269,7 +11484,7 @@ function _autoExportBeforeDestruct(reason){
   try{
     const payload={
       _meta:{version:BACKUP_VERSION,appName:'AlphaDesk',exportedAt:new Date().toISOString(),...appProvenance(),reason,lifoTrades:(S.lifoLedger||[]).length,momTrades:(S.momTrades||[]).length},
-      state:{lifoLedger:S.lifoLedger,momTrades:S.momTrades,momPositions:S.momPositions,momFyData:S.momFyData,momFyLossCf:S.momFyLossCf,momUniverse:S.momUniverse,universe:S.universe,priceAlerts:S.priceAlerts,watchlist:S.watchlist,trash:S.trash,brokerImportCandidates:S.brokerImportCandidates,dividends:S.dividends,corpActions:S.corpActions,config:S.config}
+      state:{lifoLedger:S.lifoLedger,momTrades:S.momTrades,momPositions:S.momPositions,momFyData:S.momFyData,momFyLossCf:S.momFyLossCf,momUniverse:S.momUniverse,universe:S.universe,priceAlerts:S.priceAlerts,watchlist:S.watchlist,trash:S.trash,brokerImportCandidates:S.brokerImportCandidates,dividends:S.dividends,corpActions:S.corpActions,corporateActions:S.corporateActions||[],config:S.config}
     };
     const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
@@ -14078,8 +14293,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A5';
-const APP_SOURCE_SHA256='52611f454d9a831b2a40e69edb81f4fe95cad6e852da084ed1d1494694bfde9c';
+const APP_BUILD='2026-09-20-v3.22-A6';
+const APP_SOURCE_SHA256='8e6cc4c1ea76427e95574d451ab475b7cc0406bc2d42598251c36a6a6242e5c2';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
