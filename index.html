@@ -901,7 +901,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 <!-- STRATEGY SEGMENTED CONTROL (desktop) -->
 <div id="strategy-bar">
-<button class="strat-btn active" onclick="switchStrategy('lifo',this)">📦 ETF Shop</button>
+<button class="strat-btn active" onclick="switchStrategy('lifo',this)">📦 LIFO</button>
 <div class="strat-divider"></div>
 <button class="strat-btn momentum" onclick="switchStrategy('momentum',this)">📊 Dual Momentum</button>
 <div class="strat-divider"></div>
@@ -2201,7 +2201,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <select class="form-input" id="tax-fy-filter" onchange="renderTaxTradeBreakdown()" style="width:120px"><option value="">All FY</option></select>
 <select class="form-input" id="tax-strat-filter" onchange="renderTaxTradeBreakdown()" style="width:160px">
 <option value="">All Strategies</option>
-<option value="lifo">ETF Shop LIFO</option>
+<option value="lifo">LIFO</option>
 <option value="dm">Dual Momentum</option>
 </select>
 </div>
@@ -2236,7 +2236,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Risk</span></div>
 <div class="stat-grid" id="risk-stat-bar"></div>
 <div class="card" style="margin-bottom:14px">
-<div class="card-title" style="margin-bottom:6px">Strategy Split <span style="font-size:10px;color:var(--fog)">market value, ETF Shop LIFO vs Dual Momentum</span></div>
+<div class="card-title" style="margin-bottom:6px">Strategy Split <span style="font-size:10px;color:var(--fog)">market value, LIFO vs Dual Momentum</span></div>
 <div id="risk-strategy-split"></div>
 </div>
 <div class="card" style="margin-bottom:14px">
@@ -2337,7 +2337,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <!-- LIFO Broker Account -->
 <div class="conn-card">
 <div class="conn-card-head">
-<div class="conn-card-title">📦 ETF Shop Account</div>
+<div class="conn-card-title">📦 LIFO Account</div>
 <div class="conn-status idle" id="broker-lifo-status"><span style="width:6px;height:6px;border-radius:50%;background:var(--fog);display:inline-block"></span> Not connected</div>
 </div>
 <div class="form-row" style="margin-bottom:8px">
@@ -2531,7 +2531,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 <div class="card">
-<div class="settings-section-title">ETF Shop — LIFO Engine Settings</div>
+<div class="settings-section-title">LIFO engine</div>
 <div class="form-row">
 <div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
 <div class="form-group"><label class="form-label">Slots (divisor)</label><input class="form-input" id="s-slots" type="number"/></div>
@@ -2565,11 +2565,11 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <button class="toggle" id="t-high-guard" onclick="this.classList.toggle('on')"></button>
 </div>
 <div class="toggle-row">
-<div><div class="toggle-label">LIQUIDBEES Idle Parking (ETF Shop)</div><div class="toggle-sub">Park free slots in LIQUIDBEES at <input class="form-input" id="s-lifo-liquid-rate" max="15" min="1" step="0.1" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="6.5"/> % pa when no buy signal</div></div>
+<div><div class="toggle-label">LIQUIDBEES Idle Parking (LIFO)</div><div class="toggle-sub">Park free slots in LIQUIDBEES at <input class="form-input" id="s-lifo-liquid-rate" max="15" min="1" step="0.1" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="6.5"/> % pa when no buy signal</div></div>
 <button class="toggle" id="t-lifo-liquid-park" onclick="this.classList.toggle('on')"></button>
 </div>
 <div class="toggle-row">
-<div><div class="toggle-label">Compound Profits (ETF Shop)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each close</div></div>
+<div><div class="toggle-label">Compound Profits (LIFO)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each close</div></div>
 <button class="toggle" id="t-lifo-compound" onclick="this.classList.toggle('on')"></button>
 </div>
 </div>
@@ -9421,7 +9421,7 @@ function getSpikeFilteredLow(histIndex,dateTs,thresh=0.08){
 // ║  runLifoBacktestCore                                                   ║
 // ║  V3.1: Tenet remains a separate strategy module; this core is not shared. ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
-// ETF Shop LIFO backtest engine. DOM-free pure function.
+// LIFO backtest engine. DOM-free pure function.
 // Used by: LIFO backtest, LIFO param sweep, walk-forward, stability score.
 // renderLifoSignals() must mirror its decision rules — see STRATEGY CONTRACT.
 async function runLifoBacktestCore(p){
@@ -10503,7 +10503,7 @@ function renderRiskDashboard(){
     const lifoPct=(lifoTotal/grandTotal*100), dmPct=(dmTotal/grandTotal*100);
     stratZone.innerHTML=`
       <div style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mist);margin-bottom:4px"><span>ETF Shop (LIFO)</span><b style="color:var(--sky)">${fmtINR(lifoTotal)} · ${lifoPct.toFixed(1)}%</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mist);margin-bottom:4px"><span>LIFO</span><b style="color:var(--sky)">${fmtINR(lifoTotal)} · ${lifoPct.toFixed(1)}%</b></div>
         <div style="height:8px;background:var(--wire);border-radius:4px;overflow:hidden"><div style="height:100%;width:${lifoPct}%;background:var(--azure)"></div></div>
       </div>
       <div>
@@ -12698,7 +12698,7 @@ function _buildMoreMenuTabs(){
   if(!host)return;
   const strat=['momentum','tenet'].includes(curStrategy)?curStrategy:'lifo';
   const list=TABS[strat]||[];
-  const stratName=strat==='momentum'?'Dual Momentum':strat==='tenet'?'Tenet Homa':'ETF Shop';
+  const stratName=strat==='momentum'?'Dual Momentum':strat==='tenet'?'Tenet Homa':'LIFO';
   const activeId=_activeTabId||'';
   host.innerHTML=`
     <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--fog);padding:4px 8px 6px">${stratName} — Tabs</div>
@@ -14156,7 +14156,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='697878060ab8f6b7ad48d8cccdcd997e909a04c7ce1ffe4db44d9ffa31ea84fe';
+const APP_SOURCE_SHA256='6cde2c8b2e76dba999e4b155ad70b64d39c50fde6fceda938c9fca5b045ede4c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
