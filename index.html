@@ -916,6 +916,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <button class="strat-btn" onclick="switchStrategy('settings',this)">⚙️ Settings</button>
 </div>
 <div id="nav-bar"></div>
+<div id="nav-sub" style="display:none"></div>
 <!-- BOTTOM NAV (mobile only) -->
 <nav id="bottom-nav">
 <button class="bnav-item active" id="bnav-signals" onclick="bnav('signals')" style="position:relative">
@@ -1456,11 +1457,14 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 <!-- ── END STEP-7: LIFO HEATMAP ──────────────────────────────────────────── -->
 <!-- ── END STEP-3: LIFO PARAM SWEEP TAB ─────────────────────────────────── -->
+<div class="tab-pane" id="lifo-config">
+<div class="card"><div class="empty">LIFO engine settings move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+</div>
 </div><!-- /strategy-lifo -->
 <!-- MOMENTUM STRATEGY -->
 <div class="strategy-pane" id="strategy-momentum">
 <!-- Signal Tab -->
-<div class="tab-pane active" id="mom-signal">
+<div class="tab-pane active" id="dm-signals">
 <div class="stat-grid" id="mom-stat-bar"></div>
 <div id="mom-alerts"></div>
 <div class="card" style="margin-bottom:14px">
@@ -1544,7 +1548,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 </div>
 <!-- Portfolio Tab -->
-<div class="tab-pane" id="mom-portfolio">
+<div class="tab-pane" id="dm-holdings">
 <div class="hero-pnl" id="dm-portfolio-hero" style="display:none">
 <div class="hero-label">Dual Momentum Portfolio</div>
 <div class="hero-value" id="dm-hero-val">—</div>
@@ -1562,7 +1566,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 </div>
 <!-- Trades Tab -->
-<div class="tab-pane" id="mom-trades">
+<div class="tab-pane" id="dm-ledger">
 <div class="card">
 <div class="card-head">
 <div class="card-title">Trade Log — <span id="mom-trade-count" style="color:var(--go)">0 trades</span></div>
@@ -2099,6 +2103,9 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div id="dm-deep-analytics-body"><div class="empty"><div class="empty-icon">📈</div>Run DM Backtest to generate analytics</div></div>
 </div>
 </div>
+<div class="tab-pane" id="dm-config">
+<div class="card"><div class="empty">Dual Momentum settings move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+</div>
 </div><!-- /strategy-momentum -->
 <!-- TAX OFFICE -->
 <div class="strategy-pane" id="strategy-tenet">
@@ -2168,8 +2175,15 @@ or one per line" rows="4" style="resize:vertical"></textarea>
   <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
   <div class="card"><div class="card-title">Trade log</div><div id="tenet-bt-log" class="tbl-wrap"></div></div>
 </div>
+<div class="tab-pane" id="tenet-ledger">
+<div class="card"><div class="empty">Every recorded Tenet fill and correction<div style="font-size:10px;margin-top:6px">Built in R3-4.</div></div></div>
+</div>
+<div class="tab-pane" id="tenet-config">
+<div class="card"><div class="empty">Tenet rule settings and the pair builder move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+</div>
 </div>
 <div class="strategy-pane" id="strategy-tax">
+<div class="tab-pane active" id="shared-tax">
 <!-- P13 FIX 19: back row — mobile only -->
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Tax</span></div>
 <div style="font-size:14px;font-weight:800;margin:0 0 6px" id="tax-title">Tax (FIFO — demat rule)</div>
@@ -2230,6 +2244,13 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 </div>
+</div>
+<!-- R3-5 moves the risk and concentration cards in here and retires the Risk rail button. -->
+<div class="strategy-pane" id="strategy-portfolio">
+<div class="tab-pane" id="shared-portfolio">
+<div class="card"><div class="empty">Every engine in one place: totals, split, concentration<div style="font-size:10px;margin-top:6px">Built in R3-5.</div></div></div>
+</div>
+</div>
 <!-- RISK EXPOSURE DASHBOARD (Phase 4) -->
 <div class="strategy-pane" id="strategy-risk">
 <!-- P13 FIX 19: back row — mobile only -->
@@ -2276,6 +2297,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <!-- SETTINGS -->
 <div class="strategy-pane" id="strategy-settings">
+<div class="tab-pane active" id="shared-settings">
 <!-- P13 FIX 19: back row — mobile only -->
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Settings</span></div>
 <div class="two-col">
@@ -2667,6 +2689,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <button class="danger-btn" onclick="factoryReset()">🗑 Purge All Local Data</button>
 <button class="icon-btn" onclick="exportLifoCSV()">⬇ Export LIFO CSV</button>
 <button class="icon-btn" onclick="exportMomCSV()">⬇ Export Momentum CSV</button>
+</div>
 </div>
 </div>
 </div>
@@ -6881,7 +6904,7 @@ function exportLifoCSV(){
 // ── LOOKBACK PRESETS FIX #3/#4 ────────────────────────────────────────────────
 function setLookbackPreset(days,btn){
   document.querySelectorAll('.preset-btn').forEach(b=>{
-    if(b.closest('#mom-signal')) b.classList.remove('active');
+    if(b.closest('#dm-signals')) b.classList.remove('active');
   });
   if(btn) btn.classList.add('active');
   const customEl=document.getElementById('dm-lookback-custom');
@@ -7169,7 +7192,7 @@ function stageMomTrade(etf,action,units,price){
   if(chargesEl)chargesEl.value='0';
   updateMomPreview();
   // Switch to signal tab where form lives and scroll to it
-  switchTab('momentum','mom-signal',null,true);
+  switchTab('momentum','dm-signals',null,true);
   setTimeout(()=>{
     const f=document.getElementById('m-etf');
     if(f)f.scrollIntoView({behavior:'smooth',block:'center'});
@@ -12773,7 +12796,7 @@ function mobileSwitchStrategy(name, btn){
   document.querySelectorAll('.strat-seg-btn').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   // Switch strategy — maps to correct first tab
-  const firstTabs={lifo:'lifo-signal',momentum:'mom-signal',tenet:'tenet-signal'};
+  const firstTabs={lifo:'lifo-signal',momentum:'dm-signals',tenet:'tenet-signal'};
   switchStrategy(name, null);
   // Sync bnav to signals
   document.querySelectorAll('.bnav-item,.bnav-log').forEach(b=>b.classList.remove('active'));
@@ -12851,7 +12874,7 @@ function _buildMoreMenuTabs(){
   const host=document.getElementById('more-menu-tabs');
   if(!host)return;
   const strat=['momentum','tenet'].includes(curStrategy)?curStrategy:'lifo';
-  const list=TABS[strat]||[];
+  const list=navPaneIds(strat).map(id=>{const e=navEntry(id);return{id,label:e?(e.section?e.section.label:e.tab.label):id};});
   const stratName=strat==='momentum'?'Dual Momentum':strat==='tenet'?'Tenet Homa':'LIFO';
   const activeId=_activeTabId||'';
   host.innerHTML=`
@@ -12892,10 +12915,10 @@ function _syncBnav(strategy,tabId){
   document.querySelectorAll('.bnav-item,.bnav-log').forEach(b=>b.classList.remove('active'));
   _bnavStrategy=strategy;
   _activeTabId=tabId;   // P14-E: track active tab so the mobile sheet can highlight it
-  const signalTabs=['lifo-signal','mom-signal'];
-  const portfolioTabs=['lifo-holdings','lifo-poslog','mom-portfolio'];
+  const signalTabs=['lifo-signal','dm-signals'];
+  const portfolioTabs=['lifo-holdings','lifo-poslog','dm-holdings'];
   const researchTabs=['lifo-backtest','lifo-buylogic','lifo-sweep','mom-backtest','mom-rebalance','mom-sweep','mom-datacenter','mom-signallogic','mom-deepanalytics'];
-  const moreTabs=['lifo-ledger','mom-trades','mom-universe','mom-poslog'];
+  const moreTabs=['lifo-ledger','dm-ledger','mom-universe','mom-poslog'];
   if(signalTabs.includes(tabId))document.getElementById('bnav-signals')?.classList.add('active');
   else if(portfolioTabs.includes(tabId))document.getElementById('bnav-portfolio')?.classList.add('active');
   else if(researchTabs.includes(tabId))document.getElementById('bnav-research')?.classList.add('active');
@@ -12963,18 +12986,25 @@ function navEntry(tabId){
   return null;
 }
 // A renderer named by NAV but not written yet is a no-op, not a crash: R3-4..R3-6 add the last few.
+// Every pane this engine owns: its five tabs plus the sections its Research tab activates.
+// switchTab deactivates all of them, so a section pane can never stay visible under another tab.
+function navPaneIds(strategy){
+  const eng=NAV.engines[strategy];if(!eng)return[];
+  const out=[];
+  for(const t of eng.tabs){out.push(t.id);for(const sc of (t.sections||[]))out.push(sc.id);}
+  return[...new Set(out)];
+}
 function navRender(tabId){
   const e=navEntry(tabId);if(!e)return;
   const src=e.section?e.section.render:e.tab.render;
   for(const n of [].concat(src||[]))
     try{if(typeof globalThis[n]==='function')globalThis[n]();}catch(err){console.warn('navRender',n,err);}
 }
-const TABS={
-  lifo:[{id:'lifo-signal',label:'📡 Signal Desk'},{id:'lifo-holdings',label:'💼 Holdings'},{id:'lifo-ledger',label:'📋 Ledger'},{id:'lifo-backtest',label:'🔬 Backtest'},{id:'lifo-buylogic',label:'📊 Buy Logic'},{id:'lifo-poslog',label:'📒 Pos Log'},{id:'lifo-sweep',label:'🔬 Param Sweep'}],
-  tenet:[{id:'tenet-signal',label:'📡 Weekly Signals'},{id:'tenet-holdings',label:'🧩 Holdings & Universe'},{id:'tenet-backtest',label:'🔬 Backtest'}],
-  momentum:[{id:'mom-signal',label:'📡 Signal'},{id:'mom-portfolio',label:'💼 Portfolio'},{id:'mom-trades',label:'📋 Trades'},{id:'mom-backtest',label:'📊 Backtest'},{id:'mom-signallogic',label:'🧭 Signal Logic'},{id:'mom-poslog',label:'📒 Position Log'},{id:'mom-deepanalytics',label:'📈 Analytics'},{id:'mom-rebalance',label:'🔄 Rebalance'},{id:'mom-universe',label:'🗂️ Universe'},{id:'mom-datacenter',label:'💾 Data Center'},{id:'mom-sweep',label:'🔬 Param Sweep'}],
-  tax:[],settings:[],risk:[],watchlist:[],
-};
+// R3-2: TABS is now a VIEW of NAV, not a second list to keep in step with it. switchStrategy,
+// switchTab and the mobile sheet read it; the four non-engine keys have never had tabs.
+const TABS=Object.freeze(Object.assign(
+  {tax:[],settings:[],risk:[],watchlist:[],portfolio:[]},
+  Object.fromEntries(Object.entries(NAV.engines).map(([k,e])=>[k,e.tabs.map(t=>({id:t.id,label:t.label}))]))));
 let curStrategy='lifo';
 
 function switchStrategy(name,btn){
@@ -12998,13 +13028,25 @@ function switchStrategy(name,btn){
   const firstBtn=nav.querySelector('.nav-btn');if(firstBtn)firstBtn.classList.add('active');
 }
 
+// R3-2: a Research tab holds sections, which are existing panes it activates rather than absorbs.
+// The strip is how they stay two taps away once Research is a single tab button.
+function _navRenderSections(strategy,tabId){
+  const host=document.getElementById('nav-sub');if(!host)return;
+  const e=navEntry(tabId),secs=(e&&e.tab&&e.tab.sections)||[];
+  if(secs.length<2){host.innerHTML='';host.style.display='none';return;}
+  const cur=e.section?e.section.id:secs[0].id;
+  host.style.display='';
+  host.innerHTML=secs.map(sc=>`<button class="nav-btn${sc.id===cur?' active':''}" onclick="switchTab('${strategy}','${sc.id}',null,false)">${sc.label}</button>`).join('');
+}
 function switchTab(strategy,tabId,btn,silent=false){
-  const tabs=TABS[strategy]||[];
-  tabs.forEach(t=>document.getElementById(t.id)?.classList.remove('active'));
+  tabId=navResolve(tabId);   // a pre-R3 id still names the screen it always named
+  navPaneIds(strategy).forEach(id=>document.getElementById(id)?.classList.remove('active'));
   document.querySelectorAll('#nav-bar .nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById(tabId)?.classList.add('active');
   if(btn)btn.classList.add('active');
-  else document.querySelectorAll('#nav-bar .nav-btn').forEach(b=>{if(b.getAttribute('onclick')?.includes("'"+tabId+"'"))b.classList.add('active');});
+  else{const _own=(navEntry(tabId)||{}).tab,_want=_own?_own.id:tabId;   // a section highlights its Research tab
+    document.querySelectorAll('#nav-bar .nav-btn').forEach(b=>{if(b.getAttribute('onclick')?.includes("'"+_want+"'"))b.classList.add('active');});}
+  _navRenderSections(strategy,tabId);
   _syncBnav(strategy,tabId);
   if(!silent){
     navRender(tabId);
@@ -14362,7 +14404,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='2b3debb01990a8f9c292b75bf007a62fd4a95eefcf8dd0c470d25efaaedbcd24';
+const APP_SOURCE_SHA256='753d9aa10dff6300c8f50412930f6658563d9509cd20f71112e389c2e79df7b8';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
