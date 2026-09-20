@@ -3121,7 +3121,7 @@ function _renderIntegrityBanner(problems){
 // ── PHASE 3: IndexedDB-backed historical price cache ──────────────────────────
 // Replaces the old localStorage 'bth_*' cache backend. Same cache-key shape
 // (`bth_${yfSym}_${startTs}_${endTs}` → {date: {close,prev,vol,_src}}) is kept,
-// so fetchHistDaily/fetchHistoricalData callers don't need to change their data
+// so fetchHistDaily callers don't need to change their data
 // format — only the storage backend moves off localStorage's 5-10MB sync-blocking
 // cap onto IndexedDB, which is async and effectively uncapped.
 // ── INDEXEDDB — per-bar schema v2 ──────────────────────────────────────────
@@ -4028,7 +4028,7 @@ function renderMarketDataHealth(){
 
 // ── YAHOO CORS-PROXY HELPER ──────────────────────────────────────────────────
 // F-7 FIX: the 4-entry proxy list and the allorigins `{contents:"..."}` unwrap
-// were reimplemented identically in fetchAllPrices and fetchHistoricalData.
+// were reimplemented identically in fetchAllPrices and the history path.
 // Adding or reordering a proxy meant editing both. One definition now.
 const YAHOO_PROXIES=[
   u=>`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
@@ -9177,40 +9177,6 @@ function eod2ShowResultLabel(panelId,label){const host=document.getElementById(p
 let TENET_RUN_PAIRS=null;   // pairs of the running Tenet backtest after research exclusions (null = the configured pairs)
 
 
-// Legacy Yahoo reader: no longer called by any history path (kept inert).
-async function fetchHistoricalData(yfSym,startTs,endTs,ck){
-  const sym=yfSym.replace('.NS','');
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?period1=${startTs}&period2=${endTs}&interval=1d&events=history`;
-  // F-7 FIX: proxy list + unwrap now come from the shared yahooProxyFetch helper
-  {
-    try{
-      const parsed=await yahooProxyFetch(url,12000,sym);
-      const chart=parsed?.chart?.result?.[0];
-      if(!chart){ console.warn(`fetchHistoricalData: no chart data for ${sym}`); return {}; }
-      const q=chart.indicators?.quote?.[0]||{};
-      const adj=chart.indicators?.adjclose?.[0]?.adjclose||[];
-      const ts=chart.timestamp||[],op=q.open||[],hi=q.high||[],lo=q.low||[],cl=q.close||[],vols=q.volume||[];
-      const bars=[];let prev=null;
-      ts.forEach((t,i)=>{
-        if(!cl[i])return;
-        const d=new Date(t*1000+19800000).toISOString().slice(0,10);
-        const b={date:d,open:op[i]||null,high:hi[i]||null,low:lo[i]||null,close:cl[i],adjClose:adj[i]||cl[i],prev,vol:vols[i]||0,src:'yahoo'};
-        if(validateBar(b))bars.push(b);
-        prev=cl[i];
-      });
-      if(bars.length>10){
-        await idbHistPutBars(sym,bars);
-        const data={};
-        bars.forEach(b=>{data[b.date]={open:b.open,high:b.high,low:b.low,close:b.close,adjClose:b.adjClose,prev:b.prev,vol:b.vol,_src:'yahoo'};});
-        return data;
-      }
-    }catch(e){
-      console.warn(`fetchHistoricalData proxy failed for ${sym}:`,e?.message||e);
-    }
-  }
-  console.warn(`fetchHistoricalData: all proxies failed for ${sym}`);
-  return {};
-}
 
 function buildHistIndex(hist){
   return Object.keys(hist)
@@ -14190,7 +14156,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='e874d779a3e925631709f884c1ec2f1c4da702ff42dc13eb26d2c079775b96f1';
+const APP_SOURCE_SHA256='1e553d17fc3dee3e407df11ca634c740c4e31e07dc7314e1c1371d946da6a210';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
