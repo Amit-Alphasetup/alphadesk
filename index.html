@@ -1458,7 +1458,52 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <!-- ── END STEP-7: LIFO HEATMAP ──────────────────────────────────────────── -->
 <!-- ── END STEP-3: LIFO PARAM SWEEP TAB ─────────────────────────────────── -->
 <div class="tab-pane" id="lifo-config">
-<div class="card"><div class="empty">LIFO engine settings move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+<div id="lifo-config-head"></div>
+<div class="card">
+<div class="settings-section-title">LIFO engine</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
+<div class="form-group"><label class="form-label">Slots (divisor)</label><input class="form-input" id="s-slots" type="number"/></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">Avg Fall Trigger %</label><input class="form-input" id="s-avgfall" step="0.1" type="number"/></div>
+<div class="form-group"><label class="form-label">Min Profit ₹</label><input class="form-input" id="s-minprofit" type="number"/></div>
+<!-- Fixed profit target -->
+<div class="form-group"><label class="form-label" title="OFF: target scales down as capital is deployed (6/5/4/3.14%). ON: hold every lot for the full target regardless of deployment.">Fixed Profit Target</label>
+<select class="form-input" id="s-fixedtarget-on">
+<option value="off">Off — dynamic by capital used</option>
+<option value="on">On — fixed % below</option>
+</select>
+</div>
+<div class="form-group"><label class="form-label">Fixed Target %</label><input class="form-input" id="s-fixedtarget-pct" min="0.1" placeholder="8" step="0.1" type="number"/></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">Self Incentive %</label><input class="form-input" id="s-incentive" step="0.1" type="number"/></div>
+<div class="form-group"><label class="form-label">Brokerage per side ₹ <span style="font-size:10px;color:var(--fog)">(flat fee, e.g. ₹20)</span></label><input class="form-input" id="s-brok" max="100" oninput="if(+this.value&gt;100){this.style.borderColor='var(--stop)';this.title='⚠️ Brokerage above ₹100 — check this is flat fee not turnover %'}else{this.style.borderColor='';this.title=''}" placeholder="20" step="0.01" type="number"/></div>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">Buy only on rising day</div><div class="toggle-sub">Daily % change must be positive</div></div>
+<button class="toggle" id="t-buyrise" onclick="this.classList.toggle('on')"></button>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">Trailing sell mode</div><div class="toggle-sub">Hold until price turns negative after target hit</div></div>
+<button class="toggle" id="t-sellfall" onclick="this.classList.toggle('on')"></button>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">52WH Peak Guard</div><div class="toggle-sub">Skip buy if price is within <input class="form-input" id="s-high-guard-pct" max="20" min="1" step="0.5" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="5"/> % of 52W High</div></div>
+<button class="toggle" id="t-high-guard" onclick="this.classList.toggle('on')"></button>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">LIQUIDBEES Idle Parking (LIFO)</div><div class="toggle-sub">Park free slots in LIQUIDBEES at <input class="form-input" id="s-lifo-liquid-rate" max="15" min="1" step="0.1" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="6.5"/> % pa when no buy signal</div></div>
+<button class="toggle" id="t-lifo-liquid-park" onclick="this.classList.toggle('on')"></button>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">Compound Profits (LIFO)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each close</div></div>
+<button class="toggle" id="t-lifo-compound" onclick="this.classList.toggle('on')"></button>
+</div>
+</div>
+<!-- LIFO-CONFIG-BODY -->
+<button class="submit-btn" onclick="saveAllSettings()">💾 Save All Settings</button>
 </div>
 </div><!-- /strategy-lifo -->
 <!-- MOMENTUM STRATEGY -->
@@ -2104,7 +2149,46 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 <div class="tab-pane" id="dm-config">
-<div class="card"><div class="empty">Dual Momentum settings move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+<div id="dm-config-head"></div>
+<div class="card">
+<div class="settings-section-title">📊 Dual Momentum Defaults</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
+<div class="form-group"><label class="form-label">Top N Picks (Slots)</label><input class="form-input" id="s-mom-slots" type="number"/></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">Lookback Days (default 182 = 6M)</label><input class="form-input" id="s-lookback" type="number"/></div>
+<div class="form-group"><label class="form-label">Annual Hurdle % (LIQUIDBEES rate)</label><input class="form-input" id="s-liquid" step="0.1" type="number"/></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">Skim Threshold %</label><input class="form-input" id="s-skim" type="number"/></div>
+<div class="form-group"><label class="form-label">Friction % per side</label><input class="form-input" id="s-friction" step="0.01" type="number"/></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">Drift Alert Threshold (pp)</label><input class="form-input" id="s-dm-drift" placeholder="5" step="0.5" type="number"/></div>
+</div>
+<div class="form-group" style="margin-top:6px">
+<label class="form-label">Live Rebalance Interval (days)</label>
+<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+<button class="preset-btn" id="s-rb-btn-7" onclick="setLiveRebalInterval(7,this)">7D</button>
+<button class="preset-btn" id="s-rb-btn-15" onclick="setLiveRebalInterval(15,this)">15D</button>
+<button class="preset-btn" id="s-rb-btn-30" onclick="setLiveRebalInterval(30,this)">1M</button>
+<button class="preset-btn" id="s-rb-btn-0" onclick="setLiveRebalInterval(0,this)">Custom</button>
+<input class="form-input" id="s-dm-rebal-days" max="365" min="1" oninput="const v=parseInt(this.value);if(v&gt;0){S.config.dmRebalanceDays=v;checkRebalanceBanner();}" style="width:80px" type="number"/>
+</div>
+<div style="font-size:10px;color:var(--fog);margin-top:3px">Controls live rebalance banner trigger + next rebalance date display.</div>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">Nifty 200DMA Filter</div><div class="toggle-sub">All → LIQUIDBEES when Nifty below 200-day MA</div></div>
+<button class="toggle" id="t-dm-nifty" onclick="this.classList.toggle('on')"></button>
+</div>
+<div class="toggle-row">
+<div><div class="toggle-label">Compound Profits (Dual Momentum)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each rebalance close</div></div>
+<button class="toggle" id="t-dm-compound" onclick="this.classList.toggle('on')"></button>
+</div>
+</div>
+<!-- DM-CONFIG-BODY -->
+<button class="submit-btn" onclick="saveAllSettings()">💾 Save All Settings</button>
 </div>
 </div><!-- /strategy-momentum -->
 <!-- TAX OFFICE -->
@@ -2136,7 +2220,27 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <div class="tab-pane" id="tenet-holdings">
   <div class="card"><div class="card-title">Tenet Holdings & Capital Pools</div><div id="tenet-holdings-list"></div></div>
-  <div class="card"><div class="card-title">⚙ Tenet 2.0 Rule Settings</div>
+  
+</div>
+<div class="tab-pane" id="tenet-backtest">
+  <div class="card"><div class="card-title">Tenet Homa 2.0 Backtest</div>
+    <div style="font-size:10px;color:var(--fog);margin-bottom:10px">Canonical simulation: Monday→Friday trading week; weekly entry at the final session CLOSE (the sheet's after-3PM approximation); daily target exits using the day's HIGH at the exact target price; strict LIFO; no stop-loss. Historical point-in-time universe snapshots are used when supplied; otherwise the result is labelled CONFIGURED-UNIVERSE. Partial final weeks are not treated as completed weekly signals.</div>
+    <div class="form-row"><div class="form-group"><label class="form-label">From</label><input class="form-input" type="date" id="tenet-bt-from"></div><div class="form-group"><label class="form-label">To</label><input class="form-input" type="date" id="tenet-bt-to"></div><div class="form-group"><label class="form-label">Allocated capital</label><input class="form-input" type="number" id="tenet-bt-cap" value="500000"></div><button class="action-btn azure-btn" onclick="runTenetBacktestV3()">▶ Run Tenet 2.0</button></div>
+    <div class="form-row"><button class="action-btn" id="tenet-probe-btn" onclick="tenetRunCoverageProbe()" title="Checks whether the >=5y / >=2y-holdout edge gate is even reachable with your instruments' listing history">◎ Run Coverage Probe</button></div>
+    <div class="form-row"><button class="action-btn" onclick="eod2VerifyAllUI()" title="Fetch and SHA-verify every file in the certified EOD2 export">✔ Verify EOD2 dataset</button></div>
+    <div id="tenet-probe-out" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
+    <div class="form-row" style="align-items:center"><label style="display:flex;align-items:center;gap:6px;font-size:11px"><input type="checkbox" id="tenet-bt-conservative" checked> Conservative exits — at most one lot per ETF per session (a single daily HIGH cannot prove several stacked targets filled in sequence)</label></div>
+    <div id="tenet-bt-evidence" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
+    <div class="form-row"><button class="action-btn sm" id="tenet-bt-export" onclick="exportTenetBtCSV()">⬇ Export CSV</button></div>
+    <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
+  </div>
+  <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
+  <div class="card"><div class="card-title">Trade log</div><div id="tenet-bt-log" class="tbl-wrap"></div></div>
+</div>
+<div class="tab-pane" id="tenet-ledger"></div>
+<div class="tab-pane" id="tenet-config">
+<div id="tenet-config-head"></div>
+<div class="card"><div class="card-title">⚙ Tenet 2.0 Rule Settings</div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">First target %</label><input class="form-input" id="tenet-cfg-target" type="number" step="0.01" value="3.14"></div>
       <div class="form-group"><label class="form-label">Target step % / extra lot</label><input class="form-input" id="tenet-cfg-step" type="number" step="0.01" value="1.5"></div>
@@ -2158,26 +2262,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
     </div>
     <div id="tenet-pair-validation" style="font-size:10px;color:var(--fog);margin:8px 0"></div>
     <div id="tenet-pair-list"></div>
-  </div>
-</div>
-<div class="tab-pane" id="tenet-backtest">
-  <div class="card"><div class="card-title">Tenet Homa 2.0 Backtest</div>
-    <div style="font-size:10px;color:var(--fog);margin-bottom:10px">Canonical simulation: Monday→Friday trading week; weekly entry at the final session CLOSE (the sheet's after-3PM approximation); daily target exits using the day's HIGH at the exact target price; strict LIFO; no stop-loss. Historical point-in-time universe snapshots are used when supplied; otherwise the result is labelled CONFIGURED-UNIVERSE. Partial final weeks are not treated as completed weekly signals.</div>
-    <div class="form-row"><div class="form-group"><label class="form-label">From</label><input class="form-input" type="date" id="tenet-bt-from"></div><div class="form-group"><label class="form-label">To</label><input class="form-input" type="date" id="tenet-bt-to"></div><div class="form-group"><label class="form-label">Allocated capital</label><input class="form-input" type="number" id="tenet-bt-cap" value="500000"></div><button class="action-btn azure-btn" onclick="runTenetBacktestV3()">▶ Run Tenet 2.0</button></div>
-    <div class="form-row"><button class="action-btn" id="tenet-probe-btn" onclick="tenetRunCoverageProbe()" title="Checks whether the >=5y / >=2y-holdout edge gate is even reachable with your instruments' listing history">◎ Run Coverage Probe</button></div>
-    <div class="form-row"><button class="action-btn" onclick="eod2VerifyAllUI()" title="Fetch and SHA-verify every file in the certified EOD2 export">✔ Verify EOD2 dataset</button></div>
-    <div id="tenet-probe-out" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
-    <div class="form-row" style="align-items:center"><label style="display:flex;align-items:center;gap:6px;font-size:11px"><input type="checkbox" id="tenet-bt-conservative" checked> Conservative exits — at most one lot per ETF per session (a single daily HIGH cannot prove several stacked targets filled in sequence)</label></div>
-    <div id="tenet-bt-evidence" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
-    <div class="form-row"><button class="action-btn sm" id="tenet-bt-export" onclick="exportTenetBtCSV()">⬇ Export CSV</button></div>
-    <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
-  </div>
-  <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
-  <div class="card"><div class="card-title">Trade log</div><div id="tenet-bt-log" class="tbl-wrap"></div></div>
-</div>
-<div class="tab-pane" id="tenet-ledger"></div>
-<div class="tab-pane" id="tenet-config">
-<div class="card"><div class="empty">Tenet rule settings and the pair builder move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
+  </div><!-- TENET-CONFIG-BODY -->
 </div>
 </div>
 <div class="strategy-pane" id="strategy-tax">
@@ -2248,6 +2333,18 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="tab-pane" id="shared-portfolio">
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Portfolio</span></div>
 <div class="stat-grid" id="pf-totals"></div>
+<div class="card">
+<div class="settings-section-title">💰 Capital Allocation</div>
+<div class="form-row">
+<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital" oninput="updateCapitalPreview()" type="number"/></div>
+<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital" oninput="updateCapitalPreview()" type="number"/></div>
+</div>
+<div id="s-split-bar" style="height:8px;border-radius:4px;overflow:hidden;display:flex;margin-bottom:10px;border:1px solid var(--wire)">
+<div id="s-split-lifo" style="background:var(--azure);transition:width .2s"></div>
+<div id="s-split-dm" style="background:var(--violet);flex:1"></div>
+</div>
+<div style="font-size:11px;color:var(--fog)">Total: <b id="s-capital-total" style="color:var(--paper);font-variant-numeric:tabular-nums">—</b> · <span id="s-split-label">—</span></div>
+</div>
 <div class="card" style="margin-bottom:14px">
 <div class="card-title" style="margin-bottom:6px">By engine <span style="font-size:10px;color:var(--fog)">units and market value in each engine's own book</span></div>
 <div id="pf-by-engine"></div>
@@ -2522,18 +2619,6 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <div>
 <div class="card">
-<div class="settings-section-title">💰 Capital Allocation</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital" oninput="updateCapitalPreview()" type="number"/></div>
-<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital" oninput="updateCapitalPreview()" type="number"/></div>
-</div>
-<div id="s-split-bar" style="height:8px;border-radius:4px;overflow:hidden;display:flex;margin-bottom:10px;border:1px solid var(--wire)">
-<div id="s-split-lifo" style="background:var(--azure);transition:width .2s"></div>
-<div id="s-split-dm" style="background:var(--violet);flex:1"></div>
-</div>
-<div style="font-size:11px;color:var(--fog)">Total: <b id="s-capital-total" style="color:var(--paper);font-variant-numeric:tabular-nums">—</b> · <span id="s-split-label">—</span></div>
-</div>
-<div class="card">
 <div class="settings-section-title">🛡️ Risk &amp; Execution</div>
 <div class="form-row">
 <div class="form-group"><label class="form-label">Slippage % per side</label><input class="form-input" id="s-slippage" min="0" step="0.01" type="number"/></div>
@@ -2552,86 +2637,6 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <option value="raw">Raw MIN — matches sheet exactly</option>
 </select>
 </div>
-</div>
-</div>
-<div class="card">
-<div class="settings-section-title">LIFO engine</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
-<div class="form-group"><label class="form-label">Slots (divisor)</label><input class="form-input" id="s-slots" type="number"/></div>
-</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">Avg Fall Trigger %</label><input class="form-input" id="s-avgfall" step="0.1" type="number"/></div>
-<div class="form-group"><label class="form-label">Min Profit ₹</label><input class="form-input" id="s-minprofit" type="number"/></div>
-<!-- Fixed profit target -->
-<div class="form-group"><label class="form-label" title="OFF: target scales down as capital is deployed (6/5/4/3.14%). ON: hold every lot for the full target regardless of deployment.">Fixed Profit Target</label>
-<select class="form-input" id="s-fixedtarget-on">
-<option value="off">Off — dynamic by capital used</option>
-<option value="on">On — fixed % below</option>
-</select>
-</div>
-<div class="form-group"><label class="form-label">Fixed Target %</label><input class="form-input" id="s-fixedtarget-pct" min="0.1" placeholder="8" step="0.1" type="number"/></div>
-</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">Self Incentive %</label><input class="form-input" id="s-incentive" step="0.1" type="number"/></div>
-<div class="form-group"><label class="form-label">Brokerage per side ₹ <span style="font-size:10px;color:var(--fog)">(flat fee, e.g. ₹20)</span></label><input class="form-input" id="s-brok" max="100" oninput="if(+this.value&gt;100){this.style.borderColor='var(--stop)';this.title='⚠️ Brokerage above ₹100 — check this is flat fee not turnover %'}else{this.style.borderColor='';this.title=''}" placeholder="20" step="0.01" type="number"/></div>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">Buy only on rising day</div><div class="toggle-sub">Daily % change must be positive</div></div>
-<button class="toggle" id="t-buyrise" onclick="this.classList.toggle('on')"></button>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">Trailing sell mode</div><div class="toggle-sub">Hold until price turns negative after target hit</div></div>
-<button class="toggle" id="t-sellfall" onclick="this.classList.toggle('on')"></button>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">52WH Peak Guard</div><div class="toggle-sub">Skip buy if price is within <input class="form-input" id="s-high-guard-pct" max="20" min="1" step="0.5" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="5"/> % of 52W High</div></div>
-<button class="toggle" id="t-high-guard" onclick="this.classList.toggle('on')"></button>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">LIQUIDBEES Idle Parking (LIFO)</div><div class="toggle-sub">Park free slots in LIQUIDBEES at <input class="form-input" id="s-lifo-liquid-rate" max="15" min="1" step="0.1" style="width:56px;display:inline-block;padding:2px 6px" type="number" value="6.5"/> % pa when no buy signal</div></div>
-<button class="toggle" id="t-lifo-liquid-park" onclick="this.classList.toggle('on')"></button>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">Compound Profits (LIFO)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each close</div></div>
-<button class="toggle" id="t-lifo-compound" onclick="this.classList.toggle('on')"></button>
-</div>
-</div>
-<div class="card">
-<div class="settings-section-title">📊 Dual Momentum Defaults</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
-<div class="form-group"><label class="form-label">Top N Picks (Slots)</label><input class="form-input" id="s-mom-slots" type="number"/></div>
-</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">Lookback Days (default 182 = 6M)</label><input class="form-input" id="s-lookback" type="number"/></div>
-<div class="form-group"><label class="form-label">Annual Hurdle % (LIQUIDBEES rate)</label><input class="form-input" id="s-liquid" step="0.1" type="number"/></div>
-</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">Skim Threshold %</label><input class="form-input" id="s-skim" type="number"/></div>
-<div class="form-group"><label class="form-label">Friction % per side</label><input class="form-input" id="s-friction" step="0.01" type="number"/></div>
-</div>
-<div class="form-row">
-<div class="form-group"><label class="form-label">Drift Alert Threshold (pp)</label><input class="form-input" id="s-dm-drift" placeholder="5" step="0.5" type="number"/></div>
-</div>
-<div class="form-group" style="margin-top:6px">
-<label class="form-label">Live Rebalance Interval (days)</label>
-<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-<button class="preset-btn" id="s-rb-btn-7" onclick="setLiveRebalInterval(7,this)">7D</button>
-<button class="preset-btn" id="s-rb-btn-15" onclick="setLiveRebalInterval(15,this)">15D</button>
-<button class="preset-btn" id="s-rb-btn-30" onclick="setLiveRebalInterval(30,this)">1M</button>
-<button class="preset-btn" id="s-rb-btn-0" onclick="setLiveRebalInterval(0,this)">Custom</button>
-<input class="form-input" id="s-dm-rebal-days" max="365" min="1" oninput="const v=parseInt(this.value);if(v&gt;0){S.config.dmRebalanceDays=v;checkRebalanceBanner();}" style="width:80px" type="number"/>
-</div>
-<div style="font-size:10px;color:var(--fog);margin-top:3px">Controls live rebalance banner trigger + next rebalance date display.</div>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">Nifty 200DMA Filter</div><div class="toggle-sub">All → LIQUIDBEES when Nifty below 200-day MA</div></div>
-<button class="toggle" id="t-dm-nifty" onclick="this.classList.toggle('on')"></button>
-</div>
-<div class="toggle-row">
-<div><div class="toggle-label">Compound Profits (Dual Momentum)</div><div class="toggle-sub">Add net profit ÷ slots to slot size on each rebalance close</div></div>
-<button class="toggle" id="t-dm-compound" onclick="this.classList.toggle('on')"></button>
 </div>
 </div>
 <button class="submit-btn" onclick="saveAllSettings()">💾 Save All Settings</button>
@@ -10595,6 +10600,25 @@ function renderPortfolioScreen(){
   try{renderRiskDashboard();}catch(e){}
   try{Promise.resolve(renderBenchmarkCard()).catch(()=>{});}catch(e){}
 }
+// ── PER-ENGINE CONFIG (R3-6) ────────────────────────────────────────────────────────────────────
+// The fields themselves are static HTML that moved into each engine's Config pane, keeping their
+// ids. This renders the band above them and refreshes their values from S.config.
+const ENGINE_CONFIG_PANES=Object.freeze({
+  lifo:    {pane:'lifo-config', label:'LIFO',           note:'Slot sizing, averaging triggers and exit rules for the LIFO engine.'},
+  momentum:{pane:'dm-config',   label:'Dual Momentum',  note:'Lookback, hurdle, skim and rebalance rules for the DM engine.'},
+  tenet:   {pane:'tenet-config',label:'Tenet Homa',     note:'The weekly rule set, and the index → GREEN/RED pair list the engine trades.'}
+});
+function renderEngineConfig(strategy){
+  const meta=ENGINE_CONFIG_PANES[strategy||curStrategy];if(!meta)return;
+  const head=document.getElementById(meta.pane+'-head');
+  if(head)head.innerHTML=`<div class="card" style="margin-bottom:14px">
+    <div class="card-title">⚙ ${escapeHtml(meta.label)} — Config</div>
+    <div style="font-size:11px;color:var(--fog);line-height:1.6">${escapeHtml(meta.note)}
+      Capital is split between the engines in <b>Portfolio</b>; execution assumptions every engine shares — slippage, minimum volume, the 52-week-low method — stay in <b>Settings</b>.</div>
+  </div>`;
+  try{syncSettingsUI();}catch(e){}
+  if((strategy||curStrategy)==='tenet'){try{tenetRenderPairList();}catch(e){}try{tenetPopulatePairBuilder();}catch(e){}}
+}
 function renderRiskDashboard(){
   const zone=document.getElementById('risk-stat-bar');
   if(!zone)return; // pane not in DOM yet
@@ -14508,7 +14532,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='ae043a0e3df0026dfe5169e08c95f7d5ebcf3d6d1287f7df344cbdb841c020ff';
+const APP_SOURCE_SHA256='e1a52b89b6d38fee0b3c2d90b6900c0825c7c960876321a4078bbdd96da5e4b9';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
