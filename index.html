@@ -893,7 +893,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="conn-pill" id="pill-sb"><div class="conn-dot"></div>SB</div>
 <div class="conn-pill live" id="pill-price"><div class="conn-dot"></div><span id="price-src">PRICE</span></div>
 <button class="tb-icon-btn" onclick="switchStrategy('tax',null)" title="Tax">🧾</button>
-<button class="tb-icon-btn" onclick="switchStrategy('risk',null)" title="Risk">📐</button>
+<button class="tb-icon-btn" onclick="switchStrategy('portfolio',null)" title="Portfolio">💼</button>
 <button class="tb-icon-btn" onclick="switchStrategy('watchlist',null)" title="Watchlist">👁</button>
 <button class="tb-icon-btn" onclick="switchStrategy('settings',null)" title="Settings">⚙️</button>
 <button id="refresh-btn" onclick="fetchAllPrices()">⟳ Refresh</button>
@@ -909,7 +909,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('tax',this)">🧾 Tax</button>
 <div class="strat-divider"></div>
-<button class="strat-btn" onclick="switchStrategy('risk',this)">📐 Risk</button>
+<button class="strat-btn" onclick="switchStrategy('portfolio',this)">💼 Portfolio</button>
 <div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('watchlist',this)">👁 Watchlist</button>
 <div class="strat-divider"></div>
@@ -2243,16 +2243,19 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 </div>
-<!-- R3-5 moves the risk and concentration cards in here and retires the Risk rail button. -->
+<!-- PORTFOLIO — every engine in one place (R3-5). The four cards below came from the Risk pane. -->
 <div class="strategy-pane" id="strategy-portfolio">
 <div class="tab-pane" id="shared-portfolio">
-<div class="card"><div class="empty">Every engine in one place: totals, split, concentration<div style="font-size:10px;margin-top:6px">Built in R3-5.</div></div></div>
+<div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Portfolio</span></div>
+<div class="stat-grid" id="pf-totals"></div>
+<div class="card" style="margin-bottom:14px">
+<div class="card-title" style="margin-bottom:6px">By engine <span style="font-size:10px;color:var(--fog)">units and market value in each engine's own book</span></div>
+<div id="pf-by-engine"></div>
 </div>
+<div class="card" style="margin-bottom:14px">
+<div class="card-title" style="margin-bottom:6px">By ETF <span style="font-size:10px;color:var(--fog)">units consolidated across every engine — what your broker should show</span></div>
+<div id="pf-by-etf"></div>
 </div>
-<!-- RISK EXPOSURE DASHBOARD (Phase 4) -->
-<div class="strategy-pane" id="strategy-risk">
-<!-- P13 FIX 19: back row — mobile only -->
-<div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Risk</span></div>
 <div class="stat-grid" id="risk-stat-bar"></div>
 <div class="card" style="margin-bottom:14px">
 <div class="card-title" style="margin-bottom:6px">Strategy Split <span style="font-size:10px;color:var(--fog)">market value, LIFO vs Dual Momentum</span></div>
@@ -2269,6 +2272,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="card">
 <div class="card-title" style="margin-bottom:6px">Live Benchmark <span style="font-size:10px;color:var(--fog)">portfolio vs NIFTYBEES buy &amp; hold, since your first trade</span></div>
 <div id="risk-benchmark"></div>
+</div>
 </div>
 </div>
 <!-- WATCHLIST (Phase 4) -->
@@ -10536,6 +10540,61 @@ function _riskCategorize(name){
   return'Other';
 }
 
+// ── PORTFOLIO (R3-5) ────────────────────────────────────────────────────────────────────────────
+// Every engine in one place. Units come from openUnitsByEngine, which already applies corporate
+// actions, so a split shows the units you actually hold rather than the ones you originally bought.
+function portfolioSnapshot(){
+  const rows=holdingsByEtf(S,HOLDINGS_BROKER_QTY);
+  const mark=sym=>{
+    const p=+((PRICES[sym]||{}).cmp)||0;if(p>0)return p;
+    const m=+(((S.momPrices||{})[sym]||{}).current)||0;return m>0?m:0;
+  };
+  const byEngine={};let total=0,priced=0;
+  for(const r of rows){
+    r.mark=mark(r.sym);r.value=r.mark*r.total;total+=r.value;if(r.mark>0)priced++;
+    for(const [eng,u] of Object.entries(r.byEngine)){
+      const b=byEngine[eng]||(byEngine[eng]={units:0,value:0,symbols:0});
+      b.units+=u;b.value+=u*r.mark;b.symbols++;
+    }
+  }
+  return{rows,byEngine,total,priced};
+}
+function renderPortfolioScreen(){
+  const host=document.getElementById('shared-portfolio');if(!host)return;
+  const {rows,byEngine,total,priced}=portfolioSnapshot();
+  const money=v=>typeof fmtINR==='function'?fmtINR(v):String(Math.round(v));
+  const label={LIFO:'LIFO',DM:'DM',TENET:'Tenet'};
+  const totals=document.getElementById('pf-totals');
+  if(totals)totals.innerHTML=`
+    <div class="stat-card azure"><div class="stat-label">Market value</div><div class="stat-val azure">${money(total)}</div></div>
+    <div class="stat-card"><div class="stat-label">ETFs held</div><div class="stat-val">${rows.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Engines in use</div><div class="stat-val">${Object.keys(byEngine).length}</div></div>
+    <div class="stat-card"><div class="stat-label">Priced</div><div class="stat-val${priced<rows.length?' bad':''}">${priced}/${rows.length}</div></div>`;
+
+  const eng=document.getElementById('pf-by-engine');
+  if(eng)eng.innerHTML=rows.length?`<div class="tbl-wrap"><table><thead><tr>
+      <th>Engine</th><th>ETFs</th><th>Units</th><th>Market value</th><th>Share</th></tr></thead><tbody>
+      ${(typeof ENGINES!=='undefined'?ENGINES:['LIFO','DM','TENET']).map(k=>{
+        const b=byEngine[k]||{units:0,value:0,symbols:0};
+        const pct=total>0?(b.value/total*100):0;
+        return `<tr><td style="font-weight:800">${label[k]||k}</td><td>${b.symbols}</td><td>${(+b.units.toFixed(4))}</td><td>${money(b.value)}</td><td>${pct.toFixed(1)}%</td></tr>`;
+      }).join('')}</tbody></table></div>`
+    :'<div class="empty">No open units in any engine yet.</div>';
+
+  const etf=document.getElementById('pf-by-etf');
+  if(etf)etf.innerHTML=rows.length?`<div class="tbl-wrap"><table><thead><tr>
+      <th>ETF</th><th>Total units</th><th>Per engine</th><th>Price</th><th>Market value</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr>
+        <td>${escapeHtml(r.sym)}</td>
+        <td style="font-weight:800">${(+r.total.toFixed(4))}</td>
+        <td style="font-size:10px;color:var(--fog)">${Object.entries(r.byEngine).map(([k,u])=>`${label[k]||k} ${+u.toFixed(4)}`).join(' · ')}</td>
+        <td>${r.mark>0?r.mark.toFixed(2):'—'}</td>
+        <td>${r.mark>0?money(r.value):'—'}</td></tr>`).join('')}</tbody></table></div>`
+    :'<div class="empty">Nothing held yet.</div>';
+
+  try{renderRiskDashboard();}catch(e){}
+  try{Promise.resolve(renderBenchmarkCard()).catch(()=>{});}catch(e){}
+}
 function renderRiskDashboard(){
   const zone=document.getElementById('risk-stat-bar');
   if(!zone)return; // pane not in DOM yet
@@ -12955,7 +13014,7 @@ function _closeMoreMenu(){
 // P13 FIX 20: grey strat pill when on non-strategy panes (Tax/Risk/Watchlist/Settings)
 // so user knows the LIFO/DM switcher won't do anything useful there
 function _updateStratPillState(strategy){
-  const nonStrat=['tax','risk','watchlist','settings'];
+  const nonStrat=['tax','portfolio','watchlist','settings'];
   const isNonStrat=nonStrat.includes(strategy);
   document.querySelectorAll('.strat-seg-btn').forEach(btn=>{
     btn.classList.toggle('greyed',isNonStrat);
@@ -13052,6 +13111,7 @@ const TABS=Object.freeze(Object.assign(
 let curStrategy='lifo';
 
 function switchStrategy(name,btn){
+  if(name==='risk')name='portfolio';   // R3-5: Risk became a band inside Portfolio; the old name still answers
   document.querySelectorAll('.strategy-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.strat-btn').forEach(b=>b.classList.remove('active'));
   const pane=document.getElementById('strategy-'+name);
@@ -13064,7 +13124,7 @@ function switchStrategy(name,btn){
   _closeMoreMenu(); // close more menu if open
   const nav=document.getElementById('nav-bar');
   const tabs=TABS[name]||[];
-  if(!tabs.length){nav.innerHTML='';if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='risk'){renderRiskDashboard();renderBenchmarkCard();}if(name==='watchlist')renderWatchlist();return;}
+  if(!tabs.length){nav.innerHTML='';if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='portfolio')renderPortfolioScreen();if(name==='watchlist')renderWatchlist();return;}
   nav.innerHTML=tabs.map(t=>`<button class="nav-btn" onclick="switchTab('${name}','${t.id}',this)">${t.label}</button>`).join('');
   if(tabs.length)switchTab(name,tabs[0].id,null,true);
   if(name==='tenet'){try{tenetInitBacktestDates();}catch(e){}}      // A4-5 (F25): silent tab switches skipped the date init
@@ -14448,7 +14508,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='70ab7e278081e87514f6bd9422c1d2ac0331d5f7c37405a20ffc0b6ab2f359f7';
+const APP_SOURCE_SHA256='ae043a0e3df0026dfe5169e08c95f7d5ebcf3d6d1287f7df344cbdb841c020ff';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -16602,7 +16662,7 @@ function initDataCenterPatch(){
 // modals/overlays. Ignored while typing in an input/textarea/select.
 function initKeyboardShortcuts(){
   let gPending=false, gTimer=null;
-  const jumpMap={l:'lifo',d:'momentum',t:'tax',r:'risk',w:'watchlist',s:'settings'};
+  const jumpMap={l:'lifo',d:'momentum',t:'tax',r:'portfolio',w:'watchlist',s:'settings'};
   document.addEventListener('keydown',(e)=>{
     const tag=(e.target.tagName||'').toLowerCase();
     if(tag==='input'||tag==='textarea'||tag==='select'||e.target.isContentEditable) return;
@@ -16732,7 +16792,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--fog);padding:4px 8px 6px">Sections</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('tax',null)"><span style="font-size:18px">🧾</span><span>Tax</span></button>
-<button class="mm-item" onclick="_closeMoreMenu();switchStrategy('risk',null)"><span style="font-size:18px">📐</span><span>Risk</span></button>
+<button class="mm-item" onclick="_closeMoreMenu();switchStrategy('portfolio',null)"><span style="font-size:18px">💼</span><span>Portfolio</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('watchlist',null)"><span style="font-size:18px">👁</span><span>Watchlist</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('settings',null)"><span style="font-size:18px">⚙️</span><span>Settings</span></button>
 </div>
