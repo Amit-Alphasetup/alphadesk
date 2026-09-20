@@ -12780,13 +12780,21 @@ async function runTenetBacktestV3(inputsArg){
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
 // ── BOTTOM NAV (mobile) ──────────────────────────────────────────────────────
 // Maps mobile bottom-nav items to strategy+tab combinations
-const BNAV_MAP = {
-  signals:   {strategy:'lifo',   tab:'lifo-signal'},
-  portfolio: {strategy:'lifo',   tab:'lifo-holdings'},
-  log:       {strategy:'lifo',   tab:'lifo-signal'},   // scroll to log form
-  research:  {strategy:'lifo',   tab:'lifo-backtest'},
-  more:      {strategy:'lifo',   tab:'lifo-ledger'},
-};
+// R3-3: which screen a bottom-bar item means depends on the engine you are in, and that is the one
+// thing the old BNAV_MAP could not express - it named LIFO screens and nothing else.
+const _BNAV_TAB_KEY=Object.freeze({signals:'signals',portfolio:'holdings',holdings:'holdings',ledger:'ledger',research:'research',config:'config'});
+const _BNAV_OF_TAB_KEY=Object.freeze({signals:'signals',holdings:'portfolio',ledger:'more',research:'research',config:'more'});
+function bnavTarget(item,strategy){
+  const eng=NAV.engines[strategy]||NAV.engines.lifo;
+  const key=_BNAV_TAB_KEY[String(item||'').toLowerCase()];
+  const tab=key&&eng.tabs.find(t=>t.key===key);
+  return tab?tab.id:eng.tabs[0].id;
+}
+function bnavItemFor(tabId){
+  const e=navEntry(tabId);if(!e)return'signals';
+  if(e.tab&&e.tab.key)return _BNAV_OF_TAB_KEY[e.tab.key]||'more';
+  return (e.tab&&e.tab.bnav)||'more';
+}
 let _bnavStrategy = 'lifo'; // track which strategy bottom nav is on
 let _activeTabId='';   // P14-E: currently visible sub-tab id
 
@@ -12842,27 +12850,15 @@ function bnav(item){
     } else {
       const el=document.getElementById('f-price');
       if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
-      switchTab('lifo','lifo-signal',null,true);
+      switchTab('lifo',bnavTarget('signals','lifo'),null,true);
     }
     return;
   }
 
-  // For 'portfolio' — show holdings/positions for current strategy
-  if(item==='portfolio'){
-    const tab=curStrategy==='momentum'?'mom-portfolio':'lifo-holdings';
-    switchTab(curStrategy,tab);
-    return;
-  }
-  // For 'research' — show backtest for current strategy
-  if(item==='research'){
-    const tab=curStrategy==='momentum'?'mom-backtest':'lifo-backtest';
-    switchTab(curStrategy,tab);
-    return;
-  }
-  // For 'signals' — show signal desk for current strategy
-  if(item==='signals'){
-    const tab=curStrategy==='momentum'?'mom-signal':'lifo-signal';
-    switchTab(curStrategy,tab);
+  // Every remaining item means "this engine's <something>", and NAV knows which screen that is.
+  // Tapping one never changes which engine you are in.
+  if(_BNAV_TAB_KEY[item]){
+    switchTab(curStrategy,bnavTarget(item,curStrategy));
     return;
   }
 }
@@ -12915,15 +12911,7 @@ function _syncBnav(strategy,tabId){
   document.querySelectorAll('.bnav-item,.bnav-log').forEach(b=>b.classList.remove('active'));
   _bnavStrategy=strategy;
   _activeTabId=tabId;   // P14-E: track active tab so the mobile sheet can highlight it
-  const signalTabs=['lifo-signal','dm-signals'];
-  const portfolioTabs=['lifo-holdings','lifo-poslog','dm-holdings'];
-  const researchTabs=['lifo-backtest','lifo-buylogic','lifo-sweep','mom-backtest','mom-rebalance','mom-sweep','mom-datacenter','mom-signallogic','mom-deepanalytics'];
-  const moreTabs=['lifo-ledger','dm-ledger','mom-universe','mom-poslog'];
-  if(signalTabs.includes(tabId))document.getElementById('bnav-signals')?.classList.add('active');
-  else if(portfolioTabs.includes(tabId))document.getElementById('bnav-portfolio')?.classList.add('active');
-  else if(researchTabs.includes(tabId))document.getElementById('bnav-research')?.classList.add('active');
-  else if(moreTabs.includes(tabId))document.getElementById('bnav-more')?.classList.add('active');
-  else document.getElementById('bnav-signals')?.classList.add('active');
+  document.getElementById('bnav-'+bnavItemFor(tabId))?.classList.add('active');
 }
 
 // ── R3: NAVIGATION MODEL ────────────────────────────────────────────────────────────────────────
@@ -12963,11 +12951,11 @@ const NAV=Object.freeze({
         {id:'tenet-backtest',label:'Backtest',render:'tenetInitBacktestDates'}]},
       {key:'config',   id:'tenet-config',   label:'⚙ Config',    render:'renderEngineConfig'}]}},
   shared:{
-    portfolio:{id:'shared-portfolio',label:'Portfolio',render:'renderPortfolioScreen'},
-    universe: {id:'mom-universe',    label:'Universe', render:'renderUniverse'},
-    data:     {id:'mom-datacenter',  label:'Data',     render:'dcUpdateCacheSummary'},
-    tax:      {id:'shared-tax',      label:'Tax',      render:'renderTaxScreen'},
-    settings: {id:'shared-settings', label:'Settings', render:'renderSettingsScreen'}}
+    portfolio:{id:'shared-portfolio',label:'Portfolio',render:'renderPortfolioScreen',bnav:'portfolio'},
+    universe: {id:'mom-universe',    label:'Universe', render:'renderUniverse',       bnav:'more'},
+    data:     {id:'mom-datacenter',  label:'Data',     render:'dcUpdateCacheSummary', bnav:'research'},
+    tax:      {id:'shared-tax',      label:'Tax',      render:'renderTax',            bnav:'more'},
+    settings: {id:'shared-settings', label:'Settings', render:null,                   bnav:'more'}}
 });
 // Every pre-R3 tab id keeps working FOREVER, not just through the transition: a persisted last tab,
 // a bookmark, or an old test may still name one. Ids not listed here already are their own answer.
@@ -14404,7 +14392,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='753d9aa10dff6300c8f50412930f6658563d9509cd20f71112e389c2e79df7b8';
+const APP_SOURCE_SHA256='f9bcd495bc73b0fde6e9831fde19b96f9ba4304d623d227879569d4584410ccb';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
