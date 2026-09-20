@@ -2811,10 +2811,58 @@ function buildDefaultUniverse(){
   return [...map.values()];
 }
 
+// ── R2: INSTRUMENT REGISTRY + PER-ENGINE UNIVERSES ──────────────────────────────────────────────
+// Facts about an ETF live once, in S.instruments. Which ETFs an engine may trade lives in
+// S.engineUniverse, one independent list per engine, so changing one engine never touches another.
+// TENET has no stored list: its universe is derived from S.tenet.pairs, which is its only authority.
+// S.universe is a DERIVED VIEW regenerated here. It stays a plain writable array because the frozen
+// engine binders assign to it to inject determinism snapshots (A4-7).
+function instrumentFacts(sym){const k=String(sym||'').toUpperCase();return (S.instruments||[]).find(e=>e&&String(e.sym||'').toUpperCase()===k)||null;}
+function instrumentSymbols(){return (S.instruments||[]).map(e=>e&&e.sym).filter(Boolean);}
+function tenetUniverseSymbols(){
+  const out=new Set();
+  ((S.tenet&&S.tenet.pairs)||[]).forEach(p=>{if(!p)return;[p.green,p.red].forEach(x=>{const v=sanSym(x);if(v)out.add(v);});});
+  return [...out];
+}
+function engineList(engine){
+  const eng=String(engine||'').toUpperCase();
+  if(eng==='TENET')return tenetUniverseSymbols();
+  const l=(S.engineUniverse&&S.engineUniverse[eng])||[];
+  return Array.isArray(l)?l.slice():[];
+}
+function engineHas(engine,sym){const k=String(sym||'').toUpperCase();return engineList(engine).some(x=>String(x).toUpperCase()===k);}
+function enginesOf(sym){return ENGINES.filter(e=>engineHas(e,sym));}
+// Fills the registry from an old-shape universe array (tag/engines rows). Used by migration and defaults.
+function universeToRegistry(rows){
+  const inst=[],eu={LIFO:[],DM:[]};
+  (rows||[]).forEach(e=>{
+    if(!e||typeof e!=='object'||!e.sym)return;
+    const {tag:_tg,engines:_en,...rest}=e;   // membership is not a fact about the instrument
+    inst.push({...rest,sym:e.sym,name:e.name||e.sym,yf:e.yf||e.sym+'.NS',assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||''});
+    const en=Array.isArray(e.engines)?e.engines:(e.tag==='both'?['LIFO','DM']:e.tag==='lifo'?['LIFO']:e.tag==='momentum'?['DM']:[]);
+    if(en.includes('LIFO'))eu.LIFO.push(e.sym);
+    if(en.includes('DM'))eu.DM.push(e.sym);
+  });
+  S.instruments=inst;S.engineUniverse=eu;
+  return{instruments:inst,engineUniverse:eu};
+}
 function rebuildUniverses(){
-  if(!Array.isArray(S.universe)) S.universe=buildDefaultUniverse();
-  LIFO_ETF_UNIVERSE=S.universe.filter(e=>e.tag==='lifo'||e.tag==='both')
-    .map(e=>({sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,assetClass:e.assetClass||'equity'}));
+  // Legacy bridge: code and tests written before R2 stage rows on S.universe and then call this.
+  // They are adopted ONLY while the registry has nothing in it. Nothing else seeds the registry:
+  // a universe that was deliberately emptied - Clear universe, or removing the last instrument -
+  // must stay empty, and the defaults are applied by loadState exactly as they were before R2.
+  if(!Array.isArray(S.instruments))S.instruments=[];
+  if(!S.instruments.length&&Array.isArray(S.universe)&&S.universe.length)universeToRegistry(S.universe);
+  if(!S.engineUniverse||typeof S.engineUniverse!=='object'||Array.isArray(S.engineUniverse))S.engineUniverse={LIFO:[],DM:[]};
+  for(const eng of ['LIFO','DM'])if(!Array.isArray(S.engineUniverse[eng]))S.engineUniverse[eng]=[];
+  delete S.engineUniverse.TENET;
+  // tag is still emitted here for compatibility with the ~24 sites and tests that read it.
+  // R2-5 removes both the field and its readers; dropping it now would break them mid-workstream.
+  S.universe=(S.instruments||[]).map(e=>{const en=enginesOf(e.sym);
+    return{...e,sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,assetClass:e.assetClass||'equity',
+      isin:e.isin||'',linkedIndex:e.linkedIndex||'',engines:en,tag:tagFromEngines(en)};});
+  LIFO_ETF_UNIVERSE=engineList('LIFO').map(sy=>{const e=instrumentFacts(sy)||{};
+    return{sym:sy,yf:e.yf||sy+'.NS',name:e.name||sy,assetClass:e.assetClass||'equity'};});
   S.universe.forEach(e=>{ if(!PRICES[e.sym]) PRICES[e.sym]={cmp:0,chg:0,low52:0,high52:0,vol:0}; });
 }
 
@@ -2827,7 +2875,10 @@ let S = {
   momFyLossCf: 0,
   momPrices: {},
   momUniverse: [],
-  universe: [],
+  universe: [],            // R2: DERIVED VIEW of instruments + engineUniverse. Only rebuildUniverses() writes it.
+                           // It must stay a plain writable array: the frozen engine binders assign to it.
+  instruments: [],         // R2: facts, one row per ETF {sym,name,yf,assetClass,isin,linkedIndex}. Shared by every engine.
+  engineUniverse: {LIFO:[],DM:[]},   // R2: independent symbol list per engine. TENET is derived from tenet.pairs.
   priceAlerts: [], // Phase4: {id,sym,type:'above'|'below',price,active,triggered,triggeredAt,triggeredPrice,createdAt}
   watchlist: [], // Phase4: {sym,yf,name,addedAt} — ETFs tracked outside the traded universe
   trash: [], // Phase5: {id,kind:'lifo'|'mom',data,deletedAt} — soft-deleted trades, restorable for 30 days
@@ -2863,9 +2914,9 @@ let S = {
 const STATE_KEYS=Object.freeze([
   'lifoLedger','momTrades','momPositions','momFyData','momFyLossCf','momPrices','momUniverse',
   'universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','tenet',
-  'corpActions','corporateActions','config'
+  'corpActions','corporateActions','instruments','engineUniverse','config'
 ]);
-const OPTIONAL_STATE_KEYS=Object.freeze(['corporateActions']);   // A6-3: backups made before A6 do not have it and still restore
+const OPTIONAL_STATE_KEYS=Object.freeze(['corporateActions','instruments','engineUniverse']);   // backups made before A6/R2 lack these and still restore
 function serializeState(){
   const out={};
   STATE_KEYS.forEach(k=>{out[k]=S[k];});
@@ -2875,8 +2926,8 @@ function _plainObject(v){return !!v&&typeof v==='object'&&!Array.isArray(v);}
 function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
   const errs=[];
   if(!_plainObject(st))return ['State must be an object'];
-  const arrayKeys=['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions',...(('corporateActions' in st)?['corporateActions']:[])];
-  const objectKeys=['momPositions','momFyData','momPrices','config','tenet'];
+  const arrayKeys=['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions',...(('corporateActions' in st)?['corporateActions']:[]),...(('instruments' in st)?['instruments']:[])];
+  const objectKeys=['momPositions','momFyData','momPrices','config','tenet',...(('engineUniverse' in st)?['engineUniverse']:[])];
   if(requireExactKeys){
     const actual=Object.keys(st).sort(), expected=STATE_KEYS.filter(k=>!OPTIONAL_STATE_KEYS.includes(k)||k in st).sort();
     if(actual.length!==expected.length||actual.some((k,i)=>k!==expected[i]))
@@ -2885,7 +2936,7 @@ function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
   arrayKeys.forEach(k=>{if(!Array.isArray(st[k]))errs.push(`${k} must be an array`);});
   objectKeys.forEach(k=>{if(!_plainObject(st[k]))errs.push(`${k} must be an object`);});
   if(!Number.isFinite(+st.momFyLossCf))errs.push('momFyLossCf must be a finite number');
-  const objectArrayKeys=['lifoLedger','momTrades','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions'];
+  const objectArrayKeys=['lifoLedger','momTrades','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions','instruments'];
   objectArrayKeys.forEach(k=>{if(Array.isArray(st[k])&&st[k].some(x=>!_plainObject(x)))errs.push(`${k} entries must be objects`);});
   if(Array.isArray(st.momUniverse)&&st.momUniverse.some(x=>typeof x!=='string'))errs.push('momUniverse entries must be strings');
   // Reject unsafe/corrupt symbol-like fields before overwrite. Render paths also escape,
@@ -2905,7 +2956,7 @@ function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
 }
 function applyStateSnapshot(d,{mergeConfig=true}={}){
   if(!d||typeof d!=='object')return;
-  const arrKeys=new Set(['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions']);
+  const arrKeys=new Set(['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions','corporateActions','instruments']);
   STATE_KEYS.forEach(k=>{
     if(!(k in d))return; // legacy snapshots may be missing newly-added fields; current default survives.
     if(k==='config'){
@@ -2997,6 +3048,7 @@ function loadState(){
         S.momUniverse.forEach(s=>{if(map.has(s))map.get(s).tag='both';else map.set(s,{sym:s,yf:s+'.NS',name:s,tag:'momentum',assetClass:'equity'});});
         S.universe=[...map.values()];
       } else S.universe=buildDefaultUniverse();
+      universeToRegistry(S.universe);
     }
     if(S.config.slippage===undefined) S.config.slippage=0.05;
     if(S.config.minVol==null) S.config.minVol=50000;
@@ -3020,6 +3072,16 @@ function loadState(){
       const ac=['equity','debt','gold','international'].includes(e?.assetClass)?e.assetClass:(def?.assetClass||'equity');
       return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),tag:['lifo','momentum','both','none'].includes(e?.tag)?e.tag:'momentum',assetClass:ac};
     }).filter(Boolean);
+    // R2: the sanitised rows are the registry's input. If a stored snapshot already carried a
+    // registry, keep it; otherwise derive one from the rows just hardened above.
+    if(Array.isArray(S.instruments)&&S.instruments.length){
+      S.instruments=S.instruments.map(e=>{
+        const sym=sanSym(e?.sym||''); if(!sym)return null;
+        const def=_defaultBySym.get(sym);
+        const ac=['equity','debt','gold','international'].includes(e?.assetClass)?e.assetClass:(def?.assetClass||'equity');
+        return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),assetClass:ac};
+      }).filter(Boolean);
+    } else universeToRegistry(S.universe);
     ensureUniverseEngines();
     rebuildUniverses();
     { const _ve=[...validateTenetState(S.tenet,S),...validateConfigRanges(S.config)]; if(_ve.length){console.warn('loadState validation:',_ve);setTimeout(()=>{try{toast('⚠️ Stored data has problems: '+_ve.slice(0,2).join(' · '),'warn');}catch(e){}},1500);} }
@@ -10906,7 +10968,7 @@ function renderTaxTradeBreakdown(preRecords=null,preCalc=null){
 }
 
 // ── UNIVERSE MANAGEMENT ───────────────────────────────────────────────────────
-function getMomUniverse(){rebuildUniverses();return S.universe.filter(e=>e.tag==='momentum'||e.tag==='both').map(e=>e.sym);}
+function getMomUniverse(){rebuildUniverses();return engineList('DM');}
 
 function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}try{renderCorpActions();}catch(_e){}
   rebuildUniverses();
@@ -10994,6 +11056,23 @@ function migrateRawState(raw){
       if(!Array.isArray(e.engines)){const en=enginesFromTag(e.tag);if(inPair.has(String(e.sym||'').toUpperCase()))en.push('TENET');e.engines=en;}
       e.engines=[...new Set(e.engines.filter(x=>ENGINES.includes(x)))];e.tag=tagFromEngines(e.engines);});
   }
+  // R2: derive the registry from the annotated rows. A snapshot that already has instruments is
+  // left alone, so this stays idempotent. TENET membership is NOT stored - it comes from pairs.
+  if(!Array.isArray(raw.instruments)&&Array.isArray(raw.universe)){
+    const inst=[],eu={LIFO:[],DM:[]};
+    raw.universe.forEach(e=>{
+      if(!e||typeof e!=='object'||!e.sym)return;
+      inst.push({sym:e.sym,name:e.name||e.sym,yf:e.yf||e.sym+'.NS',assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||''});
+      const en=Array.isArray(e.engines)?e.engines:(e.tag==='both'?['LIFO','DM']:e.tag==='lifo'?['LIFO']:e.tag==='momentum'?['DM']:[]);
+      if(en.includes('LIFO'))eu.LIFO.push(e.sym);
+      if(en.includes('DM'))eu.DM.push(e.sym);
+    });
+    raw.instruments=inst;raw.engineUniverse=eu;
+  }
+  if(raw.engineUniverse&&typeof raw.engineUniverse==='object'&&!Array.isArray(raw.engineUniverse)){
+    for(const eng of ['LIFO','DM'])if(!Array.isArray(raw.engineUniverse[eng]))raw.engineUniverse[eng]=[];
+    delete raw.engineUniverse.TENET;
+  }
   return raw;
 }
 const _finPos=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
@@ -11070,20 +11149,53 @@ function validateUniverseChange(next,st){
   return{ok:errors.length===0,errors};
 }
 function _universeBlocked(errors){try{toast('⛔ Blocked: '+errors.slice(0,3).join(' · ')+(errors.length>3?` (+${errors.length-3} more)`:''),'err');}catch(e){}}
-async function setEnginesFor(sym,engines){
-  ensureUniverseEngines();
-  const e=S.universe.find(x=>x.sym===sym);if(!e)return false;
-  const en=[...new Set(engines.filter(x=>ENGINES.includes(x)))];
-  const next=S.universe.map(x=>x.sym===sym?{...x,engines:en,tag:tagFromEngines(en)}:x);
-  const v=validateUniverseChange(next);if(!v.ok){_universeBlocked(v.errors);return false;}
-  const ok=await commitState(()=>{const x=S.universe.find(y=>y.sym===sym);x.engines=en;x.tag=tagFromEngines(en);rebuildUniverses();},{label:'Engines'});
+// R2: the universe that WOULD result from a proposed set of engine lists, for validation only.
+function _derivedUniverseFor(nextEU){
+  const has=(eng,sym)=>eng==='TENET'?engineHas('TENET',sym):(nextEU[eng]||[]).some(y=>String(y).toUpperCase()===String(sym).toUpperCase());
+  return (S.instruments||[]).map(e=>{const en=ENGINES.filter(x=>has(x,e.sym));
+    return{sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||'',engines:en,tag:tagFromEngines(en)};});
+}
+// R2: add one instrument to the registry and put it in the engine lists it was asked for.
+// Facts are stored once here; membership is stored in S.engineUniverse and nowhere else.
+function addInstrumentRow(facts,engines){
+  rebuildUniverses();   // adopt any legacy S.universe rows first, so this never wipes them
+  if(!facts||!facts.sym||instrumentFacts(facts.sym))return false;
+  const {tag:_tg,engines:_en,...rest}=facts;
+  S.instruments.push({...rest,sym:facts.sym,name:facts.name||facts.sym,yf:facts.yf||facts.sym+'.NS',
+    assetClass:facts.assetClass||'equity',isin:facts.isin||'',linkedIndex:facts.linkedIndex||''});
+  for(const eng of ['LIFO','DM'])if((engines||[]).includes(eng))
+    S.engineUniverse[eng]=[...new Set([...(S.engineUniverse[eng]||[]),facts.sym])];
+  return true;
+}
+// R2: add or remove ONE symbol from ONE engine list. The other engines are never touched.
+async function setEngineMembership(sym,engine,on){
+  rebuildUniverses();   // the registry is the thing being edited: make sure it exists first
+  const eng=String(engine||'').toUpperCase();
+  if(eng==='TENET'){_universeBlocked(['Tenet membership comes from its pair list \u2014 edit the pairs instead']);return false;}
+  if(!['LIFO','DM'].includes(eng))return false;
+  if(!instrumentFacts(sym))return false;
+  const cur=engineList(eng);
+  const nextEU={...S.engineUniverse,[eng]:on?[...new Set([...cur,sym])]:cur.filter(x=>x!==sym)};
+  const v=validateUniverseChange(_derivedUniverseFor(nextEU));if(!v.ok){_universeBlocked(v.errors);return false;}
+  const ok=await commitState(()=>{S.engineUniverse=nextEU;rebuildUniverses();},{label:'Engine membership'});
   if(!ok)return false;
   TENET_RUNTIME.live=null;
   try{renderUniverse();populateLifoDropdown();}catch(e2){}
   try{await syncUniverseToSB();}catch(e3){}
   return true;
 }
-function toggleEngine(sym,engine){ensureUniverseEngines();const e=S.universe.find(x=>x.sym===sym);if(!e)return;const has=e.engines.includes(engine);return setEnginesFor(sym,has?e.engines.filter(x=>x!==engine):[...e.engines,engine]);}
+// Applies a whole engine set for one symbol, one engine at a time. Kept for existing callers.
+async function setEnginesFor(sym,engines){
+  if(!instrumentFacts(sym))return false;
+  const want=new Set(engines.filter(x=>ENGINES.includes(x)));
+  for(const eng of ['LIFO','DM']){
+    if(engineHas(eng,sym)!==want.has(eng)){
+      if(!await setEngineMembership(sym,eng,want.has(eng)))return false;
+    }
+  }
+  return true;
+}
+function toggleEngine(sym,engine){if(!instrumentFacts(sym))return;return setEngineMembership(sym,engine,!engineHas(engine,sym));}
 // A3-5: read-only consolidated view; optional broker quantity per ETF shows a mismatch
 function holdingsByEtf(st,brokerQty){
   const open=openUnitsByEngine(st||S),rows=Object.entries(open).map(([sym,m])=>({sym,total:Object.values(m).reduce((a,b)=>a+b,0),byEngine:m}));
@@ -11107,9 +11219,11 @@ async function importEnginesFromMarketData(){
   let m;try{m=(await EOD2Store.loadHandle()).manifest;}catch(e){toast('Cannot load the market-data manifest: '+(e&&e.message||e),'err');return;}
   const d=diffEnginesFromManifest(m);if(!d.length){toast('Engines already match market-data','ok');return;}
   if(!confirm('Apply engine changes from market-data?\n\n'+d.map(x=>`${x.sym}: ${x.from.join('+')||'—'} → ${x.to.join('+')||'—'}`).join('\n')))return;
-  const next=S.universe.map(e=>{const x=d.find(y=>y.sym===e.sym);return x?{...e,engines:x.to,tag:tagFromEngines(x.to)}:e;});
-  const v=validateUniverseChange(next);if(!v.ok){_universeBlocked(v.errors);return;}
-  const ok=await commitState(()=>{d.forEach(x=>{const e=S.universe.find(y=>y.sym===x.sym);e.engines=x.to;e.tag=tagFromEngines(x.to);});rebuildUniverses();},{label:'Import engines'});
+  rebuildUniverses();
+  const nextEU={...S.engineUniverse};
+  for(const x of d)for(const eng of ['LIFO','DM']){const cur=(nextEU[eng]||[]).filter(y=>y!==x.sym);nextEU[eng]=x.to.includes(eng)?[...cur,x.sym]:cur;}
+  const v=validateUniverseChange(_derivedUniverseFor(nextEU));if(!v.ok){_universeBlocked(v.errors);return;}
+  const ok=await commitState(()=>{S.engineUniverse=nextEU;rebuildUniverses();},{label:'Import engines'});
   if(ok){TENET_RUNTIME.live=null;try{renderUniverse();}catch(e){}toast(`${d.length} ETF engine assignment(s) updated`,'ok');}
 }
 function tenetAssertHistoryComplete(rows){
@@ -11126,8 +11240,8 @@ async function addSingleETF(){
   // unencoded. Same whitelist and same length bounds as the bulk path.
   const v=(document.getElementById('uni-single').value||'').trim().toUpperCase().replace(/\.NS$/i,'').replace(/[^A-Z0-9]/g,'');
   if(!v){toast('Enter symbol','err');return;}
-  if(v.length<2||v.length>20){toast('Symbol must be 2–20 letters/digits','err');return;}if(S.universe.some(e=>e.sym===v)){toast(v+' already in universe','warn');return;}const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const linkedIndex=sanIndexName(document.getElementById('uni-linked-index')?.value||'');const linkedIndexYf=sanIndexTicker(document.getElementById('uni-linked-index-yf')?.value||'');S.universe.push({sym:v,yf:v+'.NS',name:v,tag,assetClass,linkedIndex,linkedIndexYf});rebuildUniverses();saveState();document.getElementById('uni-single').value='';if(document.getElementById('uni-linked-index'))document.getElementById('uni-linked-index').value='';if(document.getElementById('uni-linked-index-yf'))document.getElementById('uni-linked-index-yf').value='';renderUniverse();populateLifoDropdown();tenetPopulatePairBuilder();await syncUniverseToSB();}
-async function addBulkETFs(){const raw=document.getElementById('uni-bulk').value||'';const syms=raw.split(/[,\n\r]+/).map(s=>s.trim().toUpperCase().replace(/\.NS$/i,'').replace(/[^A-Z0-9]/g,'')).filter(s=>s.length>=2&&s.length<=20);const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const news=syms.filter(s=>!S.universe.some(e=>e.sym===s));if(!news.length){toast('All already in universe','warn');return;}news.forEach(s=>S.universe.push({sym:s,yf:s+'.NS',name:s,tag,assetClass}));rebuildUniverses();saveState();document.getElementById('uni-bulk').value='';renderUniverse();populateLifoDropdown();await syncUniverseToSB();toast(`Added ${news.length} ETF(s) tagged ${tag}`,'ok');}
+  if(v.length<2||v.length>20){toast('Symbol must be 2–20 letters/digits','err');return;}if(S.universe.some(e=>e.sym===v)){toast(v+' already in universe','warn');return;}const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const linkedIndex=sanIndexName(document.getElementById('uni-linked-index')?.value||'');const linkedIndexYf=sanIndexTicker(document.getElementById('uni-linked-index-yf')?.value||'');addInstrumentRow({sym:v,yf:v+'.NS',name:v,assetClass,linkedIndex,linkedIndexYf},enginesFromTag(tag));rebuildUniverses();saveState();document.getElementById('uni-single').value='';if(document.getElementById('uni-linked-index'))document.getElementById('uni-linked-index').value='';if(document.getElementById('uni-linked-index-yf'))document.getElementById('uni-linked-index-yf').value='';renderUniverse();populateLifoDropdown();tenetPopulatePairBuilder();await syncUniverseToSB();}
+async function addBulkETFs(){const raw=document.getElementById('uni-bulk').value||'';const syms=raw.split(/[,\n\r]+/).map(s=>s.trim().toUpperCase().replace(/\.NS$/i,'').replace(/[^A-Z0-9]/g,'')).filter(s=>s.length>=2&&s.length<=20);const tag=document.getElementById('uni-tag')?.value||'momentum';const assetClass=['equity','gold','international','debt'].includes(document.getElementById('uni-asset-class')?.value)?document.getElementById('uni-asset-class').value:'equity';const news=syms.filter(s=>!S.universe.some(e=>e.sym===s));if(!news.length){toast('All already in universe','warn');return;}news.forEach(s=>addInstrumentRow({sym:s,yf:s+'.NS',name:s,assetClass},enginesFromTag(tag)));rebuildUniverses();saveState();document.getElementById('uni-bulk').value='';renderUniverse();populateLifoDropdown();await syncUniverseToSB();toast(`Added ${news.length} ETF(s) tagged ${tag}`,'ok');}
 async function removeETF(s){
   // S0-6b + A3-4: removal is checked against the Tenet pairs and every engine's open units BEFORE anything changes.
   ensureUniverseEngines();
@@ -11142,18 +11256,18 @@ async function removeETF(s){
   const _next=S.universe.filter(e=>e.sym!==s);
   const _v=validateUniverseChange(_next,{...S,tenet:{...(S.tenet||{}),pairs:nextPairs}});
   if(!_v.ok){_universeBlocked(_v.errors);return;}
-  const _ok=await commitState(()=>{if(_t)tenetState().pairs=nextPairs;S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();},{label:'Remove ETF'});
+  const _ok=await commitState(()=>{if(_t)tenetState().pairs=nextPairs;S.instruments=(S.instruments||[]).filter(e=>e.sym!==s);for(const _e of ['LIFO','DM'])S.engineUniverse[_e]=engineList(_e).filter(x=>x!==s);S.universe=S.universe.filter(e=>e.sym!==s);rebuildUniverses();},{label:'Remove ETF'});
   if(!_ok)return;
   TENET_RUNTIME.live=null;
   renderUniverse();populateLifoDropdown();
   if(_t&&typeof tenetRenderPairList==='function'){tenetRenderPairList();tenetRenderHoldings();}
   await syncUniverseToSB();}
-async function resetToDefault(){if(!confirm('Reset universe to defaults?'))return;const _d=buildDefaultUniverse().map(e=>({...e,engines:enginesFromTag(e.tag)}));const _v=validateUniverseChange(_d);if(!_v.ok){_universeBlocked(_v.errors);return;}const _ok=await commitState(()=>{S.universe=_d;rebuildUniverses();},{label:'Reset universe'});if(!_ok)return;TENET_RUNTIME.live=null;renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
+async function resetToDefault(){if(!confirm('Reset universe to defaults?'))return;const _d=buildDefaultUniverse().map(e=>({...e,engines:enginesFromTag(e.tag)}));const _v=validateUniverseChange(_d);if(!_v.ok){_universeBlocked(_v.errors);return;}const _ok=await commitState(()=>{universeToRegistry(_d);rebuildUniverses();},{label:'Reset universe'});if(!_ok)return;TENET_RUNTIME.live=null;renderUniverse();populateLifoDropdown();await syncUniverseToSB();}
 async function clearAllETFs(){
   if(!confirm('Clear entire universe?'))return;
   const _v=validateUniverseChange([]);if(!_v.ok){_universeBlocked(_v.errors);return;}   // A3-4: never with open positions or Tenet pairs
   _autoExportBeforeDestruct('pre-clear-universe');   // SAFEGUARD 2
-  const _ok=await commitState(()=>{S.universe=[];LIFO_ETF_UNIVERSE=[];},{label:'Clear universe'});
+  const _ok=await commitState(()=>{S.instruments=[];S.engineUniverse={LIFO:[],DM:[]};S.universe=[];LIFO_ETF_UNIVERSE=[];},{label:'Clear universe'});
   if(!_ok)return;
   TENET_RUNTIME.live=null;renderUniverse();populateLifoDropdown();
   await syncUniverseToSB();
@@ -11190,7 +11304,7 @@ function universeSig(u){return JSON.stringify((u||[]).map(e=>[String(e.sym||'').
 async function applyRemoteUniverse(){
   const r=UNIVERSE_REMOTE_PENDING;if(!r)return false;
   const v=validateUniverseChange(r);if(!v.ok){showRemoteConflict('universe','Universe (cloud) cannot be loaded',v.errors);return false;}
-  const ok=await commitState(()=>{S.universe=r;rebuildUniverses();},{label:'Load universe'});
+  const ok=await commitState(()=>{universeToRegistry(r);rebuildUniverses();},{label:'Load universe'});
   if(ok){UNIVERSE_REMOTE_PENDING=null;UNIVERSE_REMOTE_CONFLICT=null;TENET_RUNTIME.live=null;showRemoteConflict('universe','',[]);try{renderUniverse();}catch(e){}}
   return ok;
 }
@@ -11905,7 +12019,7 @@ function tenetAddPairFromBuilder(){const t=tenetState(),u=sanIndexName(document.
 function tenetEditPair(underlying){const p=tenetState().pairs.find(x=>x.underlying===underlying);if(!p)return;const u=document.getElementById('tenet-pair-underlying'),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(!u||!g||!r)return;u.innerHTML=tenetIndexOptions(p.underlying);u.value=p.underlying;g.innerHTML=tenetEtfOptions(p.underlying,p.green,false);r.innerHTML=tenetEtfOptions(p.underlying,p.red||'',true);g.value=p.green;r.value=p.red||'';u.scrollIntoView({behavior:'smooth',block:'center'});}
 function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.underlying===underlying);if(!p)return;const held=[p.green,p.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));if(held.length)return toast(`Keep this scanner slot until holdings are fully sold: ${held.join(', ')}`,'warn');t.pairs=t.pairs.filter(x=>x.underlying!==underlying);saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Removed ${underlying} from Tenet scanner`,'ok');}
 function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanIndexName(index))?.yf||'';}
-async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}{const _nx=S.universe.map(x=>x.sym===sym?{...x,linkedIndex:clean}:x);const _v=validateUniverseChange(_nx);if(!_v.ok){_universeBlocked(_v.errors);return;}}TENET_RUNTIME.live=null;e.linkedIndex=clean;e.linkedIndexYf=yf;saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
+async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}{const _nx=S.universe.map(x=>x.sym===sym?{...x,linkedIndex:clean}:x);const _v=validateUniverseChange(_nx);if(!_v.ok){_universeBlocked(_v.errors);return;}}TENET_RUNTIME.live=null;rebuildUniverses();const _f=instrumentFacts(sym);if(!_f)return;_f.linkedIndex=clean;_f.linkedIndexYf=yf;rebuildUniverses();saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
 function tenetRenderPairList(){const host=document.getElementById('tenet-pair-list'),msg=document.getElementById('tenet-pair-validation');if(!host)return;const t=tenetState(),errs=tenetValidatePairs(),conflicts=tenetIndexRegistry().filter(x=>x.conflict),activeEtfs=tenetActiveEtfs(),per=tenetPerBuy();if(msg){msg.style.color=errs.length||conflicts.length?'var(--bad)':'var(--go)';msg.textContent=errs.length?`⚠ ${errs.join(' · ')}`:conflicts.length?`⚠ Conflicting Yahoo index tickers: ${conflicts.map(x=>x.name).join(', ')}`:`✓ ${t.pairs.length}/${t.config.maxGreen} GREEN slots · ${activeEtfs.length} actual ETFs · per-buy ${fmtINR(per)}.`;}
   host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=TENET_RUNTIME.metrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
 function tenetSaveConfigFromUI(){const t=tenetState();
@@ -14156,7 +14270,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='6cde2c8b2e76dba999e4b155ad70b64d39c50fde6fceda938c9fca5b045ede4c';
+const APP_SOURCE_SHA256='927081360e00f45b09c261b03bf1a34300be82cb67fac5068bb8092bab77c645';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
