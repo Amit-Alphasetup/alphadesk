@@ -2650,19 +2650,6 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 <div class="card" style="margin-top:14px">
-<div class="settings-section-title">✂ Corporate Actions</div>
-<div style="font-size:11px;color:var(--fog);margin-bottom:10px">Apply a split or bonus to every historical trade row for a symbol so cost basis stays correct. Export a backup first — this rewrites the ledger.</div>
-<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
-<div class="form-group" style="margin:0"><label class="form-label">Symbol</label><input class="form-input" id="ca-sym" placeholder="NIFTYBEES" style="width:110px" type="text"/></div>
-<div class="form-group" style="margin:0"><label class="form-label">Type</label><select class="form-input" id="ca-kind" style="width:100px"><option value="split">Split</option><option value="bonus">Bonus</option></select></div>
-<div class="form-group" style="margin:0"><label class="form-label">Ratio From</label><input class="form-input" id="ca-from" placeholder="1" style="width:80px" type="number"/></div>
-<div class="form-group" style="margin:0"><label class="form-label">Ratio To</label><input class="form-input" id="ca-to" placeholder="2" style="width:80px" type="number"/></div>
-<div class="form-group" style="margin:0;flex:1;min-width:140px"><label class="form-label">Note</label><input class="form-input" id="ca-note" placeholder="optional" type="text"/></div>
-<button class="action-btn sm azure-btn" onclick="applyCorporateAction()">Apply</button>
-</div>
-<div id="corp-actions-list"></div>
-</div>
-<div class="card" style="margin-top:14px">
 <div class="settings-section-title">💰 Dividends</div>
 <div style="font-size:11px;color:var(--fog);margin-bottom:10px">Manual entry — not auto-fetched, not modelled in backtests. Total: <b id="dividend-total" style="color:var(--paper)">₹0</b></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
@@ -4424,100 +4411,7 @@ function renderBrokerImportPanel(){
 // consistent after a split/bonus. Does not touch frozen ledger math functions —
 // it rewrites the raw ledger rows, which computeLifoPortfolio()/momRebuildState()
 // then re-derive lots/positions from as normal.
-function applyCorporateAction(){
-  const sym=sanSym(document.getElementById('ca-sym')?.value); // SEC FIX 4
-  const kind=document.getElementById('ca-kind')?.value; // 'split' or 'bonus'
-  const from=parseFloat(document.getElementById('ca-from')?.value);
-  const to=parseFloat(document.getElementById('ca-to')?.value);
-  const note=sanNote(document.getElementById('ca-note')?.value); // SEC FIX 4
-  if(!sym){toast('Enter a symbol','err');return;}
-  if(!from||!to||from<=0||to<=0){toast('Enter valid ratio (e.g. 1 → 2 for a 1:2 split)','err');return;}
-  const factor=to/from; // units multiply by factor, price divides by factor
-  const touchedLifo=S.lifoLedger.filter(t=>t.sym===sym);
-  // Money-safety gate: LIFO ledger quantities represent whole exchange units. If the
-  // corporate-action ratio would create fractional units for any historical row,
-  // do not guess/round silently. Broker cash-in-lieu/allotment treatment must be
-  // reconciled manually first. DM can legitimately carry fractional units and is
-  // separately warned below.
-  const fractionalLifoPre=touchedLifo.filter(t=>Math.abs((Number(t.qty)||0)*factor-Math.round((Number(t.qty)||0)*factor))>1e-8);
-  if(fractionalLifoPre.length){
-    toast(`❌ ${sym}: ${kind} ${from}:${to} would create fractional LIFO quantities in ${fractionalLifoPre.length} row(s). Corporate action aborted — reconcile broker allotment/cash-in-lieu manually.`, 'err');
-    console.error('Corporate action blocked: fractional LIFO units',fractionalLifoPre.map(t=>({date:t.date,type:t.type,qty:t.qty,scaled:t.qty*factor})));
-    return;
-  }
-  // Phase7.0 FIX: real momTrades records key symbol as `etf`, not `sym` — the
-  // original filter here always matched zero rows on live DM data and silently
-  // no-op'd (or misreported "no trades found" even when DM trades existed).
-  const touchedMom=S.momTrades.filter(t=>t.etf===sym);
-  if(!touchedLifo.length&&!touchedMom.length){toast(`No trades found for ${sym}`,'err');return;}
-  if(!confirm(`Apply ${kind} ${from}:${to} to ${sym}?\n\nThis rewrites ${touchedLifo.length} LIFO + ${touchedMom.length} DM trade row(s): qty/units ×${factor.toFixed(4)}, price ÷${factor.toFixed(4)}.\n\nThis cannot be auto-undone — export a backup first if unsure.`)) return;
-  // #9 FIX: rounding each row independently can leave a residual net position on a
-  // symbol that was flat (e.g. BUY 10 / SELL 3 / SELL 7 at factor 1.5 -> net +1).
-  // Rescale exactly, then push the whole rounding residual onto the LAST SELL row
-  // so the net position is preserved. Warn if that isn't possible.
-  const lifoSnapshot=touchedLifo.map(t=>({ref:t,qty:t.qty,price:t.price}));
-  const momSnapshot=touchedMom.map(t=>({ref:t,units:t.units,price:t.price,value:t.value}));
-  const corpActionsSnapshot=JSON.parse(JSON.stringify(S.corpActions||[]));
-  const netBefore=touchedLifo.reduce((s,t)=>s+(t.type==='BUY'?t.qty:-t.qty),0);
-  touchedLifo.forEach(t=>{ t.qty=Math.round(t.qty*factor); t.price=t.price/factor; });
-  const netAfter=touchedLifo.reduce((s,t)=>s+(t.type==='BUY'?t.qty:-t.qty),0);
-  const drift=netAfter-Math.round(netBefore*factor);
-  if(drift!==0){
-    const lastSell=[...touchedLifo].reverse().find(t=>t.type==='SELL'&&t.qty+drift>0);
-    if(lastSell){
-      lastSell.qty+=drift;
-      console.warn(`Corp action ${sym}: absorbed ${drift} unit rounding drift into SELL on ${lastSell.date}`);
-    } else {
-      toast(`⚠️ ${sym}: rounding left a ${drift>0?'+':''}${drift} unit residual — verify the ledger manually`,'warn');
-      console.warn(`Corp action ${sym}: unabsorbed rounding drift ${drift}`);
-    }
-  }
-  // Phase7.0 FIX: momTrades uses `units` (fractional, not rounded to integer —
-  // DM sizing is fractional-unit) and `price`; recompute `value` (units*price)
-  // so exports/renders relying on it stay consistent. `friction` is an absolute
-  // rupee cost already paid and does not rescale with a nominal split.
-  touchedMom.forEach(t=>{ t.units=t.units*factor; t.price=t.price/factor; t.value=t.units*t.price; });
-  const fractionalDm=touchedMom.filter(t=>Math.abs(t.units-Math.round(t.units))>1e-8);
-  if(fractionalDm.length){
-    toast(`⚠️ ${sym}: corporate action produced fractional DM units in ${fractionalDm.length} row(s). Verify against broker allotment before trading.`, 'warn');
-    console.warn('Corporate action fractional DM units',fractionalDm.map(t=>({date:t.date,units:t.units,type:t.type})));
-  }
-  // Validate chronological running positions BEFORE commit. A split/bonus must
-  // never create an intermediate negative holding merely because rows were rounded.
-  const caProblem=validateRescaledLifoRows(touchedLifo)||validateRescaledDmRows(touchedMom);
-  if(caProblem){
-    lifoSnapshot.forEach(x=>{x.ref.qty=x.qty;x.ref.price=x.price;});
-    momSnapshot.forEach(x=>{x.ref.units=x.units;x.ref.price=x.price;x.ref.value=x.value;});
-    toast(`❌ Corporate action aborted — ${caProblem}`,'err');
-    console.error('Corporate action rollback:',caProblem);
-    return;
-  }
-  if(!Array.isArray(S.corpActions)) S.corpActions=[];
-  S.corpActions.unshift({id:'ca_'+Date.now(),sym,kind,ratioFrom:from,ratioTo:to,date:localDate(),note});
-  momRebuildState();
-  if(!saveState()){
-    lifoSnapshot.forEach(x=>{x.ref.qty=x.qty;x.ref.price=x.price;});
-    momSnapshot.forEach(x=>{x.ref.units=x.units;x.ref.price=x.price;x.ref.value=x.value;});
-    S.corpActions=corpActionsSnapshot;
-    momRebuildState();validateLedgerIntegrity();validateDmLedgerIntegrity();
-    toast('❌ Corporate action rolled back — local persistence failed','err');
-    return;
-  }
-  renderLifo();renderMomPortfolio();renderMomTradeLog();renderTax();renderCorpActions();
-  toast(`${kind==='split'?'Split':'Bonus'} applied to ${sym}`,'ok');
-  ['ca-sym','ca-from','ca-to','ca-note'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-}
 
-function renderCorpActions(){
-  const zone=document.getElementById('corp-actions-list');
-  if(!zone) return;
-  const items=S.corpActions||[];
-  if(!items.length){zone.innerHTML='<div style="font-size:11px;color:var(--fog)">No corporate actions logged yet.</div>';return;}
-  zone.innerHTML=items.map(a=>`
-    <div style="font-size:11px;color:var(--fog);padding:6px 0;border-bottom:1px solid var(--line)">
-      <b style="color:var(--paper)">${escapeHtml(a.sym)}</b> · ${escapeHtml(a.kind)} ${a.ratioFrom}:${a.ratioTo} · ${escapeHtml(a.date)}${a.note?' · '+escapeHtml(a.note):''}
-    </div>`).join('');
-}
 
 // ── PHASE 5.3: DIVIDEND TRACKING (manual entry, not auto-fetched) ───────────
 async function addDividend(){
@@ -10986,13 +10880,15 @@ function renderCorpActions(){
   const acts=(S.corporateActions||[]).filter(a=>a&&a.type!=='REVERSAL').slice().sort((a,b)=>String(b.exDate).localeCompare(String(a.exDate))),adj=corpAdjustedHoldings();
   const list=acts.length?`<div class="tbl-wrap"><table><thead><tr><th>Ex-date</th><th>ETF</th><th>Type</th><th>Ratio</th><th>Status</th><th>Evidence</th><th></th></tr></thead><tbody>${acts.map(a=>`<tr><td class="mono">${escapeHtml(a.exDate)}</td><td>${escapeHtml(a.symbol)}</td><td>${escapeHtml(a.type)}</td><td class="mono">${a.ratioNum}:${a.ratioDen}</td><td>${escapeHtml(a.status)}</td><td>${escapeHtml(a.evidence||'')}</td><td>${a.status==='ACTIVE'?`<button class="icon-btn" data-id="${escapeHtml(a.id)}" onclick="corpActionReverseUI(this.dataset.id)">Reverse</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<span style="color:var(--fog);font-size:11px">No corporate actions recorded.</span>';
   const adjT=adj.length?`<div style="font-size:11px;font-weight:700;margin:8px 0 4px">Original vs adjusted holdings</div><div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Engine</th><th>Units (original)</th><th>Units (adjusted)</th><th>Avg price (original)</th><th>Avg price (adjusted)</th></tr></thead><tbody>${adj.map(r=>`<tr><td>${escapeHtml(r.sym)}</td><td>${escapeHtml(r.engine)}</td><td class="mono">${r.originalUnits}</td><td class="mono">${r.adjustedUnits}</td><td class="mono">${r.originalAvgPrice}</td><td class="mono">${r.adjustedAvgPrice}</td></tr>`).join('')}</tbody></table></div>`:'';
+  const legacy=(S.corpActions||[]).filter(a=>a&&a.sym);
+  const legacyT=legacy.length?`<div style="font-size:11px;font-weight:700;margin:10px 0 4px">Legacy corporate actions (recorded before AlphaDesk 3.22 — read-only)</div><div style="font-size:10.5px;color:var(--fog);margin-bottom:4px">These were applied by rewriting the trade rows. They are kept for reference and are not replayed.</div><div class="tbl-wrap"><table><thead><tr><th>Date</th><th>ETF</th><th>Type</th><th>Ratio</th><th>Note</th></tr></thead><tbody>${legacy.map(a=>`<tr><td class="mono">${escapeHtml(a.date||'')}</td><td>${escapeHtml(a.sym)}</td><td>${escapeHtml(a.kind||'')}</td><td class="mono">${a.ratioFrom}:${a.ratioTo}</td><td>${escapeHtml(a.note||'')}</td></tr>`).join('')}</tbody></table></div>`:'';
   host.innerHTML=`<div class="card" style="margin-top:10px"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Corporate actions (events — fills are never modified)</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       <input class="form-input" id="ca-sym" placeholder="ETF" style="width:100px"><select class="form-input" id="ca-type" style="width:150px"><option>SPLIT</option><option>BONUS</option><option>CONSOLIDATION</option></select>
       <input class="form-input" id="ca-num" type="number" min="1" placeholder="num" style="width:70px"><span>:</span><input class="form-input" id="ca-den" type="number" min="1" placeholder="den" style="width:70px">
       <input class="form-input" id="ca-date" type="date" style="width:140px"><input class="form-input" id="ca-evidence" placeholder="evidence (required)" style="flex:1;min-width:160px">
       <button class="action-btn sm" id="ca-add" onclick="corpActionAddUI()">Add</button></div>
-    <div id="ca-status" style="font-size:10.5px;margin-bottom:6px"></div>${list}${adjT}</div>`;
+    <div id="ca-status" style="font-size:10.5px;margin-bottom:6px"></div>${list}${adjT}${legacyT}</div>`;
 }
 function collectEngineTaxRecords(){    // engine-internal records (each engine's own accounting) — the "Strategy" side of Strategy vs Tax
   computeLifoPortfolio();const out=[],lots={};
@@ -14294,7 +14190,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='8e6cc4c1ea76427e95574d451ab475b7cc0406bc2d42598251c36a6a6242e5c2';
+const APP_SOURCE_SHA256='e874d779a3e925631709f884c1ec2f1c4da702ff42dc13eb26d2c079775b96f1';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
