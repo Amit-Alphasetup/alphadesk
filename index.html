@@ -12903,6 +12903,72 @@ function _syncBnav(strategy,tabId){
   else document.getElementById('bnav-signals')?.classList.add('active');
 }
 
+// ── R3: NAVIGATION MODEL ────────────────────────────────────────────────────────────────────────
+// Every engine has the same five tabs, so the same question is asked the same way in all three.
+// Screens that serve every engine live under shared. A Research tab holds sections, which ACTIVATE
+// existing panes rather than moving them. 'render' is the function, or functions, that a screen
+// needs run when it is opened — exactly the ones the old if-chain ran, no more and no less.
+const NAV=Object.freeze({
+  engines:{
+    lifo:{label:'LIFO',tabs:[
+      {key:'signals',  id:'lifo-signal',   label:'📡 Signals',  render:'renderLifo'},
+      {key:'holdings', id:'lifo-holdings', label:'💼 Holdings', render:'renderLifo'},
+      {key:'ledger',   id:'lifo-ledger',   label:'📋 Ledger',   render:'renderLifo'},
+      {key:'research', id:'lifo-backtest', label:'🔬 Research', render:null, sections:[
+        {id:'lifo-backtest',label:'Backtest',    render:null},
+        {id:'lifo-buylogic',label:'Buy Logic',   render:'renderBuyLogicTab'},
+        {id:'lifo-poslog',  label:'Position Log',render:'renderPosLog'},
+        {id:'lifo-sweep',   label:'Param Sweep', render:null}]},
+      {key:'config',   id:'lifo-config',   label:'⚙ Config',    render:'renderEngineConfig'}]},
+    momentum:{label:'DM',tabs:[
+      {key:'signals',  id:'dm-signals',   label:'📡 Signals',  render:['renderMonthlyAlphaReport','renderMomAlerts']},
+      {key:'holdings', id:'dm-holdings',  label:'💼 Holdings', render:['renderMomPortfolio','renderMomAlerts']},
+      {key:'ledger',   id:'dm-ledger',    label:'📋 Ledger',   render:'renderMomTradeLog'},
+      {key:'research', id:'mom-backtest', label:'🔬 Research', render:null, sections:[
+        {id:'mom-backtest',     label:'Backtest',    render:null},
+        {id:'mom-signallogic',  label:'Signal Logic',render:'renderDmSignalLogic'},
+        {id:'mom-poslog',       label:'Position Log',render:'renderDmPosLog'},
+        {id:'mom-deepanalytics',label:'Analytics',   render:'renderDmDeepAnalytics'},
+        {id:'mom-rebalance',    label:'Rebalance',   render:'renderRebalanceTab'},
+        {id:'mom-sweep',        label:'Param Sweep', render:null}]},
+      {key:'config',   id:'dm-config',    label:'⚙ Config',    render:'renderEngineConfig'}]},
+    tenet:{label:'Tenet',tabs:[
+      {key:'signals',  id:'tenet-signal',   label:'📡 Signals',  render:'tenetRenderSignals'},
+      {key:'holdings', id:'tenet-holdings', label:'💼 Holdings', render:'tenetRenderHoldings'},
+      {key:'ledger',   id:'tenet-ledger',   label:'📋 Ledger',   render:'tenetRenderLedger'},
+      {key:'research', id:'tenet-backtest', label:'🔬 Research', render:'tenetInitBacktestDates', sections:[
+        {id:'tenet-backtest',label:'Backtest',render:'tenetInitBacktestDates'}]},
+      {key:'config',   id:'tenet-config',   label:'⚙ Config',    render:'renderEngineConfig'}]}},
+  shared:{
+    portfolio:{id:'shared-portfolio',label:'Portfolio',render:'renderPortfolioScreen'},
+    universe: {id:'mom-universe',    label:'Universe', render:'renderUniverse'},
+    data:     {id:'mom-datacenter',  label:'Data',     render:'dcUpdateCacheSummary'},
+    tax:      {id:'shared-tax',      label:'Tax',      render:'renderTaxScreen'},
+    settings: {id:'shared-settings', label:'Settings', render:'renderSettingsScreen'}}
+});
+// Every pre-R3 tab id keeps working FOREVER, not just through the transition: a persisted last tab,
+// a bookmark, or an old test may still name one. Ids not listed here already are their own answer.
+const NAV_ALIAS=Object.freeze({
+  'mom-signal':'dm-signals','mom-portfolio':'dm-holdings','mom-trades':'dm-ledger'
+});
+function navResolve(tabId){return NAV_ALIAS[tabId]||tabId;}
+function navEntry(tabId){
+  const id=navResolve(tabId);
+  for(const [sk,eng] of Object.entries(NAV.engines))
+    for(const tab of eng.tabs){
+      if(tab.id===id)return{strategy:sk,tab,section:null};
+      for(const sec of (tab.sections||[]))if(sec.id===id)return{strategy:sk,tab,section:sec};
+    }
+  for(const [k,sh] of Object.entries(NAV.shared))if(sh.id===id)return{strategy:k,tab:sh,section:null};
+  return null;
+}
+// A renderer named by NAV but not written yet is a no-op, not a crash: R3-4..R3-6 add the last few.
+function navRender(tabId){
+  const e=navEntry(tabId);if(!e)return;
+  const src=e.section?e.section.render:e.tab.render;
+  for(const n of [].concat(src||[]))
+    try{if(typeof globalThis[n]==='function')globalThis[n]();}catch(err){console.warn('navRender',n,err);}
+}
 const TABS={
   lifo:[{id:'lifo-signal',label:'📡 Signal Desk'},{id:'lifo-holdings',label:'💼 Holdings'},{id:'lifo-ledger',label:'📋 Ledger'},{id:'lifo-backtest',label:'🔬 Backtest'},{id:'lifo-buylogic',label:'📊 Buy Logic'},{id:'lifo-poslog',label:'📒 Pos Log'},{id:'lifo-sweep',label:'🔬 Param Sweep'}],
   tenet:[{id:'tenet-signal',label:'📡 Weekly Signals'},{id:'tenet-holdings',label:'🧩 Holdings & Universe'},{id:'tenet-backtest',label:'🔬 Backtest'}],
@@ -12941,21 +13007,7 @@ function switchTab(strategy,tabId,btn,silent=false){
   else document.querySelectorAll('#nav-bar .nav-btn').forEach(b=>{if(b.getAttribute('onclick')?.includes("'"+tabId+"'"))b.classList.add('active');});
   _syncBnav(strategy,tabId);
   if(!silent){
-    if(tabId==='lifo-holdings'||tabId==='lifo-signal'||tabId==='lifo-ledger')renderLifo();
-    if(tabId==='lifo-buylogic')renderBuyLogicTab();
-    if(tabId==='lifo-poslog')renderPosLog();
-    if(tabId==='mom-portfolio'){renderMomPortfolio();renderMomAlerts();}
-    if(tabId==='mom-signal'){renderMonthlyAlphaReport();renderMomAlerts();}
-    if(tabId==='mom-trades')renderMomTradeLog();
-    if(tabId==='mom-signallogic')renderDmSignalLogic();
-    if(tabId==='mom-poslog')renderDmPosLog();
-    if(tabId==='mom-deepanalytics')renderDmDeepAnalytics();
-    if(tabId==='mom-universe')renderUniverse();
-    if(tabId==='mom-rebalance')renderRebalanceTab();
-    if(tabId==='mom-datacenter')dcUpdateCacheSummary();      // also renders the EOD2 v3 section (A5-3)
-    if(tabId==='tenet-signal')tenetRenderSignals();
-    if(tabId==='tenet-holdings')tenetRenderHoldings();
-    if(tabId==='tenet-backtest')tenetInitBacktestDates();
+    navRender(tabId);
     if(strategy==='tax')renderTax();
   }
 }
@@ -14310,7 +14362,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='91973080bf459e6bff8865170e5e5e759585a43474fd6e1114007c00d204f164';
+const APP_SOURCE_SHA256='2b3debb01990a8f9c292b75bf007a62fd4a95eefcf8dd0c470d25efaaedbcd24';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
