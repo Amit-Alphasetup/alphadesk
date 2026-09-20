@@ -2330,7 +2330,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <!-- PORTFOLIO — every engine in one place (R3-5). The four cards below came from the Risk pane. -->
 <div class="strategy-pane" id="strategy-portfolio">
-<div class="tab-pane" id="shared-portfolio">
+<div class="tab-pane active" id="shared-portfolio">
 <div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Portfolio</span></div>
 <div class="stat-grid" id="pf-totals"></div>
 <div class="card">
@@ -14532,7 +14532,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='e1a52b89b6d38fee0b3c2d90b6900c0825c7c960876321a4078bbdd96da5e4b9';
+const APP_SOURCE_SHA256='0e1f6205d84a051f3e0b29a12cfb9174c45ef024b5597075e9eaba24d89d4d21';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
