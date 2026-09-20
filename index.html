@@ -2175,9 +2175,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
   <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
   <div class="card"><div class="card-title">Trade log</div><div id="tenet-bt-log" class="tbl-wrap"></div></div>
 </div>
-<div class="tab-pane" id="tenet-ledger">
-<div class="card"><div class="empty">Every recorded Tenet fill and correction<div style="font-size:10px;margin-top:6px">Built in R3-4.</div></div></div>
-</div>
+<div class="tab-pane" id="tenet-ledger"></div>
 <div class="tab-pane" id="tenet-config">
 <div class="card"><div class="empty">Tenet rule settings and the pair builder move here<div style="font-size:10px;margin-top:6px">Built in R3-6.</div></div></div>
 </div>
@@ -12083,6 +12081,64 @@ function tenetEditPair(underlying){const p=tenetState().pairs.find(x=>x.underlyi
 function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.underlying===underlying);if(!p)return;const held=[p.green,p.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));if(held.length)return toast(`Keep this scanner slot until holdings are fully sold: ${held.join(', ')}`,'warn');t.pairs=t.pairs.filter(x=>x.underlying!==underlying);saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Removed ${underlying} from Tenet scanner`,'ok');}
 function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanIndexName(index))?.yf||'';}
 async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}{const _nx=S.universe.map(x=>x.sym===sym?{...x,linkedIndex:clean}:x);const _v=validateUniverseChange(_nx);if(!_v.ok){_universeBlocked(_v.errors);return;}}TENET_RUNTIME.live=null;rebuildUniverses();const _f=instrumentFacts(sym);if(!_f)return;_f.linkedIndex=clean;_f.linkedIndexYf=yf;rebuildUniverses();saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
+// ── TENET LEDGER (R3-4) ─────────────────────────────────────────────────────────────────────────
+// One row per actual fill, with the corrections that amend it folded in. Corrections are applied in
+// the order they were recorded, so the effective number is what the book actually used.
+function tenetLedgerRows(){
+  const fills=tenetFills(),corr=new Map();
+  for(const c of fills){
+    if(!c||c.type!=='correction'||!c.refFillId)continue;
+    if(!corr.has(c.refFillId))corr.set(c.refFillId,[]);
+    corr.get(c.refFillId).push(c);
+  }
+  const byTime=(a,b)=>String(a.recordedAt||'').localeCompare(String(b.recordedAt||''));
+  return fills.filter(x=>x&&x.type!=='correction').map(fill=>{
+    const corrections=(corr.get(fill.fillId)||[]).slice().sort(byTime);
+    const eff={price:+fill.price,charges:+(fill.charges||0),date:fill.date},was={};
+    for(const c of corrections)for(const k of ['price','charges','date'])
+      if(c.patch&&c.patch[k]!=null){if(!(k in was))was[k]=eff[k];eff[k]=c.patch[k];}
+    return{fill,corrections,eff,was};
+  }).sort((a,b)=>String(b.eff.date||'').localeCompare(String(a.eff.date||''))||byTime(b.fill,a.fill));
+}
+function tenetRenderLedger(){
+  const host=document.getElementById('tenet-ledger');if(!host)return;
+  const rows=tenetLedgerRows();
+  if(!rows.length){
+    host.innerHTML='<div class="card"><div class="card-title">📋 Tenet Ledger</div>'
+      +'<div class="empty"><div class="empty-icon">📋</div>No Tenet fills recorded yet.'
+      +'<div style="font-size:10px;margin-top:6px">Every BUY, BID and SELL you record appears here with its order id, the lot it belongs to, and any correction made to it.</div></div></div>';
+    return;
+  }
+  const buys=rows.filter(r=>r.fill.side==='BUY').length,sells=rows.length-buys;
+  const amended=rows.filter(r=>r.corrections.length).length;
+  const n=v=>Number.isFinite(+v)?(+v).toFixed(2):'—';
+  const trail=r=>r.corrections.map(c=>{
+    const parts=Object.keys(c.patch||{}).map(k=>`${k} ${escapeHtml(String(r.was[k]??'—'))} → ${escapeHtml(String(c.patch[k]))}`);
+    return `<div style="font-size:9px;color:var(--gold)">↳ correction ${escapeHtml(String(c.recordedAt||'').slice(0,10))}: ${parts.join(' · ')||'no change'}</div>`;
+  }).join('');
+  host.innerHTML=`<div class="card">
+    <div class="card-head">
+      <div class="card-title">📋 Tenet Ledger</div>
+      <div style="font-size:11px;color:var(--fog)">${rows.length} fill${rows.length===1?'':'s'} · ${buys} BUY · ${sells} SELL${amended?` · ${amended} amended by a correction`:''}</div>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>Date</th><th>Side</th><th>ETF</th><th>Qty</th><th>Price</th><th>Charges</th><th>Order id</th><th>Lot</th><th>Source</th>
+    </tr></thead><tbody>${rows.map(r=>{
+      const f=r.fill,sellish=f.side==='SELL';
+      return `<tr>
+        <td>${escapeHtml(String(r.eff.date||'—'))}${'date' in r.was?`<div style="font-size:9px;color:var(--fog)">was ${escapeHtml(String(r.was.date))}</div>`:''}</td>
+        <td style="color:${sellish?'var(--stop)':'var(--go)'};font-weight:800">${escapeHtml(f.side||'')}${f.isBid?' <span style="font-size:9px;color:var(--gold)">BID</span>':''}</td>
+        <td>${escapeHtml(f.etf||'')}${f.team?` <span style="font-size:9px;color:var(--fog)">${escapeHtml(f.team)}</span>`:''}</td>
+        <td>${escapeHtml(String(f.qty??'—'))}</td>
+        <td>${n(r.eff.price)}${'price' in r.was?`<div style="font-size:9px;color:var(--fog)">was ${n(r.was.price)}</div>`:''}</td>
+        <td>${n(r.eff.charges)}${'charges' in r.was?`<div style="font-size:9px;color:var(--fog)">was ${n(r.was.charges)}</div>`:''}</td>
+        <td>${escapeHtml(f.orderId||'—')}</td>
+        <td style="font-size:10px;color:var(--fog)">${escapeHtml(f.lotId||'—')}</td>
+        <td style="font-size:10px;color:var(--fog)">${escapeHtml(f.source||'—')}${trail(r)}</td>
+      </tr>`;}).join('')}</tbody></table></div>
+    <div style="font-size:10px;color:var(--fog);margin-top:8px">A correction never edits a fill: it is recorded as its own row and shown here under the fill it amends, so the trail stays auditable.</div>
+  </div>`;
+}
 function tenetRenderPairList(){const host=document.getElementById('tenet-pair-list'),msg=document.getElementById('tenet-pair-validation');if(!host)return;const t=tenetState(),errs=tenetValidatePairs(),conflicts=tenetIndexRegistry().filter(x=>x.conflict),activeEtfs=tenetActiveEtfs(),per=tenetPerBuy();if(msg){msg.style.color=errs.length||conflicts.length?'var(--bad)':'var(--go)';msg.textContent=errs.length?`⚠ ${errs.join(' · ')}`:conflicts.length?`⚠ Conflicting Yahoo index tickers: ${conflicts.map(x=>x.name).join(', ')}`:`✓ ${t.pairs.length}/${t.config.maxGreen} GREEN slots · ${activeEtfs.length} actual ETFs · per-buy ${fmtINR(per)}.`;}
   host.innerHTML=t.pairs.length?`<div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Underlying Index</th><th>52W distance</th><th>GREEN</th><th>RED counter</th><th></th></tr></thead><tbody>${t.pairs.map((p,i)=>{const met=TENET_RUNTIME.metrics?.[p.underlying],dist=Number.isFinite(met?.distance)?met.distance.toFixed(2)+'%':'—',hasHold=[p.green,p.red].filter(Boolean).some(sym=>t.holdings.some(h=>h.etf===sym)),guide=Number.isFinite(met?.distance)&&met.distance<t.config.selectionDistancePct?(hasHold?' · KEEP: holding open':' · review replacement'):'';return `<tr><td>G${i+1}${p.red?'/R'+(i+1):''}</td><td>${escapeHtml(p.underlying)}<div style="font-size:9px;color:var(--fog)">${escapeHtml(tenetIndexYf(p.underlying)||'Yahoo fallback not set')}</div></td><td>${dist}${guide}</td><td>🟢 ${escapeHtml(p.green)}</td><td>${p.red?'🔴 '+escapeHtml(p.red):'—'}</td><td><button class="icon-btn" onclick="tenetEditPair(${htmlJsArg(p.underlying)})">Edit</button> <button class="danger-btn" onclick="tenetRemovePair(${htmlJsArg(p.underlying)})">×</button></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No Tenet scanner universe. Link ETFs to their real underlying index in Master Universe, then assign GREEN and optional RED counters here.</div>';}
 function tenetSaveConfigFromUI(){const t=tenetState();
@@ -14392,7 +14448,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='f9bcd495bc73b0fde6e9831fde19b96f9ba4304d623d227879569d4584410ccb';
+const APP_SOURCE_SHA256='70ab7e278081e87514f6bd9422c1d2ac0331d5f7c37405a20ffc0b6ab2f359f7';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
