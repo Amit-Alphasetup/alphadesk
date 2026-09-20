@@ -11305,19 +11305,27 @@ async function clearAllETFs(){
   await syncUniverseToSB();
 }
 
+// R2-6: the outbound universe shape. One row per instrument, its facts, and the UNION of the
+// engines that trade it — LIFO and DM from their stored lists, TENET from the Tenet pair list.
+function universeExportRows(){
+  return (S.instruments||[]).map(e=>({sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,
+    assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||'',
+    ...(e.linkedIndexYf?{linkedIndexYf:e.linkedIndexYf}:{}),engines:enginesOf(e.sym)}));
+}
 async function syncUniverseToSB(){
   const el=document.getElementById('uni-sync-status');
   if(el)el.textContent='Syncing…';
   if(!SB.url||!SB.key){if(el){el.style.color='var(--stop)';el.textContent='❌ Supabase not configured';}return;}
+  const _rows=universeExportRows();
   try{
     // #14 FIX: was hand-rolled headers duplicating sbFetch; now routed through it
     // (which also inherits the #13 timeout). sbFetch returns null on failure.
     const res=await sbFetch('etf_universe',{
       method:'POST',
       headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
-      body:JSON.stringify({user_id:'default',symbols:JSON.stringify(S.universe),updated_at:new Date().toISOString()})
+      body:JSON.stringify({user_id:'default',symbols:JSON.stringify(_rows),updated_at:new Date().toISOString()})
     });
-    if(res!==null){if(el){el.style.color='var(--go)';el.textContent=`✅ ${S.universe.length} ETFs synced`;}}
+    if(res!==null){if(el){el.style.color='var(--go)';el.textContent=`✅ ${_rows.length} ETFs synced`;}}
     else{if(el){el.style.color='var(--stop)';el.textContent='❌ '+(_sbLastError||'Sync failed');}}
   }catch(e){if(el){el.style.color='var(--stop)';el.textContent=`❌ ${e.message}`;}}
 }
@@ -14302,7 +14310,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='063d116c85208379936eeaec339e39c99b1ab32d9fc4884546d250a9f8bf58ae';
+const APP_SOURCE_SHA256='91973080bf459e6bff8865170e5e5e759585a43474fd6e1114007c00d204f164';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
