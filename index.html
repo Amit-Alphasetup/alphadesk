@@ -11125,8 +11125,18 @@ function openUnitsByEngine(st){
   return out;
 }
 // A3-4: may this universe exist given the pairs and the open positions? (never mutates)
-function validateUniverseChange(next,st){
-  st=st||S;const errors=[],uni=Array.isArray(next)?next:[];
+// R2-3: given a third argument it validates a proposed set of ENGINE LISTS instead of a whole
+// universe. The registry supplies the facts, so the only questions left are whether every listed
+// symbol is a real instrument, whether the Tenet pairs still resolve, and whether any engine that
+// still holds units is being taken away. With two arguments it behaves exactly as it did before.
+function validateUniverseChange(next,st,nextEngineUniverse){
+  st=st||S;const errors=[];
+  if(nextEngineUniverse&&typeof nextEngineUniverse==='object'&&!Array.isArray(nextEngineUniverse)){
+    for(const eng of ['LIFO','DM'])for(const sym of (nextEngineUniverse[eng]||[]))
+      if(!instrumentFacts(sym))errors.push(`${sym} is in the ${eng} list but not in the instrument registry`);
+    next=_derivedUniverseFor(nextEngineUniverse,st);
+  }
+  const uni=Array.isArray(next)?next:[];
   const seen=new Set();uni.forEach(e=>{const k=String(e&&e.sym||'').toUpperCase();if(!k){errors.push('an entry has no symbol');return;}if(seen.has(k))errors.push('duplicate symbol '+k);seen.add(k);});
   const by=new Map(uni.map(e=>[String(e&&e.sym||'').toUpperCase(),e]));
   const engOf=e=>Array.isArray(e&&e.engines)?e.engines:enginesFromTag(e&&e.tag);
@@ -11150,10 +11160,11 @@ function validateUniverseChange(next,st){
 }
 function _universeBlocked(errors){try{toast('⛔ Blocked: '+errors.slice(0,3).join(' · ')+(errors.length>3?` (+${errors.length-3} more)`:''),'err');}catch(e){}}
 // R2: the universe that WOULD result from a proposed set of engine lists, for validation only.
-function _derivedUniverseFor(nextEU){
-  const has=(eng,sym)=>eng==='TENET'?engineHas('TENET',sym):(nextEU[eng]||[]).some(y=>String(y).toUpperCase()===String(sym).toUpperCase());
+function _derivedUniverseFor(nextEU,st){
+  const inPair=new Set();((((st||S).tenet)||{}).pairs||[]).forEach(p=>{if(!p)return;[p.green,p.red].forEach(x=>{const v=sanSym(x);if(v)inPair.add(v.toUpperCase());});});
+  const has=(eng,sym)=>eng==='TENET'?inPair.has(String(sym).toUpperCase()):(nextEU[eng]||[]).some(y=>String(y).toUpperCase()===String(sym).toUpperCase());
   return (S.instruments||[]).map(e=>{const en=ENGINES.filter(x=>has(x,e.sym));
-    return{sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||'',engines:en,tag:tagFromEngines(en)};});
+    return{...e,sym:e.sym,yf:e.yf||e.sym+'.NS',name:e.name||e.sym,assetClass:e.assetClass||'equity',isin:e.isin||'',linkedIndex:e.linkedIndex||'',engines:en,tag:tagFromEngines(en)};});
 }
 // R2: add one instrument to the registry and put it in the engine lists it was asked for.
 // Facts are stored once here; membership is stored in S.engineUniverse and nowhere else.
@@ -11176,7 +11187,7 @@ async function setEngineMembership(sym,engine,on){
   if(!instrumentFacts(sym))return false;
   const cur=engineList(eng);
   const nextEU={...S.engineUniverse,[eng]:on?[...new Set([...cur,sym])]:cur.filter(x=>x!==sym)};
-  const v=validateUniverseChange(_derivedUniverseFor(nextEU));if(!v.ok){_universeBlocked(v.errors);return false;}
+  const v=validateUniverseChange(null,null,nextEU);if(!v.ok){_universeBlocked(v.errors);return false;}
   const ok=await commitState(()=>{S.engineUniverse=nextEU;rebuildUniverses();},{label:'Engine membership'});
   if(!ok)return false;
   TENET_RUNTIME.live=null;
@@ -11222,7 +11233,7 @@ async function importEnginesFromMarketData(){
   rebuildUniverses();
   const nextEU={...S.engineUniverse};
   for(const x of d)for(const eng of ['LIFO','DM']){const cur=(nextEU[eng]||[]).filter(y=>y!==x.sym);nextEU[eng]=x.to.includes(eng)?[...cur,x.sym]:cur;}
-  const v=validateUniverseChange(_derivedUniverseFor(nextEU));if(!v.ok){_universeBlocked(v.errors);return;}
+  const v=validateUniverseChange(null,null,nextEU);if(!v.ok){_universeBlocked(v.errors);return;}
   const ok=await commitState(()=>{S.engineUniverse=nextEU;rebuildUniverses();},{label:'Import engines'});
   if(ok){TENET_RUNTIME.live=null;try{renderUniverse();}catch(e){}toast(`${d.length} ETF engine assignment(s) updated`,'ok');}
 }
@@ -14270,7 +14281,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='927081360e00f45b09c261b03bf1a34300be82cb67fac5068bb8092bab77c645';
+const APP_SOURCE_SHA256='f2be594b1255e916c21591abedecc558884840678ae29722bd2965980eaa967e';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
