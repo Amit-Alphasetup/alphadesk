@@ -11201,6 +11201,38 @@ function migrateRawState(raw){
   }
   return raw;
 }
+// Restore repair. A backup written while an engine held units of an ETF that was missing from that
+// engine's list would otherwise be refused for ever (validateUniverseChange, correctly). Runs on the
+// RAW snapshot after migrateRawState: puts the missing LIFO/DM listing back, taking the facts from the
+// backup's own registry, then the built-in defaults, and returns one note per ETF so the restore
+// dialog can say so. Only ever ADDS. Tenet's list comes from its pairs, so it is never repaired here.
+function repairUniverseForHoldings(st){
+  const notes=[];
+  if(!st||typeof st!=='object'||!Array.isArray(st.universe))return notes;
+  const defs=new Map(buildDefaultUniverse().map(e=>[e.sym,e]));
+  const hasReg=Array.isArray(st.instruments)&&st.engineUniverse&&typeof st.engineUniverse==='object';
+  for(const [sym,m] of Object.entries(openUnitsByEngine(st))){
+    const K=String(sym).toUpperCase();
+    for(const eng of ['LIFO','DM']){
+      if(!(m[eng]>0))continue;
+      let row=st.universe.find(e=>e&&String(e.sym||'').toUpperCase()===K);
+      const fact=hasReg&&st.instruments.find(e=>e&&String(e.sym||'').toUpperCase()===K)||null;
+      const d=defs.get(K)||{};
+      if(!row){row={sym:K,yf:(fact&&fact.yf)||d.yf||K+'.NS',name:(fact&&fact.name)||d.name||K,assetClass:(fact&&fact.assetClass)||d.assetClass||'equity',
+        isin:(fact&&fact.isin)||'',linkedIndex:(fact&&fact.linkedIndex)||'',engines:[]};st.universe.push(row);}
+      if(!Array.isArray(row.engines))row.engines=enginesFromLegacyRow(row);
+      if(row.engines.includes(eng))continue;
+      row.engines.push(eng);
+      if(hasReg){
+        if(!fact)st.instruments.push({sym:K,name:row.name||K,yf:row.yf||K+'.NS',assetClass:row.assetClass||'equity',isin:row.isin||'',linkedIndex:row.linkedIndex||''});
+        if(!Array.isArray(st.engineUniverse[eng]))st.engineUniverse[eng]=[];
+        if(!st.engineUniverse[eng].some(x=>String(x).toUpperCase()===K))st.engineUniverse[eng].push(K);
+      }
+      notes.push(`${K} in ${eng} (${+m[eng].toFixed(4)} unit(s) held)`);
+    }
+  }
+  return notes;
+}
 const _finPos=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
 function validateTenetState(t,st){
   const errs=[];if(!t||typeof t!=='object')return errs;
@@ -14532,7 +14564,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='0e1f6205d84a051f3e0b29a12cfb9174c45ef024b5597075e9eaba24d89d4d21';
+const APP_SOURCE_SHA256='117aa7b39bd0970190b70aa1a02bdca695b7644d270251d1ca25377bdf4e4999';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -16247,6 +16279,7 @@ function importFullBackup(inputEl){
 
     // ── VALIDATION ──────────────────────────────────────────────────────────
     const errs = [];
+    let _restoreListingNotes = [];
 
     if(!payload._meta || payload._meta.appName !== 'AlphaDesk')
       errs.push('Not an AlphaDesk backup file (_meta.appName mismatch)');
@@ -16260,6 +16293,7 @@ function importFullBackup(inputEl){
     const migratedLegacyTenet=false; // v2 restore is intentionally unsupported: no complete schema migration exists.
     if(payload.state && typeof payload.state==='object'){
       migrateRawState(payload.state);                                       // A3-6: legacy fields are upgraded on the RAW snapshot first
+      try{_restoreListingNotes=repairUniverseForHoldings(payload.state);}catch(e){_restoreListingNotes=[];}   // held ETFs missing from a list are put back, never dropped
       errs.push(...validateStateSnapshotShape(payload.state,{requireExactKeys:true}));
       if(!errs.length){
         errs.push(...validateTenetState(payload.state.tenet,payload.state));
@@ -16293,6 +16327,7 @@ function importFullBackup(inputEl){
       `DM trades:   ${meta.momTrades ?? '?'}\n` +
       `ETFs:        ${meta.universeSize ?? '?'}\n` +
       `${migratedLegacyTenet?'Legacy v2 backup: current Tenet state will be preserved (v2 did not store it).\\n':''}\n` +
+      (_restoreListingNotes.length?`ℹ️  This backup held units of ETFs missing from an ETF list. They will be added back so nothing is lost:\n${_restoreListingNotes.map(n=>'   • '+n).join('\n')}\n\n`:'') +
       `⚠️  ALL current local data represented by this backup will be OVERWRITTEN.\n` +
       `This cannot be undone. Proceed?`;
 
