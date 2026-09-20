@@ -10975,17 +10975,32 @@ function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}try{renderCorpAc
   const uni=S.universe;
   const search=(document.getElementById('uni-search')?.value||'').toUpperCase().trim();
   const filtered=search?uni.filter(e=>e.sym.includes(search)):uni;
-  const nL=uni.filter(e=>e.tag==='lifo'||e.tag==='both').length;
-  const nM=uni.filter(e=>e.tag==='momentum'||e.tag==='both').length;
+  const lifoL=engineList('LIFO'),dmL=engineList('DM'),tenetL=engineList('TENET');
   document.getElementById('uni-count').textContent=uni.length;
   document.getElementById('uni-metrics').innerHTML=`
-    <div class="stat-card azure"><div class="stat-label">Total ETFs</div><div class="stat-val azure">${uni.length}</div></div>
-    <div class="stat-card"><div class="stat-label">📦 LIFO Engine</div><div class="stat-val">${nL}</div></div>
-    <div class="stat-card"><div class="stat-label">📡 Momentum</div><div class="stat-val go">${nM}</div></div>
-    <div class="stat-card"><div class="stat-label">Showing</div><div class="stat-val">${filtered.length}</div></div>`;
-  const tagCol={lifo:'var(--azure)',momentum:'var(--go)',both:'var(--gold)'};
-  const tagLbl={lifo:'LIFO',momentum:'MOM',both:'BOTH'};
-  document.getElementById('uni-list').innerHTML=`<div style="display:flex;flex-wrap:wrap">${filtered.map(e=>`<div class="etf-chip">${escapeHtml(e.sym)}<span style="font-size:8px;color:var(--fog);margin-left:5px">${escapeHtml((e.assetClass||'equity').toUpperCase())}</span>${e.linkedIndex?`<span style="font-size:8px;color:var(--fog);margin-left:5px">→ ${escapeHtml(e.linkedIndex)}</span>`:''}${['LIFO','DM','TENET'].map(en=>{const on=(e.engines||enginesFromTag(e.tag)).includes(en),col=en==='LIFO'?'var(--azure)':en==='DM'?'var(--go)':'var(--gold)';return `<button onclick="toggleEngine(${htmlJsArg(e.sym)},'${en}')" title="${en} engine ${on?'ON':'OFF'} — tap to toggle" style="background:${on?col:'none'};border:1px solid ${col};color:${on?'var(--ink)':col};border-radius:4px;font-size:8px;font-weight:800;margin-left:${en==='LIFO'?'6':'2'}px;padding:1px 4px;cursor:pointer;opacity:${on?1:.55}">${en[0]}</button>`;}).join('')}<button onclick="editAssetClass(${htmlJsArg(e.sym)})" title="Edit tax asset class" style="background:none;border:none;color:var(--violet);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">⚖</button><button onclick="editLinkedIndex(${htmlJsArg(e.sym)})" title="Link this ETF to its real underlying index" style="background:none;border:none;color:var(--gold);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">🔗</button><button onclick="editYfSymbol(${htmlJsArg(e.sym)})" title="Edit Yahoo ticker (${escapeHtml(e.yf||e.sym+'.NS')})" style="background:none;border:none;color:var(--fog);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">✎</button><button class="chip-del" onclick="removeETF(${htmlJsArg(e.sym)})">×</button></div>`).join('')}</div><p style="font-size:10px;color:var(--fog);margin-top:8px">Tap a tag to cycle 📦 LIFO → 📡 MOM → ⚡ BOTH</p>`;
+    <div class="stat-card azure"><div class="stat-label">Instruments</div><div class="stat-val azure">${uni.length}</div></div>
+    <div class="stat-card"><div class="stat-label">📦 LIFO list</div><div class="stat-val">${lifoL.length}</div></div>
+    <div class="stat-card"><div class="stat-label">📡 DM list</div><div class="stat-val go">${dmL.length}</div></div>
+    <div class="stat-card"><div class="stat-label">⚡ TENET (derived)</div><div class="stat-val gold">${tenetL.length}</div></div>`;
+  // R2-4: one editable list per engine, plus one shared facts editor per instrument. The lists are
+  // independent — taking an ETF out of LIFO here cannot change what DM trades. TENET has no list to
+  // edit: its universe is derived from the Tenet pairs, which are the only authority for it.
+  const engSec=(eng,list,col,label)=>`<div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:800;color:${col};margin-bottom:4px">${label}<span style="color:var(--fog);font-weight:600;margin-left:6px">${list.length} ETF${list.length===1?'':'s'}</span></div>
+      ${list.length?`<div style="display:flex;flex-wrap:wrap">${list.map(sy=>`<div class="etf-chip">${escapeHtml(sy)}<button class="chip-del" title="Remove ${escapeHtml(sy)} from the ${eng} list only" onclick="setEngineMembership(${htmlJsArg(sy)},'${eng}',false)">×</button></div>`).join('')}</div>`:`<div class="empty" style="font-size:10px">Nothing is in the ${eng} list.</div>`}
+    </div>`;
+  document.getElementById('uni-list').innerHTML=
+    engSec('LIFO',lifoL,'var(--azure)','📦 LIFO')+
+    engSec('DM',dmL,'var(--go)','📡 DM')+
+    `<div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:800;color:var(--gold);margin-bottom:4px">⚡ TENET<span style="color:var(--fog);font-weight:600;margin-left:6px">${tenetL.length} ETF${tenetL.length===1?'':'s'} · read-only, derived from its pairs</span></div>
+      ${tenetL.length?`<div style="display:flex;flex-wrap:wrap">${tenetL.map(sy=>`<div class="etf-chip" title="In TENET because a Tenet pair names it">${escapeHtml(sy)}</div>`).join('')}</div>`:`<div class="empty" style="font-size:10px">No Tenet pair names an ETF yet. Build the pairs in Tenet, and this list follows them.</div>`}
+    </div>
+    <div style="border-top:1px solid var(--wire);margin-top:10px;padding-top:8px">
+      <div style="font-size:10px;font-weight:800;color:var(--fog);margin-bottom:4px">INSTRUMENTS<span style="font-weight:600;margin-left:6px">${filtered.length} shown · each fact is stored once and shared by every engine</span></div>
+      <div style="display:flex;flex-wrap:wrap">${filtered.map(e=>`<div class="etf-chip">${escapeHtml(e.sym)}<span style="font-size:8px;color:var(--fog);margin-left:5px">${escapeHtml((e.assetClass||'equity').toUpperCase())}</span>${e.linkedIndex?`<span style="font-size:8px;color:var(--fog);margin-left:5px">→ ${escapeHtml(e.linkedIndex)}</span>`:''}${['LIFO','DM'].map(en=>{const on=engineHas(en,e.sym),col=en==='LIFO'?'var(--azure)':'var(--go)';return `<button onclick="toggleEngine(${htmlJsArg(e.sym)},'${en}')" title="${en} list: ${on?'in — tap to remove':'out — tap to add'}" style="background:${on?col:'none'};border:1px solid ${col};color:${on?'var(--ink)':col};border-radius:4px;font-size:8px;font-weight:800;margin-left:${en==='LIFO'?'6':'2'}px;padding:1px 4px;cursor:pointer;opacity:${on?1:.55}">${en[0]}</button>`;}).join('')}${engineHas('TENET',e.sym)?`<span title="In TENET because a Tenet pair names it — edit the pairs to change this" style="border:1px solid var(--gold);color:var(--gold);border-radius:4px;font-size:8px;font-weight:800;margin-left:2px;padding:1px 4px;opacity:.75">T</span>`:''}<button onclick="editAssetClass(${htmlJsArg(e.sym)})" title="Edit tax asset class" style="background:none;border:none;color:var(--violet);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">⚖</button><button onclick="editLinkedIndex(${htmlJsArg(e.sym)})" title="Link this ETF to its real underlying index" style="background:none;border:none;color:var(--gold);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">🔗</button><button onclick="editYfSymbol(${htmlJsArg(e.sym)})" title="Edit Yahoo ticker (${escapeHtml(e.yf||e.sym+'.NS')})" style="background:none;border:none;color:var(--fog);font-size:10px;margin-left:4px;padding:1px 3px;cursor:pointer">✎</button><button class="chip-del" title="Remove the instrument itself, from every list" onclick="removeETF(${htmlJsArg(e.sym)})">×</button></div>`).join('')}</div>
+      <p style="font-size:10px;color:var(--fog);margin-top:8px">L and D add or remove this ETF from that one engine's list; nothing else moves. T is shown only when a Tenet pair names the ETF.</p>
+    </div>`;
 }
 
 // If a symbol's Yahoo ticker is wrong, no history can ever be fetched for it and
@@ -14281,7 +14296,7 @@ window.addEventListener('unhandledrejection',e=>{
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
 const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='f2be594b1255e916c21591abedecc558884840678ae29722bd2965980eaa967e';
+const APP_SOURCE_SHA256='0912ef84025822dc416b110456b1d7358789f7ad01bdb2f82dc5d8faaef68b5e';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
