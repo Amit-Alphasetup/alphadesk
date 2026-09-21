@@ -913,6 +913,10 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('watchlist',this)">👁 Watchlist</button>
 <div class="strat-divider"></div>
+<button class="strat-btn" onclick="switchStrategy('universe',this)">🌐 Universe</button>
+<div class="strat-divider"></div>
+<button class="strat-btn" onclick="switchStrategy('data',this)">🗄 Data</button>
+<div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('settings',this)">⚙️ Settings</button>
 </div>
 <div id="nav-bar"></div>
@@ -13070,7 +13074,7 @@ function _closeMoreMenu(){
 // P13 FIX 20: grey strat pill when on non-strategy panes (Tax/Risk/Watchlist/Settings)
 // so user knows the LIFO/DM switcher won't do anything useful there
 function _updateStratPillState(strategy){
-  const nonStrat=['tax','portfolio','watchlist','settings'];
+  const nonStrat=['tax','portfolio','watchlist','settings','universe','data'];
   const isNonStrat=nonStrat.includes(strategy);
   document.querySelectorAll('.strat-seg-btn').forEach(btn=>{
     btn.classList.toggle('greyed',isNonStrat);
@@ -13170,7 +13174,8 @@ function switchStrategy(name,btn){
   if(name==='risk')name='portfolio';   // R3-5: Risk became a band inside Portfolio; the old name still answers
   document.querySelectorAll('.strategy-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.strat-btn').forEach(b=>b.classList.remove('active'));
-  const pane=document.getElementById('strategy-'+name);
+  const SHARED_IN_DM={universe:'mom-universe',data:'mom-datacenter'};   // R3nav: NAV.shared screens whose markup sits inside strategy-momentum
+  const pane=document.getElementById('strategy-'+(SHARED_IN_DM[name]?'momentum':name));
   if(pane)pane.classList.add('active');
   if(btn)btn.classList.add('active');
   curStrategy=name;
@@ -13180,7 +13185,7 @@ function switchStrategy(name,btn){
   _closeMoreMenu(); // close more menu if open
   const nav=document.getElementById('nav-bar');
   const tabs=TABS[name]||[];
-  if(!tabs.length){nav.innerHTML='';if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='portfolio')renderPortfolioScreen();if(name==='watchlist')renderWatchlist();return;}
+  if(!tabs.length){nav.innerHTML='';if(SHARED_IN_DM[name]){switchTab('momentum',SHARED_IN_DM[name],null,false);return;}if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='portfolio')renderPortfolioScreen();if(name==='watchlist')renderWatchlist();return;}
   nav.innerHTML=tabs.map(t=>`<button class="nav-btn" onclick="switchTab('${name}','${t.id}',this)">${t.label}</button>`).join('');
   if(tabs.length)switchTab(name,tabs[0].id,null,true);
   if(name==='tenet'){try{tenetInitBacktestDates();}catch(e){}}      // A4-5 (F25): silent tab switches skipped the date init
@@ -13201,6 +13206,7 @@ function _navRenderSections(strategy,tabId){
 function switchTab(strategy,tabId,btn,silent=false){
   tabId=navResolve(tabId);   // a pre-R3 id still names the screen it always named
   navPaneIds(strategy).forEach(id=>document.getElementById(id)?.classList.remove('active'));
+  for(const id of ['mom-universe','mom-datacenter'])if(id!==tabId)document.getElementById(id)?.classList.remove('active');   // R3nav: these two share the DM pane's markup, so they must not stay lit under another tab (shared-portfolio/tax/settings own their pane and stay as they are)
   document.querySelectorAll('#nav-bar .nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById(tabId)?.classList.add('active');
   if(btn)btn.classList.add('active');
@@ -14488,7 +14494,11 @@ function dlCSV(rows,name){
   a.download=`${name}_${localDate()}.csv`;
   a.click();
 }
-function toast(msg,type='ok'){const z=document.getElementById('toast-zone');const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;z.appendChild(t);setTimeout(()=>t.remove(),3500);}
+const _TOAST_LIVE=new Map();   // 'type|msg' -> {el,timer}: the same message shown again restarts its timer instead of stacking a copy
+function toast(msg,type='ok'){const z=document.getElementById('toast-zone');const key=type+'|'+msg;const live=_TOAST_LIVE.get(key);
+  if(live){clearTimeout(live.timer);live.timer=setTimeout(()=>{live.el.remove();_TOAST_LIVE.delete(key);},3500);return;}
+  const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;z.appendChild(t);
+  const rec={el:t,timer:setTimeout(()=>{t.remove();_TOAST_LIVE.delete(key);},3500)};_TOAST_LIVE.set(key,rec);}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 // Phase6: consolidated into a single named init function, called once from the
@@ -14563,8 +14573,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-20-v3.22-A6';
-const APP_SOURCE_SHA256='117aa7b39bd0970190b70aa1a02bdca695b7644d270251d1ca25377bdf4e4999';
+const APP_BUILD='2026-09-21-v3.22-R3nav';
+const APP_SOURCE_SHA256='88e660e7d283c09bca9ac71b5e91000fd0032fac217b2f7cfbced29eab431320';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -16853,6 +16863,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('tax',null)"><span style="font-size:18px">🧾</span><span>Tax</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('portfolio',null)"><span style="font-size:18px">💼</span><span>Portfolio</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('watchlist',null)"><span style="font-size:18px">👁</span><span>Watchlist</span></button>
+<button class="mm-item" onclick="_closeMoreMenu();switchStrategy('universe',null)"><span style="font-size:18px">🌐</span><span>Universe</span></button>
+<button class="mm-item" onclick="_closeMoreMenu();switchStrategy('data',null)"><span style="font-size:18px">🗄</span><span>Data</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('settings',null)"><span style="font-size:18px">⚙️</span><span>Settings</span></button>
 </div>
 </div>
