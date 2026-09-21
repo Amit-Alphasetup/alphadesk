@@ -1546,7 +1546,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 <div id="monthly-alpha-body"><div class="empty" style="padding:10px 0">Need closed trades to generate report</div></div>
 </div>
-<div class="two-col"><div class="card" style="margin-bottom:14px;grid-column:1/-1"><div class="settings-section-title">🌐 Market data</div><div style="font-size:11px;color:var(--mist);line-height:1.7;margin-bottom:10px">Primary: <b>Upstox V3 through your read-only Cloudflare Market Bridge</b>. Google Sheet is an independent reference/gap filler; Yahoo is emergency fallback. Cached bars are display-only fallbacks and are never labelled live. The Upstox token stays in the Worker secret, never in this HTML.</div><div class="form-group"><label class="form-label">Market Bridge Worker URL</label><input class="form-input" id="s-market-bridge" placeholder="https://alphadesk-market.your-subdomain.workers.dev" type="url"/><div id="market-bridge-status" style="font-size:10px;color:var(--fog);margin-top:5px">Not configured</div></div><div style="font-size:10px;color:var(--fog);line-height:1.6;margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px">This page origin: <code id="market-origin-hint">detecting…</code><br/>If you open AlphaDesk directly from Android Downloads (<code>content://</code>) or as a local file, the browser normally sends <code>Origin: null</code>. Put the literal value <b>null</b> in the Worker's <code>ALLOWED_ORIGINS</code>.</div><div id="market-data-health" style="font-size:10px;color:var(--fog);line-height:1.65;margin:8px 0">Market-data health has not been tested this session.</div><div class="form-row"><button class="action-btn sm" onclick="testMarketBridge(true)">Test bridge + token</button><button class="action-btn sm" onclick="fetchAllPrices()">Refresh prices</button><button class="action-btn sm" onclick="copyMarketBridgeWorker()">Copy Worker code</button><button class="action-btn sm" onclick="downloadMarketBridgeWorker()">Download Worker</button></div><div style="font-size:10px;color:var(--fog);margin-top:8px">Deployment gate for real-money signals: Worker test must pass, Upstox token must validate, and Tenet's live scanner must show fresh verified index + ETF data. AlphaDesk blocks Tenet actionable BUY/BID/SELL buttons when that gate is not met.</div></div>
+<div class="two-col">
 <div class="card">
 <div class="card-head">
 <div class="card-title">🏆 Top Picks <span id="mom-signal-date" style="font-size:10px;color:var(--fog);font-weight:400"></span></div>
@@ -2544,6 +2544,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
         </div>
 <div id="trash-list"></div>
 </div>
+<div class="card" style="margin-bottom:14px;grid-column:1/-1"><div class="settings-section-title">🌐 Market data</div><div style="font-size:11px;color:var(--mist);line-height:1.7;margin-bottom:10px">Primary: <b>Upstox V3 through your read-only Cloudflare Market Bridge</b>. Google Sheet is an independent reference/gap filler; Yahoo is emergency fallback. Cached bars are display-only fallbacks and are never labelled live. The Upstox token stays in the Worker secret, never in this HTML.</div><div class="form-group"><label class="form-label">Market Bridge Worker URL</label><input class="form-input" id="s-market-bridge" placeholder="https://alphadesk-market.your-subdomain.workers.dev" type="url"/><div id="market-bridge-status" style="font-size:10px;color:var(--fog);margin-top:5px">Not configured</div></div><div style="font-size:10px;color:var(--fog);line-height:1.6;margin:8px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px">This page origin: <code id="market-origin-hint">detecting…</code><br/>If you open AlphaDesk directly from Android Downloads (<code>content://</code>) or as a local file, the browser normally sends <code>Origin: null</code>. Put the literal value <b>null</b> in the Worker's <code>ALLOWED_ORIGINS</code>.</div><div id="market-data-health" style="font-size:10px;color:var(--fog);line-height:1.65;margin:8px 0">Market-data health has not been tested this session.</div><div class="form-row"><button class="action-btn sm" onclick="saveMarketBridgeUrl(true)">💾 Save URL</button><button class="action-btn sm" onclick="testMarketBridge(true)">Test bridge + token</button><button class="action-btn sm" onclick="fetchAllPrices()">Refresh prices</button><button class="action-btn sm" onclick="copyMarketBridgeWorker()">Copy Worker code</button><button class="action-btn sm" onclick="downloadMarketBridgeWorker()">Download Worker</button></div><div style="font-size:10px;color:var(--fog);margin-top:8px">Deployment gate for real-money signals: Worker test must pass, Upstox token must validate, and Tenet's live scanner must show fresh verified index + ETF data. AlphaDesk blocks Tenet actionable BUY/BID/SELL buttons when that gate is not met.</div></div>
 <div class="card">
 <div class="settings-section-title" style="margin-top:16px">Price Source Waterfall</div>
 <div style="font-size:11px;color:var(--mist);line-height:2;margin-bottom:10px">
@@ -2556,7 +2557,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 <div class="form-group" style="margin-bottom:8px">
 <label class="form-label">Apps Script Web App URL</label>
-<input class="form-input" id="s-sheeturl" placeholder="https://script.google.com/macros/s/…/exec" type="text"/>
+<input class="form-input" id="s-sheeturl" placeholder="https://script.google.com/macros/s/…/exec" type="text"/><div id="sheet-url-hint" style="font-size:10px;color:var(--gold);margin-top:5px;display:none"></div>
 </div>
 </div>
 <div class="conn-card">
@@ -4089,7 +4090,25 @@ function _marketBridgeHelpMessage(){
   if(/TOKEN|401|invalid.*token|expired/i.test(d.error||''))return 'Upstox token is missing, invalid, or expired. Generate a current Analytics Token and update the Worker secret.';
   return d.error||'Bridge unavailable. Check Worker URL, deployment, internet connection, and Cloudflare logs.';
 }
+// R4-1: the Market data card had four buttons and no Save, and testMarketBridge read the SAVED url, so
+// typing the Worker URL and pressing Test reported 'not configured' with the URL visible in the box.
+// Same shape as saveSupabaseConfig: normalise -> assign -> saveState -> re-render -> toast.
+function saveMarketBridgeUrl(showToast=true){
+  const box=document.getElementById('s-market-bridge');
+  if(!box)return true;                                   // harness DOM: nothing typed, nothing to save
+  const raw=String(box.value||'').trim();
+  if(!raw)return true;                                   // an empty box must NEVER clear a saved URL
+  let url;
+  try{url=normalizeHttpsUrl(raw,'Market Bridge URL').replace(/\/$/,'');}
+  catch(e){if(showToast)toast('❌ '+e.message,'err');return false;}
+  if(url===S.config.marketBridgeUrl)return true;         // no toast on every Test press
+  S.config.marketBridgeUrl=url;saveState();
+  try{renderMarketDataHealth();}catch(_e){}
+  if(showToast)toast('✅ Market Bridge URL saved','ok');
+  return true;
+}
 async function testMarketBridge(showToast=true){
+  if(!saveMarketBridgeUrl(false))return false;           // what is in the box is what gets tested
   const el=document.getElementById('market-bridge-status');if(el){el.textContent='Testing Worker, CORS and Upstox token…';el.style.color='var(--fog)';}
   if(!S.config.marketBridgeUrl){const msg='✕ Market Bridge URL not configured';if(el){el.textContent=msg;el.style.color='var(--stop)';}renderMarketDataHealth();if(showToast)toast(msg,'warn');return false;}
   const j=await marketBridgeFetch('/health',{probe:'1'},10000);const ok=!!(j?.ok&&j?.tokenConfigured&&j?.tokenValid===true);
@@ -11886,6 +11905,12 @@ function syncSettingsUI(){
   if(c.gistUrl){document.getElementById('gist-conn-status').className='conn-status live';document.getElementById('gist-conn-status').textContent='● SET';}
   renderMarketDataHealth();
   {const mb=document.getElementById('market-bridge-status');if(mb&&c.marketBridgeUrl&&MARKET_BRIDGE_DIAG.ok===null)mb.textContent='Configured · press Test bridge + token';}
+  // R4-2: the Sheet field wants the Apps Script WEB-APP url; an editor or /dev url is accepted silently
+  // and then fails at fetch time as a generic error. Advisory only — it blocks nothing.
+  {const h=document.getElementById('sheet-url-hint');
+   if(h){const ok=/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(c.sheetUrl||'');
+     if(c.sheetUrl&&!ok){h.textContent='This does not look like an Apps Script web-app URL — it should end in /exec (Apps Script → Deploy → Web app).';h.style.display='';}
+     else h.style.display='none';}}
 }
 
 function saveAllSettings(){
@@ -14573,8 +14598,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-21-v3.22-R3nav';
-const APP_SOURCE_SHA256='88e660e7d283c09bca9ac71b5e91000fd0032fac217b2f7cfbced29eab431320';
+const APP_BUILD='2026-09-22-v3.22-R4';
+const APP_SOURCE_SHA256='854f9c5d87001576678c730dbcb6400b0249f059ae070e96450bc8f2bd5b2d62';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
