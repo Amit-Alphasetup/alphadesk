@@ -9113,7 +9113,7 @@ function resultLabel(engine,pf,run){
   const c=pf&&pf.counts;return `RESEARCH — ${c?c.candidatesRetained:0}/${c?c.candidates:0} candidates`;
 }
 const _pfEsc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function renderPreflightPanel(containerId,pf,{refusal=null}={}){
+function renderPreflightPanel(containerId,pf,{refusal=null,latestSession=null}={}){
   const el=document.getElementById(containerId);if(!el||!pf)return;
   const eng=pf.engine,certifiable=!!(pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true),c=pf.counts||{};
   const bad=pf.rows.filter(r=>r.action==='EXCLUDED'||r.action.startsWith('BLOCKS')||r.action==='BENCHMARK_UNAVAILABLE'||r.action==='RESEARCH_ONLY');
@@ -9123,7 +9123,8 @@ function renderPreflightPanel(containerId,pf,{refusal=null}={}){
     <div style="font-size:11px;font-weight:700">Data preflight · ${_pfEsc(eng)} · dataset ${_pfEsc(pf.datasetId||'—')} · ${_pfEsc(pf.source||'')}</div>
     <div style="font-size:10.5px;color:var(--fog);margin:4px 0">${c.ok||0} ready · ${c.excluded||0} excluded · ${c.blocking||0} blocking · candidates ${c.candidatesRetained||0}/${c.candidates||0}</div>
     ${refusal?`<div style="padding:6px 8px;border-radius:5px;background:rgba(239,68,68,.12);color:var(--loss);font-weight:600;margin:6px 0">${_pfEsc(refusal.message)}</div>`:''}
-    ${Object.keys(groups).sort().map(code=>`<div style="font-size:10.5px;margin:3px 0"><b>${_pfEsc(code)}</b> — ${groups[code].map(r=>_pfEsc(r.symbol)+' ('+_pfEsc(r.role)+')').join(', ')}</div>`).join('')}
+    ${Object.keys(groups).sort().map(code=>{const rep=groups[code].find(r=>r.detail)||groups[code][0];return `<div style="font-size:10.5px;margin:3px 0"><b>${_pfEsc(code)}</b> — ${groups[code].map(r=>_pfEsc(r.symbol)+' ('+_pfEsc(r.role)+')').join(', ')}${rep.detail?`<div style="color:var(--fog);margin:2px 0 0 2px">— ${_pfEsc(rep.detail)}</div>`:''}</div>`;}).join('')}
+    ${groups['STALE_DATASET']&&latestSession?`<div style="font-size:10.5px;color:var(--gold);margin:6px 0 2px">This is expected before this evening's data update — the newest published trading day is <b>${_pfEsc(latestSession)}</b>.</div><button class="action-btn sm" onclick="useLatestPublishedDate('${_pfEsc(eng)}','${_pfEsc(latestSession)}')">Use ${_pfEsc(latestSession)} as the end date</button>`:''}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
       ${btn('certified','Run Certified',certifiable,'certified')}
       ${btn('research',`Run Research ${c.candidatesRetained||0}/${c.candidates||0}`,!!pf.canResearch,'research')}
@@ -9275,6 +9276,15 @@ async function mdSaveTokenUI(){
 async function mdForgetTokenUI(){try{await vaultSetToken('marketdata','');mdPollStop();toast('market-data token removed','warn');mdTokenStateUI();}catch(e){toast(String(e&&e.message||e),'err');}}
 function mdTokenStateUI(){const el=document.getElementById('md-token-state');if(el){el.textContent=mdToken()?'token stored (encrypted, no expiry)':'no token';el.style.color=mdToken()?'var(--gain)':'var(--fog)';}}
 const PREFLIGHT_LAST={};   // engine -> {contract, pf}
+// R4b: the End Date field an engine's backtest reads, and the function that presses its own Run
+// button again — used only to jump a stale default forward to a date the published dataset covers.
+const STALE_END_FIELD=Object.freeze({LIFO:'bt-end',DM:'dm-bt-to',TENET:'tenet-bt-to'});
+const STALE_RERUN=Object.freeze({LIFO:'runLifoBacktest',DM:'runDMBacktest',TENET:'runTenetBacktestV3'});
+function useLatestPublishedDate(engine,dateStr){
+  const eng=String(engine).toUpperCase(),fieldId=STALE_END_FIELD[eng],fnName=STALE_RERUN[eng];
+  const el=fieldId&&document.getElementById(fieldId);if(el)el.value=dateStr;
+  const fn=fnName&&globalThis[fnName];if(typeof fn==='function')fn();
+}
 function preflightAction(engine,mode){
   const eng=String(engine).toUpperCase();
   if(mode==='preview'){RUN_PREVIEW.active=true;RUN_PREVIEW.until=Date.now()+10*60*1000;setPreviewMode(true);try{toast('Preview mode: record/confirm actions are disabled','warn');}catch(e){}
@@ -9295,7 +9305,7 @@ async function eod2RunGate(engine,params,panelId,anchorId,snapshot){
     PREFLIGHT_LAST[eng]={contract,pf,mode};
     let host=document.getElementById(panelId);
     if(!host){const a=document.getElementById(anchorId);if(a&&a.parentNode){host=document.createElement('div');host.id=panelId;a.parentNode.insertBefore(host,a);}}
-    renderPreflightPanel(panelId,pf);
+    renderPreflightPanel(panelId,pf,{latestSession:h.latestCompleted||null});
     if(mode==='certified'&&!(pf.canCertifyData&&ENGINE_CERTIFIABLE[eng]===true))return{ok:false,pf,mode,exclusions:[],message:'Certified run is not available: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending)':'the data does not meet the certified requirements')};
     if(!pf.canResearch)return{ok:false,pf,mode,exclusions:[],message:'Run refused — '+(pf.rows.filter(r=>r.action==='BLOCKS_RESEARCH').map(r=>`${r.symbol} ${r.code}`).join(', ')||'required data unavailable')};
     RUN_PREVIEW.active=false;setPreviewMode(false);
@@ -14598,8 +14608,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-22-v3.22-R4';
-const APP_SOURCE_SHA256='854f9c5d87001576678c730dbcb6400b0249f059ae070e96450bc8f2bd5b2d62';
+const APP_BUILD='2026-09-22-v3.22-R4b';
+const APP_SOURCE_SHA256='316638b937f813de915ffc4c300c0af67e0d59bb6bf7ba5bdf6acc797ca42c81';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
