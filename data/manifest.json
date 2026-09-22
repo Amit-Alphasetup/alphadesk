@@ -1,11 +1,11 @@
 {
   "dataset": "EOD2",
   "exporter_version": "2.0.0",
-  "exportedAt": "2026-09-21T17:25:56+00:00",
+  "exportedAt": "2026-09-22T23:49:51+00:00",
   "eod2_data_version": 3.4,
-  "eod2_last_update": "2026-09-21T00:00:00+05:30",
+  "eod2_last_update": "2026-09-22T00:00:00+05:30",
   "windowStart": "2019-01-14",
-  "latestSession": "2026-09-21",
+  "latestSession": "2026-09-22",
   "adjustments": "split+bonus; ETF splits applied at export",
   "dividendsAdjusted": false,
   "providerMixing": false,
@@ -16,7 +16,8 @@
       "unexplained +19.8% on 2026-09-16 (ratio 0.83)",
       "unexplained +20.0% on 2026-09-17 (ratio 0.83)",
       "unexplained +20.0% on 2026-09-18 (ratio 0.83)",
-      "unexplained -20.0% on 2026-09-21 (ratio 1.25)"
+      "unexplained -20.0% on 2026-09-21 (ratio 1.25)",
+      "unexplained -20.0% on 2026-09-22 (ratio 1.25)"
     ],
     "MOM100": [
       "1 unexplained session gap(s): ['2022-05-11']"
@@ -151,415 +152,415 @@
   "benchmark": {
     "NIFTY50_TRI": "NOT_INCLUDED (separate provider; blocks S3 edge only)"
   },
-  "datasetHash": "d488a2b7a7f65e57413e5d94afeedb6a886ca26c21cb6acf58fbaf3c445a3882",
+  "datasetHash": "0c7840ee13c26d29111394e6a60d3a0cc162750547fa2160734869af95eba682",
   "files": {
     "NIFTYBEES": {
       "path": "data/etf/NIFTYBEES.json",
       "kind": "ETF",
-      "sha256": "936adff0b26579c865306dfaf1b9ab66a73a6680a0a4cd9fcaf4186ed64c0d10",
+      "sha256": "09a9c336ae7ac010ab72c5c5eb23823cf9989c96658c93543d82c157dc9b9a15",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "JUNIORBEES": {
       "path": "data/etf/JUNIORBEES.json",
       "kind": "ETF",
-      "sha256": "5933301c3a151a856911cd66248ccefb4abb8c58f29e5b8a5c51f8b3b6eac6ad",
+      "sha256": "cfa613a9ad1ac2d630a7d2aec1d943ac0a61678ef1c8306b2f87aa52a2e2a743",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "BANKBEES": {
       "path": "data/etf/BANKBEES.json",
       "kind": "ETF",
-      "sha256": "dc7c24f79a2fcd9cf3c88c44bf0dc352f237d97b008cbf1b43dc12195f9ed7ae",
+      "sha256": "5d2af42254abf251b2304be2bba0f799e47bb1582271a58e3ad6609634ee7b85",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "GOLDBEES": {
       "path": "data/etf/GOLDBEES.json",
       "kind": "ETF",
-      "sha256": "afc4d0664d5f234e195db22d315e8bddfbb6831dfb3d59ae3260a4bad90dddb8",
+      "sha256": "d5b049e63363ace54e05f7ca5be2f8aa6b7e9ffb1f7a5bfe849fce503da5adf7",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "SILVERBEES": {
       "path": "data/etf/SILVERBEES.json",
       "kind": "ETF",
-      "sha256": "5b7f9748453b7686a6b15f37105278d71e5358644deee1a832bf99a428845a5c",
+      "sha256": "f51a325c0bd6c4863ebfd13e2b5fcd87eddb739529220a8ebedbb4fbba0b87a8",
       "first": "2022-02-07",
-      "last": "2026-09-21",
-      "bars": 1146
+      "last": "2026-09-22",
+      "bars": 1147
     },
     "TATSILV": {
       "path": "data/etf/TATSILV.json",
       "kind": "ETF",
-      "sha256": "e3eea2356a547434705bf2c054ca11e90741f0e50397da76513cec3cf49aba6a",
+      "sha256": "f6d97451e5496ddf771bcbe9d7a85238d64865a332bebcc98a9a352087402dd4",
       "first": "2024-01-17",
-      "last": "2026-09-21",
-      "bars": 664
+      "last": "2026-09-22",
+      "bars": 665
     },
     "MID150BEES": {
       "path": "data/etf/MID150BEES.json",
       "kind": "ETF",
-      "sha256": "48c836868150f60aa39b7fa277f14425b1655d9b60e24eebf7963fc04e68e1b9",
+      "sha256": "1b32e1015b7419c5668c3ba2ceee6bf3bce72e13165558a661f20147dae76cac",
       "first": "2019-02-04",
-      "last": "2026-09-21",
-      "bars": 1885
+      "last": "2026-09-22",
+      "bars": 1886
     },
     "MIDCAPETF": {
       "path": "data/etf/MIDCAPETF.json",
       "kind": "ETF",
-      "sha256": "312bfacbcddb1a1b21e4c18da613d8dddfd4f6785d1ca5cab0754ee94638aeca",
+      "sha256": "aec1676c677ecdcda3d47ab8800679893f06d294fe7574e46f5a2f1997c6f1bb",
       "first": "2022-03-15",
-      "last": "2026-09-21",
-      "bars": 1121
+      "last": "2026-09-22",
+      "bars": 1122
     },
     "ITBEES": {
       "path": "data/etf/ITBEES.json",
       "kind": "ETF",
-      "sha256": "7f72cd61c4834e6e19af674083924dd62db85c4cbce7f13ff1984aa38c9c31a1",
+      "sha256": "b1572c9d7ed25d68a594c3605619c267771fa3374e608da47b859db4f2466891",
       "first": "2020-07-01",
-      "last": "2026-09-21",
-      "bars": 1546
+      "last": "2026-09-22",
+      "bars": 1547
     },
     "ITIETF": {
       "path": "data/etf/ITIETF.json",
       "kind": "ETF",
-      "sha256": "365919bbcdab2719d79d754a1f71ddd6687c49d4e45473ce9cd614c96bc315c0",
+      "sha256": "56d771c1e086a518a459ad13b7f5e32305342789a160c8368b879fb43e8a1868",
       "first": "2020-08-20",
-      "last": "2026-09-21",
-      "bars": 1510
+      "last": "2026-09-22",
+      "bars": 1511
     },
     "AUTOBEES": {
       "path": "data/etf/AUTOBEES.json",
       "kind": "ETF",
-      "sha256": "31375ee613af15f28afb8c0279aa058f645f33d8dcfef53afadc185e9396b99e",
+      "sha256": "a9c1f212a125eb1a1daa348389734d31ecd4bbda3d9e3ec6b8de9e201c2eb77a",
       "first": "2022-01-25",
-      "last": "2026-09-21",
-      "bars": 1154
+      "last": "2026-09-22",
+      "bars": 1155
     },
     "AUTOIETF": {
       "path": "data/etf/AUTOIETF.json",
       "kind": "ETF",
-      "sha256": "b50063f38b1e20c912acc81ea83b9096b52cde92967f1a6a0d05bf14469ec8b5",
+      "sha256": "8f44b5d7f2180c6975f033cb7111fdec466668e3177b3ce76c62ee956b20a84d",
       "first": "2022-01-18",
-      "last": "2026-09-21",
-      "bars": 1159
+      "last": "2026-09-22",
+      "bars": 1160
     },
     "SETFNIF50": {
       "path": "data/etf/SETFNIF50.json",
       "kind": "ETF",
-      "sha256": "39946e2e76887c9894dc336f6e702645c4f55e6a38c8b94c93b92c249721de04",
+      "sha256": "5a1f92f15da471ea924d8b942f7594e555927f1b02ca43c7becc09c8ef172ae3",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "SETFNN50": {
       "path": "data/etf/SETFNN50.json",
       "kind": "ETF",
-      "sha256": "730ef6280ca4678a85076a13d290aa0782b42158165053cf0eafdf15013d75b9",
+      "sha256": "eb462386cc4235d3476199a80aaf6204b7de1745f5d48e7d883cbd638839a920",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "SETFGOLD": {
       "path": "data/etf/SETFGOLD.json",
       "kind": "ETF",
-      "sha256": "58303e0b2892bea3f04b599cd4f1dbec66fc7287f4d0e514b5236db64c1788f6",
+      "sha256": "9949e4198d215dd9d4185dfe1c6ca718a478fd73a71b09fcb605782a33262c50",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "HDFCNIFBAN": {
       "path": "data/etf/HDFCNIFBAN.json",
       "kind": "ETF",
-      "sha256": "171c077ee4a5f82fa724c90ccfecae6dd495f454e400c8a0f8c1e72d7db37936",
+      "sha256": "d4fddcd96293eac9bf04179aeb440e1db72558a3a2a4e1217f72b68a57b8b058",
       "first": "2020-08-28",
-      "last": "2026-09-21",
-      "bars": 1504
+      "last": "2026-09-22",
+      "bars": 1505
     },
     "CPSEETF": {
       "path": "data/etf/CPSEETF.json",
       "kind": "ETF",
-      "sha256": "5f000beeaa503431972b5e1974248e63e3553b1b147aeb4a717fee30d7c3dec1",
+      "sha256": "236577866ca13a1aad1956562c7be44773d4e42f666de226451b1f0613ff85a7",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "LIQUIDBEES": {
       "path": "data/etf/LIQUIDBEES.json",
       "kind": "ETF",
-      "sha256": "42af942aa6e0df11e33e63fafc3ecb5836bafb1b0e13eb770e6bf4bb191105ff",
+      "sha256": "db88f70bebf335d51c68de435f46e1eb49b0d2654b86397bf4a0887c7ded7b5c",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "MAFANG": {
       "path": "data/etf/MAFANG.json",
       "kind": "ETF",
-      "sha256": "da1f32227b931e55566611b8f04291fbfe5d1d1e6c5d3133786dd1c3ec602555",
+      "sha256": "0907c5be97c7c276b72eae402f0134f134d032e53c7a65c9e87b6a7f30f75370",
       "first": "2021-05-14",
-      "last": "2026-09-21",
-      "bars": 1330
+      "last": "2026-09-22",
+      "bars": 1331
     },
     "HNGSNGBEES": {
       "path": "data/etf/HNGSNGBEES.json",
       "kind": "ETF",
-      "sha256": "be1250f27fc0e4f911ba7103b6082636b25185e8edc9b14d5d1d9d45641bdd4c",
+      "sha256": "c7c98f7c49b57a47d26f1afb87f6b34cbe39c4f77ec759f1af154e26bb4ad689",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1892
+      "last": "2026-09-22",
+      "bars": 1893
     },
     "MON100": {
       "path": "data/etf/MON100.json",
       "kind": "ETF",
-      "sha256": "ad482599d543fd57848b6aebf0757f161e2963c0270b7b7e649d4fd8bd07f9db",
+      "sha256": "f0640a1b61e631372a1ac8c217c28bab519e393aca14cba098e49d032c38c68b",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "PSUBNKBEES": {
       "path": "data/etf/PSUBNKBEES.json",
       "kind": "ETF",
-      "sha256": "5c13e0934260afc6011f856eaab9f5a651f2973e52165928927e518e0e173a1c",
+      "sha256": "853b0dbc186f2e63b5cd91ee1af5b36b53d464f51ef31a6f8e6df091be313fe1",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "METALIETF": {
       "path": "data/etf/METALIETF.json",
       "kind": "ETF",
-      "sha256": "d4af3f6f0adc72976de071c5661bd5e08cff5efd91fdbfe56588f9c4b6ff0e09",
+      "sha256": "43e2453b0d1df9ae62ca0b11f3f6400308cf83c5f57bd7fef50666e08520545c",
       "first": "2024-08-20",
-      "last": "2026-09-21",
-      "bars": 519
+      "last": "2026-09-22",
+      "bars": 520
     },
     "COMMOIETF": {
       "path": "data/etf/COMMOIETF.json",
       "kind": "ETF",
-      "sha256": "62de0cba11049e1b875ab8341e277b84e580ff49fb80bb73d683836fa205b262",
+      "sha256": "029e1deda31923b29fe7965f6b96b782becf0e714ad14814644cb7f9a25d45be",
       "first": "2022-12-21",
-      "last": "2026-09-21",
-      "bars": 929
+      "last": "2026-09-22",
+      "bars": 930
     },
     "OILIETF": {
       "path": "data/etf/OILIETF.json",
       "kind": "ETF",
-      "sha256": "e03692f973835f64226020fe0833aa0c78bc354eac9c82340b8789a9d1f8e8cc",
+      "sha256": "50af9e8d222c048bb9851a242a0e833e72e6acadd2d073379f57c7678a38b5a2",
       "first": "2024-07-24",
-      "last": "2026-09-21",
-      "bars": 537
+      "last": "2026-09-22",
+      "bars": 538
     },
     "MOM30IETF": {
       "path": "data/etf/MOM30IETF.json",
       "kind": "ETF",
-      "sha256": "55437d34a5f22e9af8203ae68057acf0371db95f897000ee461760f8c9013438",
+      "sha256": "332de4e182edcf3453a0a757ba52a5a2d10e17771b239ac8a97b530b5cb58254",
       "first": "2022-08-12",
-      "last": "2026-09-21",
-      "bars": 1018
+      "last": "2026-09-22",
+      "bars": 1019
     },
     "MOMENTUM50": {
       "path": "data/etf/MOMENTUM50.json",
       "kind": "ETF",
-      "sha256": "12549ef0d8bc22f275cc335658df43435456f15bc6456152cf502991105f5713",
+      "sha256": "03468c77779931b29f7e453b14d600f90dbc11ba2a1d5b7f2495784a7be229af",
       "first": "2024-09-30",
-      "last": "2026-09-21",
-      "bars": 490
+      "last": "2026-09-22",
+      "bars": 491
     },
     "ICICIB22": {
       "path": "data/etf/ICICIB22.json",
       "kind": "ETF",
-      "sha256": "fe519070fe3d3269bc415ea0d8711bffd60631022a94a7c5618933c4661f1884",
+      "sha256": "224f73bd13d482c43342dccfd7cb8ebe8e7a3503635109197a2d5357041ff7f6",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "PVTBANIETF": {
       "path": "data/etf/PVTBANIETF.json",
       "kind": "ETF",
-      "sha256": "f0ce041dc2df7082acf1f20b2a4f7324c82dc1ed047fe6072a813eb31dfbd844",
+      "sha256": "e4100ec8a6ffef00d3465c0315c841fdedb0dd56a5334f3225a945128167ea2b",
       "first": "2019-08-14",
-      "last": "2026-09-21",
-      "bars": 1759
+      "last": "2026-09-22",
+      "bars": 1760
     },
     "PHARMABEES": {
       "path": "data/etf/PHARMABEES.json",
       "kind": "ETF",
-      "sha256": "94273295b6afe4c9cce0533c044bfda5ba5288f29233756a00567b905493f1ee",
+      "sha256": "98dd8614de19df8aacf2dbd499b46990b1503a83c6d1f808d8d31a740aac4d71",
       "first": "2021-07-07",
-      "last": "2026-09-21",
-      "bars": 1292
+      "last": "2026-09-22",
+      "bars": 1293
     },
     "HEALTHIETF": {
       "path": "data/etf/HEALTHIETF.json",
       "kind": "ETF",
-      "sha256": "764a5fce97c80cff8cb7ac73ffe2c20237ede669cf787cd3e614979dc44fbb3c",
+      "sha256": "5b42a8701614b247a0c1c72a79dd09fc1c9eeadd4a1fc753b20fbbbf78af3f07",
       "first": "2021-05-25",
-      "last": "2026-09-21",
-      "bars": 1323
+      "last": "2026-09-22",
+      "bars": 1324
     },
     "MODEFENCE": {
       "path": "data/etf/MODEFENCE.json",
       "kind": "ETF",
-      "sha256": "0843d8d571de8c68a5265f03210ec382331f86e24639cca2b066966768e7f0f2",
+      "sha256": "53952e6d83bfc0ebb2aff40350e6f17f3aa3a3771f629870dc25383ad39cd944",
       "first": "2024-08-27",
-      "last": "2026-09-21",
-      "bars": 514
+      "last": "2026-09-22",
+      "bars": 515
     },
     "INFRAIETF": {
       "path": "data/etf/INFRAIETF.json",
       "kind": "ETF",
-      "sha256": "5fd9245e079f826865dcf27cec2d68fb40190436972821b548e46e3fbb3a748f",
+      "sha256": "316b18199c35c6c55c4baab6702f021b5a4d56884bd1044fed8b271f3d7b571f",
       "first": "2022-08-24",
-      "last": "2026-09-21",
-      "bars": 1011
+      "last": "2026-09-22",
+      "bars": 1012
     },
     "CONSUMBEES": {
       "path": "data/etf/CONSUMBEES.json",
       "kind": "ETF",
-      "sha256": "40f922364be2055081d69a4e3343a27939b9289502eb1ddb63b55e08038768ec",
+      "sha256": "2148facf6738147ad82f994243ae7d2bb999af8dc2468fcd96627b16557c8434",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "FMCGIETF": {
       "path": "data/etf/FMCGIETF.json",
       "kind": "ETF",
-      "sha256": "0874b7333424c4f56a0b9bddf0f679ba02cb2d8834ce7a76186e4eca4774feba",
+      "sha256": "1087ccc7bb49383afb183d0705222a6df83bd2850098891daea1b06270c80ab3",
       "first": "2021-08-10",
-      "last": "2026-09-21",
-      "bars": 1269
+      "last": "2026-09-22",
+      "bars": 1270
     },
     "HDFCSML250": {
       "path": "data/etf/HDFCSML250.json",
       "kind": "ETF",
-      "sha256": "0e414772b5baea55dbc016b8468a814b7b2e985ea0a47e237570f2c775136db9",
+      "sha256": "7b52385460861a74a5082f932c3d8ecc232d603d891e968452beb04fcbf0db4d",
       "first": "2023-02-21",
-      "last": "2026-09-21",
-      "bars": 887
+      "last": "2026-09-22",
+      "bars": 888
     },
     "NEXT50IETF": {
       "path": "data/etf/NEXT50IETF.json",
       "kind": "ETF",
-      "sha256": "7adcc1c5cd8689f42f5b40ce5ec7bd7c4378392032e71d2ce04a115b2c737163",
+      "sha256": "8af5f70cdc3d34a391554b126783c8093fbf95dd1a69aa2d70286140f07eef0e",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIF100BEES": {
       "path": "data/etf/NIF100BEES.json",
       "kind": "ETF",
-      "sha256": "baab7450fca953ec79f5348904dc29ffeab663b794314538f4bdd833661dc6e4",
+      "sha256": "d1cd109397dde79b2b4ac1be919eb9abc37ce34895816dca6dbc1bfb1e292429",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1902
+      "last": "2026-09-22",
+      "bars": 1903
     },
     "EQUAL50ADD": {
       "path": "data/etf/EQUAL50ADD.json",
       "kind": "ETF",
-      "sha256": "8b7a4f85d00e1ad2fa958a207387e2de67aa7cc9a22434718b5b50cecb545726",
+      "sha256": "861dd0bf3aff4f8360e353243eea3cf58d3b4fd17c37db5cbde39eaaeff466aa",
       "first": "2021-11-12",
-      "last": "2026-09-21",
-      "bars": 1205
+      "last": "2026-09-22",
+      "bars": 1206
     },
     "MIDSMALL": {
       "path": "data/etf/MIDSMALL.json",
       "kind": "ETF",
-      "sha256": "2f73e9e4aa8367a01fa1ddf1928c9c5e8df3b8668971b6bd5c6d0851a2054f8c",
+      "sha256": "2557234cf2504b330f8dbd957b792e68114a85505615a7204b5012e4c31fa42c",
       "first": "2024-05-28",
-      "last": "2026-09-21",
-      "bars": 576
+      "last": "2026-09-22",
+      "bars": 577
     },
     "MOREALTY": {
       "path": "data/etf/MOREALTY.json",
       "kind": "ETF",
-      "sha256": "e6ba191aaabbc1a2cb3a0699b455a9ac7eb253b5ded3f6ef0ed673bcd5ddd618",
+      "sha256": "448ddaba8ef3d5228e94831b342913b0371ff2eaf3874ff18eef097329d177e0",
       "first": "2024-03-21",
-      "last": "2026-09-21",
-      "bars": 619
+      "last": "2026-09-22",
+      "bars": 620
     },
     "EVINDIA": {
       "path": "data/etf/EVINDIA.json",
       "kind": "ETF",
-      "sha256": "895bd7daa3501eb3844e44668ce431fdc81458848f48d0977b9e4755e6c4fb0f",
+      "sha256": "1e132e9b5f90672410eae009c43b4c2ccf800309e3d789f06b2cc0a3b450cb51",
       "first": "2024-07-16",
-      "last": "2026-09-21",
-      "bars": 542
+      "last": "2026-09-22",
+      "bars": 543
     },
     "MOENERGY": {
       "path": "data/etf/MOENERGY.json",
       "kind": "ETF",
-      "sha256": "d7a08b0231d1d9198b8c121c697ac80dfe8be8ae239501fd31932dbcc29feb34",
+      "sha256": "d444f344305b11e51e96ef876942a6ee93e68c11a1970cb89971a7a80e25b8cb",
       "first": "2025-10-16",
-      "last": "2026-09-21",
-      "bars": 230
+      "last": "2026-09-22",
+      "bars": 231
     },
     "TATAGOLD": {
       "path": "data/etf/TATAGOLD.json",
       "kind": "ETF",
-      "sha256": "50c404a3e007827c967939334e685c556c0564549332ba2976828946221833ad",
+      "sha256": "dd584f7df437496752819a363c7c6c31015bef9f875abc912f3313fd619d5662",
       "first": "2024-01-17",
-      "last": "2026-09-21",
-      "bars": 664
+      "last": "2026-09-22",
+      "bars": 665
     },
     "GROWWPOWER": {
       "path": "data/etf/GROWWPOWER.json",
       "kind": "ETF",
-      "sha256": "3cda067c45bb385ede9d2e479c38203844027179eb4a156534d76453eee70b08",
+      "sha256": "92d07bd7c29a7e7d086b314c507bb75af335415d7d3a00b68a155ef2d13bd324",
       "first": "2025-08-07",
-      "last": "2026-09-21",
-      "bars": 277
+      "last": "2026-09-22",
+      "bars": 278
     },
     "NIFTY 50": {
       "path": "data/index/NIFTY_50.json",
       "kind": "INDEX",
-      "sha256": "c9b498277550148f48e747862efb13c48cf3a1b02ffa032bb3ee3727b7939233",
+      "sha256": "176ffa98b6b89939e03979ae841683d48ce52b6705de2d28112eee1a48dd24fe",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIFTY BANK": {
       "path": "data/index/NIFTY_BANK.json",
       "kind": "INDEX",
-      "sha256": "b5cb511bd2229c593583266fde23c6856d96485280f668c216d3d753a6007f25",
+      "sha256": "0cc7103487517b7fd5cb3e41db750f4be5ff2cc645cc2f672629ba783ba060a5",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIFTY IT": {
       "path": "data/index/NIFTY_IT.json",
       "kind": "INDEX",
-      "sha256": "64aca3e99b5a2ce7e546b971f3dcc9f34c487ec89495c8fd57a1e4a1e8c201a4",
+      "sha256": "378f3313001c848db9a475f31501877910012e41076bc15cfedf9c51bcfc4a17",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIFTY MIDCAP 150": {
       "path": "data/index/NIFTY_MIDCAP_150.json",
       "kind": "INDEX",
-      "sha256": "a26b972f9860c764b43f6304800f80093ed06c9877173e414ed62d013dd89e1e",
+      "sha256": "ad28228f1bb7b1975994f181e12bb1fcbda559d0f37839893008d4bc1a41d5fe",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIFTY NEXT 50": {
       "path": "data/index/NIFTY_NEXT_50.json",
       "kind": "INDEX",
-      "sha256": "9da93f71a9d927194fa15452028ff6efc32782c7a7787a628d8c342ad6ffa9fa",
+      "sha256": "f1e786efb22ed1302583316044958ae02748a00f65f85ce3eb558debfb88e468",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     },
     "NIFTY AUTO": {
       "path": "data/index/NIFTY_AUTO.json",
       "kind": "INDEX",
-      "sha256": "277b65b168db743fb420e74a9255502cbeb66d2e5cba76e5f37d1db28ab3ea01",
+      "sha256": "3b180c450e8023157c2a7a9c682f050c5faf205a0725586c443aab51c6953462",
       "first": "2019-01-14",
-      "last": "2026-09-21",
-      "bars": 1903
+      "last": "2026-09-22",
+      "bars": 1904
     }
   }
 }
