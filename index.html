@@ -9124,7 +9124,18 @@ function renderPreflightPanel(containerId,pf,{refusal=null,latestSession=null}={
     <div style="font-size:10.5px;color:var(--fog);margin:4px 0">${c.ok||0} ready · ${c.excluded||0} excluded · ${c.blocking||0} blocking · candidates ${c.candidatesRetained||0}/${c.candidates||0}</div>
     ${refusal?`<div style="padding:6px 8px;border-radius:5px;background:rgba(239,68,68,.12);color:var(--loss);font-weight:600;margin:6px 0">${_pfEsc(refusal.message)}</div>`:''}
     ${Object.keys(groups).sort().map(code=>{const rep=groups[code].find(r=>r.detail)||groups[code][0];return `<div style="font-size:10.5px;margin:3px 0"><b>${_pfEsc(code)}</b> — ${groups[code].map(r=>_pfEsc(r.symbol)+' ('+_pfEsc(r.role)+')').join(', ')}${rep.detail?`<div style="color:var(--fog);margin:2px 0 0 2px">— ${_pfEsc(rep.detail)}</div>`:''}</div>`;}).join('')}
-    ${groups['STALE_DATASET']&&latestSession?`<div style="font-size:10.5px;color:var(--gold);margin:6px 0 2px">This is expected before this evening's data update — the newest published trading day is <b>${_pfEsc(latestSession)}</b>.</div><button class="action-btn sm" onclick="useLatestPublishedDate('${_pfEsc(eng)}','${_pfEsc(latestSession)}')">Use ${_pfEsc(latestSession)} as the end date</button>`:''}
+    ${(()=>{
+      // R4c (security review): latestSession traces back to the published data manifest, not a
+      // hardcoded literal, so it must never be trusted verbatim inside an onclick="..." attribute —
+      // _pfEsc only escapes for the surrounding HTML-attribute layer, not the nested single-quoted
+      // JS-string layer, so an entity like &#39; still decodes back to a real ' before the JS parser
+      // sees it and would close the string early. A real date can only ever match this exact shape,
+      // so requiring it here closes the gap without changing how the button is built for the normal case.
+      const safeDate=/^\d{4}-\d{2}-\d{2}$/.test(String(latestSession||''))?latestSession:null;
+      const safeEng=/^[A-Z]+$/.test(String(eng||''))?eng:null;
+      if(!(groups['STALE_DATASET']&&safeDate&&safeEng))return'';
+      return `<div style="font-size:10.5px;color:var(--gold);margin:6px 0 2px">This is expected before this evening's data update — the newest published trading day is <b>${_pfEsc(safeDate)}</b>.</div><button class="action-btn sm" onclick="useLatestPublishedDate('${_pfEsc(safeEng)}','${_pfEsc(safeDate)}')">Use ${_pfEsc(safeDate)} as the end date</button>`;
+    })()}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
       ${btn('certified','Run Certified',certifiable,'certified')}
       ${btn('research',`Run Research ${c.candidatesRetained||0}/${c.candidates||0}`,!!pf.canResearch,'research')}
@@ -14608,8 +14619,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-22-v3.22-R4b';
-const APP_SOURCE_SHA256='316638b937f813de915ffc4c300c0af67e0d59bb6bf7ba5bdf6acc797ca42c81';
+const APP_BUILD='2026-09-22-v3.22-R4c';
+const APP_SOURCE_SHA256='8b3fffaa12c6fe0cd972e2258acad3b3f43dc7e72222ff8466f0ec302fec7431';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
