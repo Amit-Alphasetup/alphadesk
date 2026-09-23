@@ -1466,7 +1466,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="card">
 <div class="settings-section-title">LIFO engine</div>
 <div class="form-row">
-<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
+<div class="form-group"><label class="form-label">LIFO Capital ₹</label><input class="form-input" id="s-capital-disp" readonly="" style="opacity:.6" title="Set on Portfolio → Capital Allocation" type="number"/><div style="font-size:10px;color:var(--sky);margin-top:3px;cursor:pointer" onclick="switchStrategy('portfolio',null)">✏️ Set on Portfolio → Capital Allocation</div></div>
 <div class="form-group"><label class="form-label">Slots (divisor)</label><input class="form-input" id="s-slots" type="number"/></div>
 </div>
 <div class="form-row">
@@ -2157,7 +2157,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="card">
 <div class="settings-section-title">📊 Dual Momentum Defaults</div>
 <div class="form-row">
-<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital-disp" readonly="" style="opacity:.6" title="Set via Capital Allocation above" type="number"/></div>
+<div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital-disp" readonly="" style="opacity:.6" title="Set on Portfolio → Capital Allocation" type="number"/><div style="font-size:10px;color:var(--sky);margin-top:3px;cursor:pointer" onclick="switchStrategy('portfolio',null)">✏️ Set on Portfolio → Capital Allocation</div></div>
 <div class="form-group"><label class="form-label">Top N Picks (Slots)</label><input class="form-input" id="s-mom-slots" type="number"/></div>
 </div>
 <div class="form-row">
@@ -2626,7 +2626,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="card">
 <div class="settings-section-title">🛡️ Risk &amp; Execution</div>
 <div class="form-row">
-<div class="form-group"><label class="form-label">Slippage % per side</label><input class="form-input" id="s-slippage" min="0" step="0.01" type="number"/></div>
+<div class="form-group"><label class="form-label">Slippage % per side</label><input class="form-input" id="s-slippage" min="0" max="5" step="0.01" type="number"/></div>
 <div class="form-group"><label class="form-label">Min Volume filter (units/day)</label><input class="form-input" id="s-minvol" placeholder="50000" type="number"/></div>
 </div>
 <div class="form-row">
@@ -11307,7 +11307,7 @@ function validateTenetState(t,st){
 function validateConfigRanges(c){
   const errs=[];if(!c||typeof c!=='object')return errs;
   const num=(k,lo,hi)=>{if(c[k]==null)return;const v=c[k];if(typeof v!=='number'||!Number.isFinite(v)||v<lo||v>hi)errs.push(`config.${k} must be a number between ${lo} and ${hi}`);};
-  num('momCapital',0,1e12);num('slippage',0,100);num('dmFriction',0,100);num('maxLots',1,1000);num('maxScan',1,1000);num('dmSlots',1,100);num('dmRebalanceDays',1,365);
+  num('momCapital',0,1e12);num('slippage',0,5);num('dmFriction',0,100);num('maxLots',1,1000);num('maxScan',1,1000);num('dmSlots',1,100);num('dmRebalanceDays',1,365);
   num('minVol',0,1e12);num('highGuardPct',0,100);num('lifoLiquidRate',0,100);num('refreshMins',0,1440);
   const t=c.tenet;if(t&&typeof t==='object'){['firstTargetPct','targetStepPct','avgTriggerPct','selectionDistancePct','newBuyAllocPct','bidAllocPct'].forEach(k=>{if(t[k]!=null&&!(Number.isFinite(t[k])&&t[k]>=0&&t[k]<=100))errs.push(`tenet.config.${k} must be between 0 and 100`);});}
   return errs;
@@ -11945,9 +11945,13 @@ function saveAllSettings(){
   }catch(e){toast('❌ '+e.message,'err');return;}
   {const v=parseFloat(document.getElementById('s-capital').value);c.capital=isNaN(v)?(c.capital||0):v;}
   {const v=parseFloat(document.getElementById('s-mom-capital').value);c.momCapital=isNaN(v)?(c.momCapital||0):v;}
-  c.slippage=Math.max(0,parseFloat(document.getElementById('s-slippage').value)||0);
+  {const v=Math.max(0,parseFloat(document.getElementById('s-slippage').value)||0);
+    if(v>5){toast(`❌ Slippage ${v}% per side is not valid (must be 0–5) — not saved.`,'err');document.getElementById('s-slippage').focus();return;}
+    c.slippage=v;}
   c.minVol=finiteParam(document.getElementById('s-minvol').value,50000,{min:0,integer:true});
-  c.maxLots=parseInt(document.getElementById('s-maxlots').value)||3;
+  {const v=parseInt(document.getElementById('s-maxlots').value)||3;
+    if(v<1||v>1000){toast(`❌ Max Lots ${v} is not valid (must be 1–1000) — not saved.`,'err');document.getElementById('s-maxlots').focus();return;}
+    c.maxLots=v;}
   c.slots=parseInt(document.getElementById('s-slots').value)||c.slots;
   {const v=parseFloat(document.getElementById('s-avgfall').value);c.avgFall=isNaN(v)?6:v;}
   {const v=parseFloat(document.getElementById('s-minprofit').value);c.minProfit=isNaN(v)?200:v;}
@@ -14619,8 +14623,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-22-v3.22-R4c';
-const APP_SOURCE_SHA256='8b3fffaa12c6fe0cd972e2258acad3b3f43dc7e72222ff8466f0ec302fec7431';
+const APP_BUILD='2026-09-23-v3.22-R5settings';
+const APP_SOURCE_SHA256='08399eee9ec83baaf5b6ed94c750c64cd55dc6c6431cb2dd1e100f2e9c289b92';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
