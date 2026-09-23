@@ -9454,9 +9454,11 @@ async function diag52WL(sym){
     out.dhcExcluded                ? 'Excluded by Data Health Check — clear it there.' :
     !out.quote.cmp                 ? 'No live price at all — the price source is not returning this symbol.' :
     out.afterFetch?.computed52wl>0 ? 'RESOLVED — history fetched and 52WL computed. Refresh to clear the banner.' :
-    (out.fetch?.barsReturned||0)===0
-      ? `No history available upstream for "${out.yfSymbol}". The Yahoo symbol is probably wrong — edit it in Universe.`
-      : `History fetched (${out.fetch.barsReturned} bars) but fewer than the 50 needed, or the bars have no usable closes.`;
+    out.fetch?.error
+      ? `Fetch failed with a specific reason (not "no data") — see "Fetch returned" above. This is a data-pipeline block, not a wrong Yahoo symbol — do not edit the symbol for this.`
+      : (out.fetch?.barsReturned||0)===0
+        ? `No history available upstream for "${out.yfSymbol}". The Yahoo symbol is probably wrong — edit it in Universe.`
+        : `History fetched (${out.fetch.barsReturned} bars) but fewer than the 50 needed, or the bars have no usable closes.`;
 
   console.log('52WL DIAGNOSTIC',out);
   return out;
@@ -14623,8 +14625,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-23-v3.22-R5settings';
-const APP_SOURCE_SHA256='08399eee9ec83baaf5b6ed94c750c64cd55dc6c6431cb2dd1e100f2e9c289b92';
+const APP_BUILD='2026-09-23-v3.22-R5b';
+const APP_SOURCE_SHA256='b8d8b3d9a00486fbbfb30e24fd5444aec6d960f019461b7200728caf49f2ba2c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
