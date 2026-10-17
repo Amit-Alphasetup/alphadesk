@@ -2651,7 +2651,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <!-- P10 FIX: Tax Settings — slab rate for debt ETFs -->
 <div class="settings-section-title" style="margin-top:14px">🧾 Tax Settings</div>
 <div class="form-group">
-<label class="form-label">Income Tax Slab Rate % <span style="font-size:9px;color:var(--fog)">(for Debt ETFs like LIQUIDBEES — slab rate, no LTCG benefit)</span></label>
+<label class="form-label">Income Tax Slab Rate % <span style="font-size:9px;color:var(--fog)">(taxes short-term gains on Gold, Silver, International and Debt ETFs — 0 makes those gains tax-free in every backtest)</span></label>
 <input class="form-input" id="s-tax-slab" max="42" min="0" placeholder="30" step="1" type="number" value="30"/>
 </div>
 <div style="font-size:10px;color:var(--fog);margin-top:-8px;margin-bottom:12px">Equity-oriented ETFs use the listed-equity rates. Gold/Silver/International ETF STCG uses your slab rate; Debt is modeled at slab rate. Historical tax uses transfer-date rules where supported. +4% cess; no surcharge modeled.</div>
@@ -3024,6 +3024,9 @@ function applyStateSnapshot(d,{mergeConfig=true}={}){
 }
 function sanIdToken(v){return String(v??'').replace(/[^A-Za-z0-9_.:-]/g,'').slice(0,120);}
 function sanIsoDate(v){const x=String(v??'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(x)?x:'';}
+// R8: the app's tax classes are equity/debt/gold/international. market-data's registry also uses 'silver' (taxed like gold) and
+// 'liquid' (a money-market ETF, taxed like debt) — map those instead of letting them fall through to 'equity'.
+function normAssetClass(v,fallback='equity'){const s=String(v||'').toLowerCase();if(['equity','debt','gold','international'].includes(s))return s;if(s==='silver')return 'gold';if(s==='liquid')return 'debt';return fallback;}
 function sanitizeStateStringsInPlace(st){
   if(!st||typeof st!=='object')return st;
   const cleanTrade=(t,dm=false)=>{
@@ -3036,7 +3039,7 @@ function sanitizeStateStringsInPlace(st){
   };
   (st.lifoLedger||[]).forEach(t=>cleanTrade(t,false));
   (st.momTrades||[]).forEach(t=>cleanTrade(t,true));
-  const cleanInstrument=e=>{if(!e||typeof e!=='object')return;e.sym=sanSym(e.sym);e.yf=sanTicker(e.yf);e.name=sanNote(e.name,100);e.assetClass=['equity','debt','gold','international'].includes(e.assetClass)?e.assetClass:'equity';e.linkedIndex=sanIndexName(e.linkedIndex);e.linkedIndexYf=sanIndexTicker(e.linkedIndexYf);};
+  const cleanInstrument=e=>{if(!e||typeof e!=='object')return;e.sym=sanSym(e.sym);e.yf=sanTicker(e.yf);e.name=sanNote(e.name,100);e.assetClass=normAssetClass(e.assetClass,'equity');e.linkedIndex=sanIndexName(e.linkedIndex);e.linkedIndexYf=sanIndexTicker(e.linkedIndexYf);};
   (st.universe||[]).forEach(cleanInstrument);
   (st.instruments||[]).forEach(cleanInstrument);   // R2: the registry is the stored shape now, so it is hardened too
   if(st.engineUniverse&&typeof st.engineUniverse==='object'&&!Array.isArray(st.engineUniverse))
@@ -3120,7 +3123,7 @@ function loadState(){
     S.universe=(S.universe||[]).map(e=>{
       const sym=sanSym(e?.sym||''); if(!sym)return null;
       const def=_defaultBySym.get(sym);
-      const ac=['equity','debt','gold','international'].includes(e?.assetClass)?e.assetClass:(def?.assetClass||'equity');
+      const ac=normAssetClass(e?.assetClass,def?.assetClass||'equity');
       return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),assetClass:ac};
     }).filter(Boolean);
     // R2: the sanitised rows are the registry's input. If a stored snapshot already carried a
@@ -3129,7 +3132,7 @@ function loadState(){
       S.instruments=S.instruments.map(e=>{
         const sym=sanSym(e?.sym||''); if(!sym)return null;
         const def=_defaultBySym.get(sym);
-        const ac=['equity','debt','gold','international'].includes(e?.assetClass)?e.assetClass:(def?.assetClass||'equity');
+        const ac=normAssetClass(e?.assetClass,def?.assetClass||'equity');
         return {...e,sym,yf:sanTicker(e?.yf||def?.yf||sym+'.NS'),name:sanNote(e?.name||def?.name||sym),assetClass:ac};
       }).filter(Boolean);
     } else universeToRegistry(S.universe);
@@ -7860,6 +7863,7 @@ async function runDMBacktestCore(p){
   // Compound toggle is resolved once above; every caller and research path uses this canonical flag.
   const positions=_dmTs?JSON.parse(JSON.stringify(_dmTs.positions)):{};
   let liqValue=_dmTs?_dmTs.liqValue:0,liqSlots=_dmTs?_dmTs.liqSlots:0,liqEntryDate=_dmTs?_dmTs.liqEntryDate:'';
+  let liqCost=_dmTs?(_dmTs.liqCost!=null?_dmTs.liqCost:_dmTs.liqValue):0;   // R8: what the liquid sleeve actually cost (a cash-short buy funds less than slots x slotSz)
   let liqTotalMs=_dmTs?_dmTs.liqTotalMs:0; // FIX BUG-N5: accumulate total time parked across all periods
   const tradeLog=[],equity=[],shortfallLog=[],dmRebalLog=[];
   const holdSnaps=[];let _prevExec=_dmTs&&_dmTs.terminalDate?_dmTs.terminalDate:fromDate;   // A4-3: post-trade holdings at every rebalance (daily NAV) + previous exec date (liquid sleeve return)
@@ -7878,7 +7882,7 @@ async function runDMBacktestCore(p){
       Object.entries(positions).forEach(([sym,pos])=>{const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}const gain=(cp-pos.entryPrice)/pos.entryPrice;if(gain>=skimPct){const val=pos.units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SKIM',entryDate:pos.entryDate,entryPrice:pos.entryPrice,exitPrice:cp,units:+pos.units.toFixed(4),friction:+fr.toFixed(2),exitReason:`Skim — gain ${(gain*100).toFixed(1)}% >= skim ${(skimPct*100).toFixed(0)}%`,pnl:(val-fr)-(pos.costBasis!=null?pos.costBasis:pos.units*pos.entryPrice),holdDays:Math.round((new Date(execDate)-new Date(pos.entryDate))/86400000)});delete positions[sym];}});
       Object.keys(positions).forEach(sym=>{if(newTop.includes(sym))return;const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}const val=positions[sym].units*cp;const fr=val*frPct;cash+=val-fr;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'SELL',entryDate:positions[sym].entryDate,entryPrice:positions[sym].entryPrice,exitPrice:cp,units:+positions[sym].units.toFixed(4),friction:+fr.toFixed(2),exitReason:'Dropped out of top-'+slots+' momentum ranking',pnl:(val-fr)-(positions[sym].costBasis!=null?positions[sym].costBasis:positions[sym].units*positions[sym].entryPrice),holdDays:Math.round((new Date(execDate)-new Date(positions[sym].entryDate))/86400000)});delete positions[sym];});
       if(liqValue>0&&liqSlots>0){const _la=px('LIQUIDBEES',_prevExec),_lb=px('LIQUIDBEES',execDate);if(_la>0&&_lb>0)liqValue*=_lb/_la;else valuationGaps.push({date:execDate,sym:'LIQUIDBEES'});}   // A4-3: price return of LIQUIDBEES (distributions not included)
-      if(newLiqSlots<oldLiqSlots&&liqValue>0){const releasing=oldLiqSlots-newLiqSlots;const perSlot=liqValue/oldLiqSlots;const released=releasing*perSlot;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'EXIT',units:releasing,friction:0,exitReason:'LIQUIDBEES slots released — momentum candidates qualified',entryDate:liqEntryDate,entryPrice:perSlot/Math.max(1,Math.pow(1+monthlyLiq,Math.max(1,Math.round((new Date(execDate)-new Date(liqEntryDate))/2592000000)))),exitPrice:perSlot,pnl:released-(releasing*slotSz),holdDays:Math.round((new Date(execDate)-new Date(liqEntryDate))/86400000)});cash+=released;liqValue-=released;liqSlots=newLiqSlots;
+      if(newLiqSlots<oldLiqSlots&&liqValue>0){const releasing=oldLiqSlots-newLiqSlots;const perSlot=liqValue/oldLiqSlots;const released=releasing*perSlot;const costPerSlot=liqCost/oldLiqSlots,costReleased=releasing*costPerSlot;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'EXIT',units:releasing,friction:0,exitReason:'LIQUIDBEES slots released — momentum candidates qualified',entryDate:liqEntryDate,entryPrice:costPerSlot,exitPrice:perSlot,costBasis:costReleased,pnl:released-costReleased,holdDays:Math.round((new Date(execDate)-new Date(liqEntryDate))/86400000)});cash+=released;liqValue-=released;liqCost=newLiqSlots>0?liqCost-costReleased:0;liqSlots=newLiqSlots;
         // FIX BUG-40: reset liqEntryDate when fully exited so next re-entry gets a fresh start date
         // FIX BUG-N5: accumulate total parked duration so liqMos reflects ALL parking periods, not just last
         if(liqSlots===0){
@@ -7889,7 +7893,7 @@ async function runDMBacktestCore(p){
       newTop.filter(s=>s!=='LIQUIDBEES').forEach(sym=>{if(positions[sym])return;const cp=execPx(sym,execDate);if(!cp){execGap(sym,execDate);return;}if(slotSz<=0)return;if(cash<slotSz-1e-9){shortfallLog.push({date:execDate,sym,neededCash:+slotSz.toFixed(2),availCash:+cash.toFixed(2),deficit:+(slotSz-cash).toFixed(2)});return;}const fr=slotSz*frPct;const units=(slotSz-fr)/cp;// G6 FIX: store slotSz at entry time — compound may change slotSz later, distorting P&L%
 positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBasis:slotSz};cash-=slotSz;totalFrictionAbs+=fr*momCapital/100;tradeLog.push({date:execDate,sym,action:'BUY',entryDate:execDate,entryPrice:cp,exitPrice:null,units:+units.toFixed(4),friction:+fr.toFixed(2),costBasis:+slotSz.toFixed(2),exitReason:'',pnl:null,holdDays:null});});
       // FIX BUG-40: always update liqEntryDate on new entry (not just when empty) so each parking period gets correct start
-      if(newLiqSlots>oldLiqSlots){const adding=newLiqSlots-oldLiqSlots;const wantVal=adding*slotSz;const addVal=Math.min(wantVal,Math.max(0,cash));if(addVal<wantVal-1e-9)shortfallLog.push({date:execDate,sym:'LIQUIDBEES',neededCash:+wantVal.toFixed(2),availCash:+Math.max(0,cash).toFixed(2),deficit:+(wantVal-Math.max(0,cash)).toFixed(2)});liqValue+=addVal;cash-=addVal;if(!liqEntryDate)liqEntryDate=execDate;liqSlots=newLiqSlots;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'BUY',entryDate:execDate,entryPrice:slotSz,exitPrice:null,pnl:null,holdDays:null});}
+      if(newLiqSlots>oldLiqSlots){const adding=newLiqSlots-oldLiqSlots;const wantVal=adding*slotSz;const addVal=Math.min(wantVal,Math.max(0,cash));if(addVal<wantVal-1e-9)shortfallLog.push({date:execDate,sym:'LIQUIDBEES',neededCash:+wantVal.toFixed(2),availCash:+Math.max(0,cash).toFixed(2),deficit:+(wantVal-Math.max(0,cash)).toFixed(2)});liqValue+=addVal;liqCost+=addVal;cash-=addVal;if(!liqEntryDate)liqEntryDate=execDate;liqSlots=newLiqSlots;tradeLog.push({date:execDate,sym:'LIQUIDBEES',action:'BUY',units:adding,entryDate:execDate,entryPrice:addVal/adding,costBasis:addVal,exitPrice:null,pnl:null,holdDays:null});}
       if(cash<-1e-9)return{error:'INVARIANT: negative cash on '+execDate};
       let nav=cash+liqValue;
       Object.entries(positions).forEach(([sym,pos])=>{const _pv=px(sym,execDate);if(!_pv)valuationGaps.push({date:execDate,sym});nav+=pos.units*(_pv||pos.entryPrice);});
@@ -7998,7 +8002,8 @@ positions[sym]={units,entryPrice:cp,entryDate:execDate,entrySlotSz:slotSz,costBa
     executionModel:sameCloseExecution?'SHEET PARITY: signal → same-session CLOSE':'REALISTIC: signal → next-session OPEN (close fallback only when OPEN missing)',
     equity,equityDaily,tradeLog,shortfallLog,dmRebalLog,histMap,executionGaps,valuationGaps,
     assumptions:{liquidReturnBasis:'PRICE_ONLY'},
-    terminalState:{cash,slotSz,positions:JSON.parse(JSON.stringify(positions)),liqValue,liqSlots,liqEntryDate,liqTotalMs,nav:endNav,executionMode,terminalEquity:equityDaily.length?equityDaily[equityDaily.length-1].nav:endNav,terminalDate:equityDaily.length?equityDaily[equityDaily.length-1].date:terminalDate,nextSigIndexDate:rebalSchedule[rebalSchedule.length-1].execDate},
+    taxSlabRatePct:Number.isFinite(parseFloat(_cfg.taxSlabRate))?parseFloat(_cfg.taxSlabRate):30,   // R8: the slab rate this run's tax used
+    terminalState:{cash,slotSz,positions:JSON.parse(JSON.stringify(positions)),liqValue,liqCost,liqSlots,liqEntryDate,liqTotalMs,nav:endNav,executionMode,terminalEquity:equityDaily.length?equityDaily[equityDaily.length-1].nav:endNav,terminalDate:equityDaily.length?equityDaily[equityDaily.length-1].date:terminalDate,nextSigIndexDate:rebalSchedule[rebalSchedule.length-1].execDate},
     metrics:{cagr,afterTaxCAGR,maxDD:maxDD2,sharpe,calmar,winRate,liqMos,
       xirr:(()=>{const r=xirr([{date:fromDate,amount:-momCapital},{date:terminalDate,amount:endNav*momCapital/100}]);return r==null?null:r*100;})(),
       avgNav:equity.length?equity.reduce((a,e)=>a+e.nav,0)/equity.length:null,
@@ -11205,10 +11210,10 @@ function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}try{renderCorpAc
 async function editAssetClass(sym){
   const e=S.universe.find(x=>x.sym===sym);if(!e)return;
   const cur=e.assetClass||'equity';
-  const next=prompt(`Asset class for ${sym}: equity / gold / international / debt`,cur);
+  const next=prompt(`Asset class for ${sym}: equity / gold (also silver) / international / debt (also liquid)`,cur);
   if(next===null)return;
-  const clean=String(next).trim().toLowerCase();
-  if(!['equity','gold','international','debt'].includes(clean)){toast('Invalid asset class','err');return;}
+  const clean=normAssetClass(String(next).trim(),'');
+  if(!clean){toast('Invalid asset class','err');return;}
   e.assetClass=clean;rebuildUniverses();if(!saveState())return;renderUniverse();renderTax();toast(`${sym} tax class → ${clean}`,'ok');
 }
 async function editYfSymbol(sym){
@@ -14297,6 +14302,7 @@ function exportDmBtCSV(){
     // calendar month), so they are exported x100 and labelled as per-period figures.
     ['Avg Period Return %',M.avgM!=null?(M.avgM*100).toFixed(2):'','Period StdDev %',M.stdM!=null?(M.stdM*100).toFixed(2):''],
     ['Months in LIQUIDBEES',M.liqMos??'','',''],
+    ['Tax slab % (gold/silver/intl/debt)',_dmBtResult.taxSlabRatePct??'','Total Tax ₹',_dmBtResult.taxResult?Math.round(_dmBtResult.taxResult.totalTax):''],   // already rupees on the run's capital
     // Two different "win rates" exist and conflating them is easy — the metric
     // the engine computes is % of positive MONTHS. The trade-level rate is what
     // most readers assume, so both are stated explicitly rather than one being
@@ -14665,8 +14671,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-18-v3.22-R7';
-const APP_SOURCE_SHA256='db50dbebe7767f52cf45e43a7572bd8e3d58291cc9f41794e99bcba9bf39104a';
+const APP_BUILD='2026-10-18-v3.22-R8';
+const APP_SOURCE_SHA256='87670d08e52ad11742525cff896902d170ffb21f8ceec2efd232685268a97395';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
