@@ -14227,9 +14227,12 @@ function exportTenetBtCSV(){
 }
 function exportDmBtCSV(){
   if(!_dmBtResult?.tradeLog?.length){toast('Run DM Backtest first','err');return;}
-  const cap=S.config.momCapital||100000;
   const M=_dmBtResult.metrics||{};
   const p=_dmBtParams||{};
+  // R6: the capital the RUN used (not whatever Settings holds now). The engine works on a NAV-100 scale, so every
+  // money figure below (Units, Cost Basis, Friction, Net P&L, Values) is multiplied by cap/100 to state real rupees.
+  const cap=p.momCapital||S.config.momCapital||100000;
+  const _sc=cap/100;
   // PARITY WITH LIFO EXPORT: the DM file previously carried only a timestamp, so
   // every rupee figure in it was unverifiable — no declared capital, no units, no
   // exit reason, and Net P&L printed identical to Gross (friction IS deducted
@@ -14254,10 +14257,14 @@ function exportDmBtCSV(){
     ['CAGR %',M.cagr!=null?(M.cagr).toFixed(2):'','After-tax CAGR %',M.afterTaxCAGR!=null?M.afterTaxCAGR.toFixed(2):''],
     ['Max Drawdown %',M.maxDD!=null?M.maxDD.toFixed(2):'','Sharpe',M.sharpe!=null?M.sharpe.toFixed(2):''],
     ['Calmar',M.calmar!=null?M.calmar.toFixed(2):'','Win Rate % (positive months)',M.winRate!=null?M.winRate.toFixed(1):''],
-    ['Start NAV ₹',M.startNav!=null?M.startNav.toFixed(0):'','End NAV ₹',M.endNav!=null?M.endNav.toFixed(0):''],
+    // R6: NAV is an index (base 100), not rupees; the rupee value on the declared capital is stated separately.
+    ['Start NAV (index)',M.startNav!=null?M.startNav.toFixed(2):'','End NAV (index)',M.endNav!=null?M.endNav.toFixed(2):''],
+    ['Start Value ₹',M.startNav!=null?(M.startNav*_sc).toFixed(0):'','End Value ₹',M.endNav!=null?(M.endNav*_sc).toFixed(0):''],
     ['Total Friction ₹',M.totalFrictionAbs!=null?M.totalFrictionAbs.toFixed(0):'','Years',M.yrs!=null?M.yrs.toFixed(2):''],
     ['Benchmark CAGR %',M.benchCAGR!=null?M.benchCAGR.toFixed(2):'','Worst Rolling 12M %',M.worstRolling12M!=null?M.worstRolling12M.toFixed(2):''],
-    ['Avg Monthly %',M.avgM!=null?M.avgM.toFixed(2):'','Monthly StdDev %',M.stdM!=null?M.stdM.toFixed(2):''],
+    // R6: the engine stores these as fractions of NAV between consecutive equity points (one per rebalance, not per
+    // calendar month), so they are exported x100 and labelled as per-period figures.
+    ['Avg Period Return %',M.avgM!=null?(M.avgM*100).toFixed(2):'','Period StdDev %',M.stdM!=null?(M.stdM*100).toFixed(2):''],
     ['Months in LIQUIDBEES',M.liqMos??'','',''],
     // Two different "win rates" exist and conflating them is easy — the metric
     // the engine computes is % of positive MONTHS. The trade-level rate is what
@@ -14277,14 +14284,16 @@ function exportDmBtCSV(){
     // friction is subtracted in the engine. There is no separate "gross" column
     // because the engine never produces one — printing it duplicated Net and
     // made friction look like it was never applied.
-    const netPnl=t.pnl!=null?+(t.pnl*(cap/100)).toFixed(2):'';
+    const netPnl=t.pnl!=null?+(t.pnl*_sc).toFixed(2):'';
     const retPct=t.entryPrice&&t.exitPrice?+((t.exitPrice/t.entryPrice-1)*100).toFixed(2):'';
     rows.push([
       t.date,t.sym,t.action,
       t.entryDate||'',t.entryPrice?t.entryPrice.toFixed(2):'',
       t.exitPrice?t.exitPrice.toFixed(2):'',
-      t.units!=null?t.units:'',t.costBasis!=null?t.costBasis:'',
-      t.friction!=null?t.friction:'',t.holdDays??'',
+      // LIQUIDBEES rows are the liquid-sleeve pseudo-position: the engine stores a SLOT COUNT in .units there, not a
+      // unit count, so it has no meaningful units figure to state.
+      t.units!=null&&t.sym!=='LIQUIDBEES'?+(t.units*_sc).toFixed(4):'',t.costBasis!=null?+(t.costBasis*_sc).toFixed(2):'',
+      t.friction!=null?+(t.friction*_sc).toFixed(2):'',t.holdDays??'',
       netPnl,retPct,t.exitReason||'',
       niftyByDate[t.date]!=null?(niftyByDate[t.date]?'Y':'N'):'',
     ]);
@@ -14625,8 +14634,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-09-23-v3.22-R5b';
-const APP_SOURCE_SHA256='b8d8b3d9a00486fbbfb30e24fd5444aec6d960f019461b7200728caf49f2ba2c';
+const APP_BUILD='2026-10-17-v3.22-R6';
+const APP_SOURCE_SHA256='25e762057569bf6cb0d6b7a4ab4b10d0dc4feeaf18e8c63e058cbbcfb4b63ae8';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
