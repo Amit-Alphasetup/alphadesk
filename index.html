@@ -7424,18 +7424,39 @@ function momRebuildState(){
 
 // ── DUAL MOMENTUM SIGNAL ──────────────────────────────────────────────────────
 
+// R7 new-listing seasoning (Apd 2026-10-17): the first NEW_LISTING_SKIP_SESSIONS sessions of an ETF that lists INSIDE the loaded
+// history are thin and erratic (listing-day pricing, low volume), so every signal treats those bars as absent. "New" = its first bar
+// comes after NIFTYBEES' 5th bar in the same map (without NIFTYBEES: the earliest 5th bar of any symbol), so an established ETF that
+// only misses a session or two at the window start is not new. Returns {sym: first usable date}; '9999-12-31' = not seasoned yet.
+const NEW_LISTING_SKIP_SESSIONS=30;
+const _newListingCache=new WeakMap();
+function newListingCutoffs(histMap,skip=NEW_LISTING_SKIP_SESSIONS){
+  if(!histMap||typeof histMap!=='object')return {};
+  const syms=Object.keys(histMap),hit=_newListingCache.get(histMap);
+  if(hit&&hit.skip===skip&&hit.n===syms.length)return hit.cut;
+  const sorted=h=>h&&typeof h==='object'?Object.keys(h).sort():[];
+  const nb=sorted(histMap.NIFTYBEES);
+  const ref=nb.length?nb[Math.min(4,nb.length-1)]:(syms.map(s=>{const d=sorted(histMap[s]);return d[Math.min(4,d.length-1)];}).filter(Boolean).sort()[0]||null);
+  const cut={};
+  if(ref&&skip>0)for(const sym of syms){if(sym==='NIFTYBEES')continue;const ds=sorted(histMap[sym]);if(ds.length&&ds[0]>ref)cut[sym]=ds.length>skip?ds[skip]:'9999-12-31';}
+  _newListingCache.set(histMap,{skip,n:syms.length,cut});
+  return cut;
+}
+function withoutListingBars(h,cutoff){if(!cutoff||!h)return h;const o={};for(const d of Object.keys(h))if(d>=cutoff)o[d]=h[d];return o;}
+
 // Pure DM ranking/filter contract shared by live signal computation and the backtest.
 // It consumes a frozen history map and one common as-of date, so every ETF is ranked
 // against the same market close instead of mixing fresh and stale symbol dates.
 function computeDmDecisionFromHist(histMap,asOfDate,{lookback=182,hurdle=6,slots=3,niftyOn=true,minVol=0,etfs=[]}={}){
   lookback=finiteParam(lookback,182,{min:1,integer:true});hurdle=finiteParam(hurdle,6,{min:0});slots=finiteParam(slots,3,{min:1,integer:true});minVol=finiteParam(minVol,0,{min:0});
   const hurdlePct=(Math.pow(1+hurdle/100,lookback/365.25)-1)*100;
-  const pxAt=(sym,date)=>{const h=histMap?.[sym];if(!h)return null;const ds=Object.keys(h).filter(d=>d<=date).sort();if(!ds.length)return null;const d=ds.at(-1),b=h[d];return{date:d,close:+b.close||0,vol:+b.vol||0};};
+  const seasoned=newListingCutoffs(histMap);   // R7: a new ETF's first sessions do not exist for ranking
+  const pxAt=(sym,date)=>{const h=histMap?.[sym];if(!h)return null;const c=seasoned[sym]||'';const ds=Object.keys(h).filter(d=>d<=date&&d>=c).sort();if(!ds.length)return null;const d=ds.at(-1),b=h[d];return{date:d,close:+b.close||0,vol:+b.vol||0};};
   const retAt=(sym,date)=>{const cur=pxAt(sym,date);if(!cur?.close)return null;const past=new Date(date+'T00:00:00Z');past.setUTCDate(past.getUTCDate()-lookback);const ps=past.toISOString().slice(0,10),old=pxAt(sym,ps);if(!old?.close)return null;return{sym,ret:(cur.close/old.close-1)*100,lastClose:cur.close,lastVol:cur.vol,lastDate:cur.date,pastDate:old.date};};
   let niftyOk=true,niftyError='';
   if(niftyOn){const h=histMap?.NIFTYBEES,ds=h?Object.keys(h).filter(d=>d<=asOfDate).sort():[];if(ds.length<200){niftyOk=false;niftyError='NIFTYBEES has fewer than 200 bars at the common as-of date';}else{const last=+h[ds.at(-1)].close||0,ma=ds.slice(-200).reduce((a,d)=>a+(+h[d].close||0),0)/200;if(!(last>0&&ma>0)){niftyOk=false;niftyError='NIFTYBEES 200DMA inputs are invalid';}else niftyOk=last>=ma;}}
   const ranked=[];const excluded=[];
-  for(const sym of etfs){if(sym==='NIFTYBEES')continue;const r=retAt(sym,asOfDate);if(!r){excluded.push({sym,reason:'insufficient lookback history'});continue;}if(minVol>0&&r.lastVol>0&&r.lastVol<minVol){excluded.push({sym,reason:`volume ${r.lastVol} < ${minVol}`});continue;}ranked.push(r);}
+  for(const sym of etfs){if(sym==='NIFTYBEES')continue;const r=retAt(sym,asOfDate);if(!r){excluded.push({sym,reason:seasoned[sym]&&seasoned[sym]!=='9999-12-31'?`new listing: first ${NEW_LISTING_SKIP_SESSIONS} sessions ignored (usable from ${seasoned[sym]}), lookback not yet covered`:seasoned[sym]?`new listing: fewer than ${NEW_LISTING_SKIP_SESSIONS+1} sessions`:'insufficient lookback history'});continue;}if(minVol>0&&r.lastVol>0&&r.lastVol<minVol){excluded.push({sym,reason:`volume ${r.lastVol} < ${minVol}`});continue;}ranked.push(r);}
   ranked.sort((a,b)=>b.ret-a.ret);const qualified=ranked.filter(r=>r.ret>hurdlePct);let topPicks=[];
   if(niftyOn&&!niftyOk&&!niftyError){topPicks=Array.from({length:slots},()=>({sym:'LIQUIDBEES',ret:0,isLiquid:true,reason:'Nifty below 200DMA'}));}
   else if(niftyError){topPicks=[];}
@@ -9371,9 +9392,13 @@ async function getLive52WL(sym){
   // 1) verified: the v3 snapshot series (no run context needed for a read-only live view)
   try{
     const r=await EOD2Store.getSeries(sym,'ETF');
+    // R7: same new-listing rule as the engines — a new ETF's first sessions are not part of its 52W low (judged against NIFTYBEES' series)
+    let cut='';
+    if(sym!=='NIFTYBEES'&&r.bars.length){try{const nb=await EOD2Store.getSeries('NIFTYBEES','ETF');const c=newListingCutoffs({NIFTYBEES:Object.fromEntries(nb.bars.map(b=>[b[0],1])),[sym]:Object.fromEntries(r.bars.map(b=>[b[0],1]))})[sym];if(c)cut=c;}catch(e){/* no reference series: no seasoning cut */}}
+    if(cut>today){const result={low52:0,src:'new-listing',verified:false,newListingFrom:cut};_live52WLCache[sym]=result;return result;}
     const hist={};let prev=null;
     for(const b of r.bars){
-      if(b[0]>=oneYearAgo&&b[0]<=today)hist[b[0]]={open:b[1],high:b[2],low:b[3],close:b[4],adjClose:b[4],prev,vol:b[5]||0};
+      if(b[0]>=oneYearAgo&&b[0]<=today&&b[0]>=cut)hist[b[0]]={open:b[1],high:b[2],low:b[3],close:b[4],adjClose:b[4],prev,vol:b[5]||0};
       prev=b[4];
     }
     if(Object.keys(hist).length>=50){
@@ -9384,6 +9409,7 @@ async function getLive52WL(sym){
         return result;
       }
     }
+    if(cut){const result={low52:0,src:'new-listing',verified:false,newListingFrom:cut};_live52WLCache[sym]=result;return result;}   // R7: never fall back to a quote low that includes the listing sessions
   }catch(e){/* fall through to the labelled fallback */}
 
   // 2) fallback: whatever the live quote gave us (spike-inclusive) — labelled, NOT verified
@@ -9656,6 +9682,10 @@ async function runLifoBacktestCore(p){
     }
   });
 
+  // R7: a new ETF's first sessions are absent from its 52W low/high and it cannot be an entry candidate before its cutoff
+  const listingCut=newListingCutoffs(histMap),entryIndex={};
+  Object.keys(listingCut).forEach(sym=>{entryIndex[sym]=buildHistIndex(withoutListingBars(histMap[sym],listingCut[sym]));});
+
   const allDays=new Set();
   Object.values(histMap).forEach(h=>Object.keys(h).forEach(d=>allDays.add(d)));
   const tradingDays=[...allDays].filter(d=>d>=startDate&&d<=endDate).sort();
@@ -9687,17 +9717,18 @@ async function runLifoBacktestCore(p){
     const dayTs=new Date(day).getTime();
     progressCb(40+Math.round(di/tradingDays.length*55),`Simulating ${day}…`);
 
-    // A4-1 (F16): snapshotAll = every symbol with a bar (SELL checks, marks, inventory); snapshotEntry = minVol-filtered (ranking/buys only)
+    // A4-1 (F16): snapshotAll = every symbol with a bar (SELL checks, marks, inventory); snapshotEntry = minVol-filtered + R7 new-listing cut (ranking/buys only)
     const snapshotAll=(_lifoUni||LIFO_ETF_UNIVERSE).filter(e=>!DHC_EXCLUDED.has(e.sym)).map(etf=>{
       const h=histMap[etf.sym];const today=h?.[day];if(!today?.close)return null;
-      const low52=compute52WL(histIndex[etf.sym],dayTs,wl52Method);   // D4: sheet-parity toggle
-      const high52=get52WHigh(histIndex[etf.sym],dayTs);
+      const _ix=entryIndex[etf.sym]||histIndex[etf.sym];   // R7
+      const low52=compute52WL(_ix,dayTs,wl52Method);   // D4: sheet-parity toggle
+      const high52=get52WHigh(_ix,dayTs);
       const prox=low52>0?((today.close-low52)/low52)*100:999;
       const distHigh=high52>0?((high52-today.close)/high52)*100:null;
       const dailyChg=today.prev?((today.close-today.prev)/today.prev)*100:0;
       return{sym:etf.sym,name:etf.name,close:today.close,low52,high52,prox,distHigh,dailyChg,vol:today.vol};
     }).filter(Boolean);
-    const snapshotEntry=minVol>0?snapshotAll.filter(s=>!(s.vol>0&&s.vol<minVol)):snapshotAll;
+    const snapshotEntry=snapshotAll.filter(s=>!(minVol>0&&s.vol>0&&s.vol<minVol)&&!(listingCut[s.sym]&&day<listingCut[s.sym]));
     // a held symbol with no bar today keeps its last mark; the gap is reported, never silently valued
     Object.keys(openLots).forEach(sym=>{if((openLots[sym]||[]).some(l=>!l.closed)&&!snapshotAll.some(s=>s.sym===sym))valuationGaps.push({date:day,sym});});
 
@@ -14634,8 +14665,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-17-v3.22-R6';
-const APP_SOURCE_SHA256='25e762057569bf6cb0d6b7a4ab4b10d0dc4feeaf18e8c63e058cbbcfb4b63ae8';
+const APP_BUILD='2026-10-18-v3.22-R7';
+const APP_SOURCE_SHA256='db50dbebe7767f52cf45e43a7572bd8e3d58291cc9f41794e99bcba9bf39104a';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
