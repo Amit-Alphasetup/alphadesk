@@ -9168,7 +9168,7 @@ function renderPreflightPanel(containerId,pf,{refusal=null,latestSession=null}={
       ${btn('preview','Show Preview',!!pf.canPreview,'preview')}
     </div>
     <div style="font-size:10px;color:var(--fog);margin-top:6px">${certifiable?'':'Certified runs are disabled: '+(pf.canCertifyData?'the engine is not certifiable yet (RESEARCH — engine fixes pending).':'the data does not meet the certified requirements.')}</div>${bad.length||c.blocking?mdRepairHtml(pf):''}</div>`;
-  if(bad.length||c.blocking){mdRenderStatus();if(mdToken())mdPollStart();}
+  if(bad.length||c.blocking){mdRenderStatus();mdPollStart();}   // R9: poll status.json (public) even without a token; history still needs one (mdPollTick)
 }
 
 // ══ MARKET-DATA REQUESTS (A5-1) ═════════════════════════════════════════════════════════════════
@@ -9256,6 +9256,35 @@ async function mdFetchStatus(){
   if(!r.ok)throw new Error('status.json HTTP '+r.status);
   return r.json();
 }
+// R9: app-wide freshness check (startup + when the app comes back to the foreground, at most every 30 min). The v3 dataset once sat
+// three weeks behind while the nightly job failed, and nothing said so until a run was attempted. >= 2 sessions behind -> banner;
+// 1 behind is tolerated (tonight's run may simply not be in yet). The public status.json message is added when reachable.
+let _dataFreshAt=0;
+async function checkDataFreshness(){
+  _dataFreshAt=Date.now();
+  const out={latest:null,expected:null,behind:0,status:null,shown:false};
+  try{
+    const h=await EOD2Store.loadHandle(),m=h.manifest,exp=EOD2Store.expectedLatest(m);
+    out.latest=h.latestCompleted||m.latestCompletedSession||m.latestSession||null;out.expected=exp.date;
+    if(out.latest&&out.expected>out.latest){
+      const hol=new Set(Array.isArray(m.holidays)?m.holidays:[]);
+      for(let d=out.latest;d<out.expected;){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+1);d=t.toISOString().slice(0,10);const w=t.getUTCDay();if(w!==0&&w!==6&&!hol.has(d))out.behind++;}
+    }
+  }catch(e){return out;}
+  try{const st=await mdFetchStatus();if(st&&st.result)out.status={result:st.result,message:st.message||'',lastRun:st.lastRun||''};}catch(e){/* status is optional */}
+  const el=document.getElementById('data-fresh-banner'),tx=document.getElementById('dfb-text');
+  out.shown=out.behind>=2;
+  if(el&&tx){
+    if(out.shown){
+      const st=out.status&&out.status.result!=='PUBLISHED'?` Last nightly run: ${out.status.result}${out.status.message?' — '+out.status.message:''}.`:'';
+      tx.textContent=`Market data is ${out.behind} sessions behind: last session ${out.latest}, expected ${out.expected}. The nightly update on the PC may be failing — check the "EOD2 Publish" task.${st}`;
+      el.style.display='flex';
+    }else el.style.display='none';
+  }
+  return out;
+}
+try{document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-_dataFreshAt>30*60*1000)checkDataFreshness();});}catch(e){}
+
 // one poll: status.json (public) + history (token). Errors are shown, never thrown into the UI.
 async function mdPollTick(){
   MD_STATE.lastPoll=Date.now();
@@ -14671,8 +14700,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-18-v3.22-R8';
-const APP_SOURCE_SHA256='87670d08e52ad11742525cff896902d170ffb21f8ceec2efd232685268a97395';
+const APP_BUILD='2026-10-18-v3.22-R9';
+const APP_SOURCE_SHA256='3b48826a1d139c2f894847bfea68a5060dd07f65ec0cc5a3ecf4adf253fb7130';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -16944,6 +16973,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // B2 FIX: check if ledger backup is overdue after state is loaded
   setTimeout(checkLedgerBackupAge, 2000);
+  setTimeout(()=>{checkDataFreshness().catch(()=>{});}, 4000);   // R9
 });
 </script>
 <!-- ── P14-E: FULL MOBILE NAVIGATION SHEET ──────────────────────────────── -->
@@ -16977,6 +17007,12 @@ document.addEventListener('DOMContentLoaded', () => {
 <button onclick="document.getElementById('ledger-backup-banner').style.display='none'" style="background:none;border:none;color:var(--fog);cursor:pointer;font-size:18px;padding:0 2px">×</button>
 </div>
 <!-- ── END LEDGER BACKUP AGE BANNER ───────────────────────────────────────── -->
+<!-- R9: market-data freshness banner (checkDataFreshness) -->
+<div id="data-fresh-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:2400;align-items:center;gap:8px;padding:8px 12px;background:var(--gold-dim);border-bottom:1px solid var(--gold)">
+<span style="font-size:16px">⚠️</span>
+<span id="dfb-text" style="font-size:11px;color:var(--gold);flex:1"></span>
+<button onclick="document.getElementById('data-fresh-banner').style.display='none'" style="background:none;border:none;color:var(--fog);cursor:pointer;font-size:18px;padding:0 2px" title="Hide until the next check">×</button>
+</div>
 <!-- ── DATA HEALTH CHECK MODAL (STEP-2) ─────────────────────────────────── -->
 <div id="dhc-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9000;overflow-y:auto">
 <div style="max-width:820px;margin:40px auto;background:var(--ink2);border:1px solid var(--plate);border-radius:12px;padding:24px">
