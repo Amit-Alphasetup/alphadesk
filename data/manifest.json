@@ -1,7 +1,7 @@
 {
   "dataset": "EOD2",
   "exporter_version": "2.0.0",
-  "exportedAt": "2026-10-17T13:45:15+00:00",
+  "exportedAt": "2026-10-18T13:46:31+00:00",
   "eod2_data_version": 3.4,
   "eod2_last_update": "2026-10-16T00:00:00+05:30",
   "windowStart": "2019-01-14",
@@ -12,24 +12,6 @@
   "fallbackUsed": false,
   "certification": "PARTIAL",
   "quarantined": {
-    "MONQ50": [
-      "unexplained +19.8% on 2026-09-16 (ratio 0.83)",
-      "unexplained +20.0% on 2026-09-17 (ratio 0.83)",
-      "unexplained +20.0% on 2026-09-18 (ratio 0.83)",
-      "unexplained -20.0% on 2026-09-21 (ratio 1.25)",
-      "unexplained -20.0% on 2026-09-22 (ratio 1.25)",
-      "unexplained -20.0% on 2026-09-23 (ratio 1.25)",
-      "unexplained +18.0% on 2026-10-07 (ratio 0.85)"
-    ],
-    "MOM100": [
-      "1 unexplained session gap(s): ['2022-05-11']"
-    ],
-    "ALPHA": [
-      "1 unexplained session gap(s): ['2022-05-11']"
-    ],
-    "TNIDETF": [
-      "1 unexplained session gap(s): ['2022-05-11']"
-    ],
     "HDFCSILVER": [
       "unexplained -16.4% on 2026-01-30 (ratio 1.20)",
       "unexplained +15.4% on 2026-02-03 (ratio 0.87)"
@@ -37,9 +19,6 @@
     "SILVERIETF": [
       "1 unexplained session gap(s): ['2022-05-11']",
       "unexplained -20.1% on 2026-01-30 (ratio 1.25)"
-    ],
-    "GOLDIETF": [
-      "1 unexplained session gap(s): ['2022-05-11']"
     ],
     "HDFCGOLD": [
       "1 unexplained session gap(s): ['2022-05-11']",
@@ -130,7 +109,14 @@
     "MID150BEES|2020-03-19": "real NSE print verified on TradingView; off-NAV, thin liquidity",
     "NIF100BEES|2020-03-12": "COVID crash day; off-NAV illiquid print",
     "MONQ50|2026-09-07": "real print verified TradingView; intl ETF premium spike, off-NAV",
-    "MONQ50|2026-09-08": "real print verified TradingView; intl ETF premium spike, off-NAV"
+    "MONQ50|2026-09-08": "real print verified TradingView; intl ETF premium spike, off-NAV",
+    "MONQ50|2026-09-16": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-09-17": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-09-18": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-09-21": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-09-22": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-09-23": "Apd confirmed 2026-10-17 these are real exchange moves (MONQ50 +20%x3 then -20%x3 on 16-23 Sep 2026; price stayed in a 188-258 range through 16 Oct, consistent with genuine circuit-limit moves).",
+    "MONQ50|2026-10-07": "Apd 2026-10-17: MONQ50 anomalies are real moves (same ETF as the approved 16-23 Sep moves). 2026-10-07 close 258.57 vs 219.20 (+18.0%) on 2.9M volume; next sessions 243-254, no reversal."
   },
   "known_no_trade": {
     "MID150BEES": [
@@ -143,6 +129,18 @@
     ],
     "NIF100BEES": [
       "2020-03-25"
+    ],
+    "ALPHA": [
+      "2022-05-11"
+    ],
+    "MOM100": [
+      "2022-05-11"
+    ],
+    "TNIDETF": [
+      "2022-05-11"
+    ],
+    "GOLDIETF": [
+      "2022-05-11"
     ]
   },
   "gap_allow_all": {
@@ -154,7 +152,7 @@
   "benchmark": {
     "NIFTY50_TRI": "NOT_INCLUDED (separate provider; blocks S3 edge only)"
   },
-  "datasetHash": "67b4f5852f2b0e215038db8d3cc780655d577f3f533ebc15767e4d50714d9863",
+  "datasetHash": "1630c380c789eb3f5461d711e2fb0108a14081a99b973c9895367f1508215349",
   "files": {
     "NIFTYBEES": {
       "path": "data/etf/NIFTYBEES.json",
@@ -364,6 +362,14 @@
       "last": "2026-10-16",
       "bars": 1036
     },
+    "MONQ50": {
+      "path": "data/etf/MONQ50.json",
+      "kind": "ETF",
+      "sha256": "6b5d1d8a0a1965d34380064fd2db1c44169fcb04041e6bcb809aab06e56e785b",
+      "first": "2021-12-29",
+      "last": "2026-10-16",
+      "bars": 1191
+    },
     "MOMENTUM50": {
       "path": "data/etf/MOMENTUM50.json",
       "kind": "ETF",
@@ -476,6 +482,14 @@
       "last": "2026-10-16",
       "bars": 594
     },
+    "MOM100": {
+      "path": "data/etf/MOM100.json",
+      "kind": "ETF",
+      "sha256": "b68e49c96739ee136406b129649f540ec9e9551437b9da22a083fd4b2d61bef7",
+      "first": "2019-01-14",
+      "last": "2026-10-16",
+      "bars": 1920
+    },
     "MOREALTY": {
       "path": "data/etf/MOREALTY.json",
       "kind": "ETF",
@@ -483,6 +497,14 @@
       "first": "2024-03-21",
       "last": "2026-10-16",
       "bars": 637
+    },
+    "ALPHA": {
+      "path": "data/etf/ALPHA.json",
+      "kind": "ETF",
+      "sha256": "9510fa515e3024f9b18d79870a46ea006da45fc763d66324e19fd934fd1eb9b4",
+      "first": "2021-12-29",
+      "last": "2026-10-16",
+      "bars": 1190
     },
     "EVINDIA": {
       "path": "data/etf/EVINDIA.json",
@@ -500,6 +522,14 @@
       "last": "2026-10-16",
       "bars": 248
     },
+    "TNIDETF": {
+      "path": "data/etf/TNIDETF.json",
+      "kind": "ETF",
+      "sha256": "d5fb22d81c084e792ac42b0d94019b6db8c3b2a61d72be67978143606338abb0",
+      "first": "2022-04-08",
+      "last": "2026-10-16",
+      "bars": 1121
+    },
     "TATAGOLD": {
       "path": "data/etf/TATAGOLD.json",
       "kind": "ETF",
@@ -507,6 +537,14 @@
       "first": "2024-01-17",
       "last": "2026-10-16",
       "bars": 682
+    },
+    "GOLDIETF": {
+      "path": "data/etf/GOLDIETF.json",
+      "kind": "ETF",
+      "sha256": "2eecdff97400bb2cb8088b54554b32ad77d53ee32037a70948ad2bbb090dceef",
+      "first": "2019-01-14",
+      "last": "2026-10-16",
+      "bars": 1920
     },
     "GROWWPOWER": {
       "path": "data/etf/GROWWPOWER.json",
