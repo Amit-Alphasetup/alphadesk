@@ -14700,8 +14700,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-18-v3.22-R9';
-const APP_SOURCE_SHA256='3b48826a1d139c2f894847bfea68a5060dd07f65ec0cc5a3ecf4adf253fb7130';
+const APP_BUILD='2026-10-19-v3.22-R10';
+const APP_SOURCE_SHA256='dc5e987d622f6d813a7e63f76112cd8f95d86dad53ca3327b10fb16272109a29';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -14862,7 +14862,8 @@ runDMBacktestCore=(function(core){const w=async function(p){p=p||{};
     const lookback=finiteParam(p.lookback,182,{min:1,integer:true});
     const etfs=[...(p.etfs||(p.universeSnapshot?p.universeSnapshot.filter(e=>enginesFromLegacyRow(e).includes('DM')).map(e=>e.sym):getMomUniverse()).filter(sy=>!DHC_EXCLUDED.has(sy)))];if(!etfs.includes('NIFTYBEES'))etfs.push('NIFTYBEES');
     const endTs=Math.floor(new Date(p.toDate).getTime()/1000)+86400,startTs=Math.floor(new Date(p.fromDate).getTime()/1000)-(lookback+220)*86400;
-    const q=await eod2PrepareCoreParams(p,ctx,{syms:etfs,from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:false});
+    // R10: LIQUIDBEES is loaded for valuing the liquid sleeve only; the core still ranks p.etfs / the DM universe
+    const q=await eod2PrepareCoreParams(p,ctx,{syms:etfs.includes('LIQUIDBEES')?etfs:[...etfs,'LIQUIDBEES'],from:fmt(new Date(startTs*1000)),to:fmt(new Date(endTs*1000)),withIndex:false});
     return q.error?q:core(q);
   },{handle:own?own.snapshot:null,params:p});};w.__frozen=core;return w;})(runDMBacktestCore);
 
@@ -15614,7 +15615,7 @@ async function runDmParamSweep() {
   progBar.style.width='35%';
   progLabel.textContent=`Fetching ${etfs.length} ETFs (parallel)…`;
   let _dmSwCtx=null;try{_dmSwCtx=await EOD2Store.startRun('SWEEP',{mode:'research'});}catch(e){_dmSweepDone(runBtn,cancelBtn,statusEl,progWrap,e.message+' Sweep aborted; no partial dataset used.');return;}
-  let _dmSwB;try{_dmSwB=await buildHistMapFromSnapshot(_dmSwCtx,etfs,fmt(new Date(startTs*1000)),fmt(new Date(endTs*1000)));}finally{EOD2Store.endRun(_dmSwCtx);}
+  let _dmSwB;try{_dmSwB=await buildHistMapFromSnapshot(_dmSwCtx,[...etfs,'LIQUIDBEES'].filter((s,i,a)=>a.indexOf(s)===i),fmt(new Date(startTs*1000)),fmt(new Date(endTs*1000)));}finally{EOD2Store.endRun(_dmSwCtx);}
   if(_dmSwB.failures.length){
     _dmSweepDone(runBtn,cancelBtn,statusEl,progWrap,`Historical data failed for ${_dmSwB.failures.map(x=>x.sym).join(', ')}. Sweep aborted; no partial dataset used.`);
     return;
