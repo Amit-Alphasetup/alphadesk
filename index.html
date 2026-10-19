@@ -9285,6 +9285,42 @@ async function checkDataFreshness(){
 }
 try{document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-_dataFreshAt>30*60*1000)checkDataFreshness();});}catch(e){}
 
+// R11: the service worker serves the cached shell first and refreshes it in the background, so a fix pushed today is only seen on
+// the open AFTER next — and nothing said a newer build existed (R10 looked "not working" on the phone). Startup + foreground (max
+// every 10 min): fetch index.html past the worker (a query string is never intercepted), compare APP_BUILD, offer a one-tap reload.
+let _appUpdAt=0;
+async function checkAppUpdate(){
+  _appUpdAt=Date.now();
+  const out={current:APP_BUILD,latest:null,shown:false};
+  if(!/^https?:$/.test(location.protocol))return out;
+  try{
+    const r=await fetch('./index.html?build='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return out;
+    const m=/^const APP_BUILD='([^']+)';/m.exec(await r.text());   // line start: never this line's own pattern
+    out.latest=m?m[1]:null;
+  }catch(e){return out;}
+  out.shown=!!out.latest&&out.latest!==APP_BUILD;
+  const el=document.getElementById('app-update-banner'),tx=document.getElementById('aub-text');
+  if(el&&tx){
+    if(out.shown){tx.textContent=`A newer AlphaDesk build is available (${out.latest}; this one is ${APP_BUILD}).`;el.style.display='flex';}
+    else el.style.display='none';
+  }
+  return out;
+}
+// drop the cached shell so the reload comes from the network, then reload
+async function applyAppUpdate(){
+  try{
+    for(const k of await caches.keys()){
+      if(!k.startsWith('alphadesk-'))continue;
+      const c=await caches.open(k);
+      for(const rq of await c.keys()){const p=new URL(rq.url).pathname;if(p.endsWith('/')||p.endsWith('/index.html'))await c.delete(rq);}
+    }
+    const reg=navigator.serviceWorker&&await navigator.serviceWorker.getRegistration();if(reg)await reg.update();
+  }catch(e){swallowLoud('applyAppUpdate',e);}
+  location.reload();
+}
+try{document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-_appUpdAt>10*60*1000)checkAppUpdate().catch(()=>{});});}catch(e){}
+
 // one poll: status.json (public) + history (token). Errors are shown, never thrown into the UI.
 async function mdPollTick(){
   MD_STATE.lastPoll=Date.now();
@@ -14700,8 +14736,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-19-v3.22-R10';
-const APP_SOURCE_SHA256='dc5e987d622f6d813a7e63f76112cd8f95d86dad53ca3327b10fb16272109a29';
+const APP_BUILD='2026-10-19-v3.22-R11';
+const APP_SOURCE_SHA256='cedc50de9dc6843c7727adcb2c6638d8a6898a0e91cce99de17f9254dea6ef2c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -16975,6 +17011,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // B2 FIX: check if ledger backup is overdue after state is loaded
   setTimeout(checkLedgerBackupAge, 2000);
   setTimeout(()=>{checkDataFreshness().catch(()=>{});}, 4000);   // R9
+  setTimeout(()=>{checkAppUpdate().catch(()=>{});}, 2500);       // R11
 });
 </script>
 <!-- ── P14-E: FULL MOBILE NAVIGATION SHEET ──────────────────────────────── -->
@@ -17013,6 +17050,13 @@ document.addEventListener('DOMContentLoaded', () => {
 <span style="font-size:16px">⚠️</span>
 <span id="dfb-text" style="font-size:11px;color:var(--gold);flex:1"></span>
 <button onclick="document.getElementById('data-fresh-banner').style.display='none'" style="background:none;border:none;color:var(--fog);cursor:pointer;font-size:18px;padding:0 2px" title="Hide until the next check">×</button>
+</div>
+<!-- R11: newer app build available (checkAppUpdate) -->
+<div id="app-update-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:2500;align-items:center;gap:8px;padding:8px 12px;background:var(--ink3);border-bottom:1px solid var(--sky)">
+<span style="font-size:16px">🔄</span>
+<span id="aub-text" style="font-size:11px;color:var(--sky);flex:1"></span>
+<button class="action-btn" onclick="applyAppUpdate()" style="font-size:11px;padding:4px 10px">Reload now</button>
+<button onclick="document.getElementById('app-update-banner').style.display='none'" style="background:none;border:none;color:var(--fog);cursor:pointer;font-size:18px;padding:0 2px" title="Hide until the next check">×</button>
 </div>
 <!-- ── DATA HEALTH CHECK MODAL (STEP-2) ─────────────────────────────────── -->
 <div id="dhc-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9000;overflow-y:auto">
