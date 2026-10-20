@@ -2235,6 +2235,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
     <div id="tenet-probe-out" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
     <div class="form-row" style="align-items:center"><label style="display:flex;align-items:center;gap:6px;font-size:11px"><input type="checkbox" id="tenet-bt-conservative" checked> Conservative exits — at most one lot per ETF per session (a single daily HIGH cannot prove several stacked targets filled in sequence)</label></div>
     <div id="tenet-bt-evidence" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
+<div id="tenet-bt-s3" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px;overflow-x:auto"></div>
     <div class="form-row"><button class="action-btn sm" id="tenet-bt-export" onclick="exportTenetBtCSV()">⬇ Export CSV</button></div>
     <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
   </div>
@@ -12778,6 +12779,78 @@ function collectTenetBacktestInputs(){
   return _deepFreeze({tenetInputs:true,from:g('tenet-bt-from')?.value,to:g('tenet-bt-to')?.value,initial:+g('tenet-bt-cap')?.value,conservative:g('tenet-bt-conservative')?.checked!==false,
     config:JSON.parse(JSON.stringify(t.config)),pairs,universeHistory:hist,assetClass:ac,feePolicyVersion:FEE_POLICY_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256});
 }
+// R12 (2026-10-20): Tenet evidence report (plan A6-5, METRICS ONLY). The S3 verdict thresholds were never supplied, so this
+// reports the numbers and never says pass/fail. Pure: reads a TENET_LAST_RESULT-shaped object, never the engine state.
+function tenetEvidenceMetrics(r){
+  const m=r.metrics||{},trades=r.trades||[],eq=r.equity||[],initial=+m.initial||0,end=eq.length?eq[eq.length-1].date:null;
+  // cash at each session close, replayed from the trade rows (BUY/BID pay notional + fee; SELL receives gross - sell fee)
+  let cash=initial,ti=0,cashSum=0,n=0;
+  for(const e of eq){
+    while(ti<trades.length&&trades[ti].date<=e.date){const x=trades[ti++];
+      if(x.action==='SELL')cash+=(+x.gross||0)-(+x.sellFee||0);else if(x.action==='BUY'||x.action==='BID')cash-=x.price*x.qty+(+x.fees||0);}
+    if(e.value>0){cashSum+=cash/e.value;n++;}
+  }
+  const avgCashPct=n?cashSum/n*100:null;
+  const cashReplayOk=Number.isFinite(+m.cash)?Math.abs(cash-m.cash)<=Math.max(1,initial*1e-6):null;
+  // open lots at the end = BUY/BID rows not consumed by a SELL of the same ETF, buy date and lot number
+  const sold=new Map();trades.forEach(x=>{if(x.action==='SELL'){const k=x.etf+'|'+x.buyDate+'|'+x.buySeq;sold.set(k,(sold.get(k)||0)+1);}});
+  const open=[];
+  trades.forEach(x=>{if(x.action!=='BUY'&&x.action!=='BID')return;const k=x.etf+'|'+x.date+'|'+x.buySeq;
+    if(sold.get(k)){sold.set(k,sold.get(k)-1);return;}open.push({etf:x.etf,buyDate:x.date,cost:x.price*x.qty,age:end?tenetDaysBetween(x.date,end):0});});
+  const openCost=open.reduce((a,l)=>a+l.cost,0),aged=d=>open.filter(l=>l.age>d).reduce((a,l)=>a+l.cost,0);
+  const oldest=open.reduce((a,l)=>!a||l.age>a.age?l:a,null);
+  const sells=trades.filter(x=>x.action==='SELL'),longestClosed=sells.reduce((a,x)=>Math.max(a,+x.holdingDays||0),0);
+  // drawdown duration: peak -> first session back at that peak (calendar days); an unrecovered one runs to the end date
+  let peak=initial,peakDate=eq.length?eq[0].date:null,longest={days:0,from:null,to:null,recovered:true},under=0,underSessions=0;
+  for(const e of eq){
+    if(e.value>=peak){if(under){const dd=tenetDaysBetween(peakDate,e.date);if(dd>longest.days)longest={days:dd,from:peakDate,to:e.date,recovered:true};}peak=e.value;peakDate=e.date;under=0;}
+    else{under++;underSessions++;}
+  }
+  let current=null;
+  if(under&&end){current={days:tenetDaysBetween(peakDate,end),from:peakDate,to:end,recovered:false};if(current.days>longest.days)longest=current;}
+  return{cagr:m.cagr,xirr:m.xirr,maxDD:m.maxDD,finalValue:m.finalValue,avgCashPct,avgInvestedPct:avgCashPct==null?null:100-avgCashPct,cashReplayOk,
+    openLots:open.length,openCost,aged180:aged(180),aged365:aged(365),aged180Pct:initial?aged(180)/initial*100:null,aged365Pct:initial?aged(365)/initial*100:null,
+    oldestOpen:oldest?{etf:oldest.etf,buyDate:oldest.buyDate,days:oldest.age}:null,longestClosedHold:longestClosed,closedLots:sells.length,
+    longestDD:longest,currentDD:current,underwaterPct:eq.length?underSessions/eq.length*100:null,sessions:eq.length,endDate:end};
+}
+// canonical vs conservative: kept per (dataset hash, window, capital, pairs, config) so the two columns are always the same inputs
+const TENET_EVIDENCE_RUNS=new Map();
+function renderTenetEvidenceReport(r,{key,conservative,label}={}){
+  const box=document.getElementById('tenet-bt-s3');if(!box||!r)return null;
+  const mx=tenetEvidenceMetrics(r);
+  const slot=TENET_EVIDENCE_RUNS.get(key)||{};slot[conservative?'conservative':'canonical']={m:mx,label};TENET_EVIDENCE_RUNS.set(key,slot);
+  const pct=v=>v==null||!Number.isFinite(v)?'—':(v*100).toFixed(2)+'%',p1=v=>v==null?'—':v.toFixed(1)+'%',inr=v=>fmtINR(v||0);
+  const dd=x=>x&&x.days?`${x.days} days (${escapeHtml(x.from)} → ${escapeHtml(x.to)}${x.recovered?'':', not yet recovered'})`:'none';
+  const row=(k,v)=>`<tr><td style="color:var(--fog);padding:3px 8px 3px 0">${k}</td><td style="padding:3px 0">${v}</td></tr>`;
+  const cmpRow=(k,f)=>`<tr><td style="color:var(--fog);padding:3px 8px 3px 0">${k}</td><td style="padding:3px 6px">${slot.canonical?f(slot.canonical.m):'—'}</td><td style="padding:3px 6px">${slot.conservative?f(slot.conservative.m):'—'}</td></tr>`;
+  const certified=/^CERTIFIED/.test(String(label||''));
+  box.style.display='block';
+  box.innerHTML=`
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">📋 Tenet evidence report</div>
+    <div style="font-size:10.5px;padding:6px 8px;border-radius:5px;margin-bottom:8px;background:${certified?'rgba(34,197,94,.10)':'rgba(234,179,8,.12)'};color:${certified?'var(--gain)':'var(--gold)'}">
+      Run: ${escapeHtml(label||'RESEARCH')} · ${conservative?'conservative':'canonical'} exits.${certified?'':' Evidence for real-money decisions should come from a CERTIFIED run.'}
+      No pass/fail verdict — no thresholds have been set. Read the numbers and decide.</div>
+    <table style="font-size:11px;border-collapse:collapse;width:100%"><tbody>
+      ${row('CAGR · XIRR',`${pct(mx.cagr)} · ${pct(mx.xirr)}`)}
+      ${row('Average idle cash',`${p1(mx.avgCashPct)} of equity (invested ${p1(mx.avgInvestedPct)})${mx.cashReplayOk===false?' <span style="color:var(--loss)">⚠ cash replay disagrees with the engine</span>':''}`)}
+      ${row('Open lots at end',`${mx.openLots} · cost ${inr(mx.openCost)}`)}
+      ${row('Aged principal &gt;180 d',`${inr(mx.aged180)} (${p1(mx.aged180Pct)} of capital)`)}
+      ${row('Aged principal &gt;365 d',`${inr(mx.aged365)} (${p1(mx.aged365Pct)} of capital)`)}
+      ${row('Oldest open lot',mx.oldestOpen?`${escapeHtml(mx.oldestOpen.etf)} bought ${escapeHtml(mx.oldestOpen.buyDate)} · ${mx.oldestOpen.days} days`:'none')}
+      ${row('Longest completed hold',`${mx.longestClosedHold} days (${mx.closedLots} lots closed)`)}
+      ${row('Max drawdown',pct(mx.maxDD==null?null:-mx.maxDD))}
+      ${row('Longest drawdown',dd(mx.longestDD))}
+      ${row('Time under water',`${p1(mx.underwaterPct)} of ${mx.sessions} sessions`)}
+      ${row('Benchmark (TRI)','not available — EOD2 has no total-return index series, so no index comparison is made')}
+    </tbody></table>
+    <div style="font-weight:600;font-size:11px;margin:10px 0 4px">Canonical vs conservative (same dataset, window, capital and pairs)</div>
+    <table style="font-size:11px;border-collapse:collapse"><thead><tr><th></th><th style="padding:3px 6px;text-align:left">Canonical</th><th style="padding:3px 6px;text-align:left">Conservative</th></tr></thead><tbody>
+      ${cmpRow('CAGR',x=>pct(x.cagr))}${cmpRow('Max drawdown',x=>pct(-x.maxDD))}${cmpRow('Idle cash',x=>p1(x.avgCashPct))}${cmpRow('Aged &gt;365 d',x=>inr(x.aged365))}${cmpRow('Lots closed',x=>String(x.closedLots))}
+    </tbody></table>
+    ${slot.canonical&&slot.conservative?'':`<button class="action-btn sm" style="margin-top:8px" onclick="tenetRunOtherExitModel()">Run ${conservative?'canonical':'conservative'} too</button>`}`;
+  return mx;
+}
+function tenetRunOtherExitModel(){const c=document.getElementById('tenet-bt-conservative');if(c)c.checked=!c.checked;return runTenetBacktestV3();}
 function tenetBacktestRunState(inp){return{config:JSON.parse(JSON.stringify(inp.config)),pairs:JSON.parse(JSON.stringify(inp.pairs)),universeHistory:JSON.parse(JSON.stringify(inp.universeHistory)),holdings:[],sold:[],capital:[],bidWeeks:{},fills:[],assetClass:inp.assetClass};}
 async function runTenetBacktestV3(inputsArg){
   const t=tenetState();
@@ -13005,7 +13078,7 @@ async function runTenetBacktestV3(inputsArg){
     // A4-5: terminal valuation needs a bar on the END date for every held ETF, else the run is refused as a result
     const _endD=eq.at(-1)?.date;
     const valuationGaps=_endD?hold.filter(h=>!tenetExactBar(data[h.etf],_endD)).map(h=>({date:_endD,sym:h.etf})):[];
-    if(valuationGaps.length){if(st)st.textContent=`Run refused — 0 execution / ${valuationGaps.length} valuation gaps: ${valuationGaps.map(g=>g.sym).join(', ')} ${valuationGaps.length>1?'have':'has'} no bar on ${_endD}`;const _eb=document.getElementById('tenet-bt-evidence');if(_eb)_eb.style.display='none';return;}
+    if(valuationGaps.length){if(st)st.textContent=`Run refused — 0 execution / ${valuationGaps.length} valuation gaps: ${valuationGaps.map(g=>g.sym).join(', ')} ${valuationGaps.length>1?'have':'has'} no bar on ${_endD}`;const _eb=document.getElementById('tenet-bt-evidence');if(_eb)_eb.style.display='none';const _s3=document.getElementById('tenet-bt-s3');if(_s3)_s3.style.display='none';return;}
     const finalValue=eq.at(-1)?.value??initial;
     const _first=eq[0]?.date||from,_last=eq.at(-1)?.date||to;
     const years=Math.max((new Date(_last)-new Date(_first))/31557600000,1/365);
@@ -13097,6 +13170,8 @@ async function runTenetBacktestV3(inputsArg){
         exchange, SEBI, stamp, GST) — it is not a broker contract note.
       </div>`;
     }
+    try{renderTenetEvidenceReport(TENET_LAST_RESULT,{conservative:conservativeExits,label:TENET_LAST_RESULT.provenance&&TENET_LAST_RESULT.provenance.label,
+      key:JSON.stringify([TENET_LAST_RESULT.provenance&&TENET_LAST_RESULT.provenance.datasetHash,from,to,initial,TENET_RUN_PAIRS||_in.pairs,t.config])});}catch(e){swallowLoud('tenetEvidenceReport',e);}   // R12
     document.getElementById('tenet-bt-log').innerHTML=`<table><thead><tr><th>Date</th><th>Action</th><th>ETF</th><th>Team</th><th>Price</th><th>Qty</th><th>Lot</th><th>Target</th><th>Fall/52W</th><th>P/L</th></tr></thead><tbody>${trades.map(x=>`<tr><td>${escapeHtml(x.date)}</td><td>${escapeHtml(x.action)}</td><td>${escapeHtml(x.etf)}</td><td>${escapeHtml(x.team||'')}</td><td>${fmtINR(x.price)}</td><td>${x.qty}</td><td>${x.buySeq||'—'}</td><td>${x.targetPct!=null?x.targetPct.toFixed(2)+'%':'—'}</td><td>${x.fall!=null?'fall '+x.fall.toFixed(2)+'%':x.distance!=null?'52W '+x.distance.toFixed(2)+'%':'—'}</td><td>${fmtINR(x.profit||0)}</td></tr>`).join('')}</tbody></table>`;
     if(st)st.textContent=`Completed · ${weeks.length} weekly decision points · ${trades.length} trades · ${sells.length} sells · ${skips.length} capital/data skips · ${t.universeHistory.length?'POINT-IN-TIME SCANNER SNAPSHOTS':'CONFIGURED-UNIVERSE'}. Daily target exits use HIGH; weekly entries use final-session CLOSE.`;
   }catch(e){
@@ -14736,8 +14811,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-19-v3.22-R11';
-const APP_SOURCE_SHA256='cedc50de9dc6843c7727adcb2c6638d8a6898a0e91cce99de17f9254dea6ef2c';
+const APP_BUILD='2026-10-20-v3.22-R12';
+const APP_SOURCE_SHA256='0e73e0829b06b09a75994d34842b0aca2ec09bbadd9ce409ae3c0d213f992cf6';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
