@@ -14671,7 +14671,7 @@ function exportDmBtCSV(){
     [],
     ['TRADES'],
     ['Exec Date','ETF','Action','Entry Date','Entry ₹','Exit ₹','Units','Cost Basis ₹',
-     'Friction ₹','Hold Days','Net P&L ₹','Net P&L %','Exit Reason','Nifty OK','Signal Date'],   // R13: appended last so existing column positions are unchanged
+     'Friction ₹','Hold Days','Net P&L ₹','Price Move %','Exit Reason','Nifty OK','Signal Date'],   // R13: appended last so existing column positions are unchanged
   ];
   const _m13=dmBtDetailModel(_dmBtResult,p),_sigByExec={};
   (_dmBtResult.dmRebalLog||[]).forEach(r=>{_sigByExec[r.execDate]=r.sigDate;});
@@ -15040,8 +15040,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-04-v3.22-R14';
-const APP_SOURCE_SHA256='15f35d689d7698f1e0a5a52fc5b60eefa9288358ca6acc8cfd9f90341c1bf010';
+const APP_BUILD='2026-11-04-v3.22-R15';
+const APP_SOURCE_SHA256='26c9ac8f3d39ffcacb0e3bae88ce305da7f33de5d51f1f21abd99548c8504b48';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
