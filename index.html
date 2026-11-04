@@ -8153,9 +8153,9 @@ async function runDMBacktest(){
       ${shortfallLog.map(s=>`<tr>
         <td class="mono" style="padding:4px">${s.date}</td>
         <td style="padding:4px">${escapeHtml(s.sym)}</td>
-        <td class="r mono" style="padding:4px">${s.neededCash.toFixed(2)}</td>
-        <td class="r mono" style="padding:4px">${s.availCash.toFixed(2)}</td>
-        <td class="r mono" style="padding:4px;color:var(--stop)">${s.deficit.toFixed(2)}</td>
+        <td class="r mono" style="padding:4px">${(s.neededCash*(momCapital/100)).toFixed(2)}</td>
+        <td class="r mono" style="padding:4px">${(s.availCash*(momCapital/100)).toFixed(2)}</td>
+        <td class="r mono" style="padding:4px;color:var(--stop)">${(s.deficit*(momCapital/100)).toFixed(2)}</td>
       </tr>`).join('')}
       </tbody></table></div>`;
   } else {
@@ -14718,7 +14718,7 @@ function exportDmBtCSV(){
   }
   if(_dmBtResult.shortfallLog?.length){
     rows.push([],['SKIPPED BUYS — INSUFFICIENT CASH'],['Date','ETF','Needed ₹','Available ₹','Deficit ₹']);
-    _dmBtResult.shortfallLog.forEach(s=>rows.push([s.date,s.sym,s.neededCash,s.availCash,s.deficit]));
+    _dmBtResult.shortfallLog.forEach(s=>rows.push([s.date,s.sym,+(s.neededCash*_sc).toFixed(2),+(s.availCash*_sc).toFixed(2),+(s.deficit*_sc).toFixed(2)]));
   }
   rows.push([],...eod2ProvenanceRows(_dmBtResult.provenance));
   dlCSV(rows,'dm_backtest_full');
@@ -15040,8 +15040,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-04-v3.22-R13';
-const APP_SOURCE_SHA256='d1a916cf811ae3474b90f3fff78ddeaa306a62743cce6c7a91e52d3ee4771c97';
+const APP_BUILD='2026-11-04-v3.22-R14';
+const APP_SOURCE_SHA256='15f35d689d7698f1e0a5a52fc5b60eefa9288358ca6acc8cfd9f90341c1bf010';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
