@@ -1729,16 +1729,44 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div id="dm-bt-verdict-text" style="font-size:12px;color:var(--fog)"></div>
 </div>
 <div class="stat-grid" id="mbt-metrics" style="display:none"></div>
+<div class="stat-grid" id="dm-bt-summary" style="display:none"></div>
 <div class="card" id="dm-bt-equity-card" style="display:none">
 <div class="card-title" style="margin-bottom:10px">Equity Curve vs NIFTYBEES</div>
 <canvas id="dm-bt-canvas" style="width:100%;height:230px;display:block"></canvas>
 </div>
-<div class="card" id="mbt-trades-card" style="display:none">
-<div class="card-title" style="margin-bottom:10px">Simulated Trades</div>
+<div class="card" id="dm-bt-holdings-card" style="display:none;border-left:3px solid var(--sky)">
+<div class="card-title" style="margin-bottom:6px">📦 Current Holdings — end of backtest</div>
+<div id="dm-bt-holdings-body"></div>
+</div>
+<div class="card" id="dm-bt-months-card" style="display:none">
+<div class="card-title" style="margin-bottom:10px">📆 Month-wise Trades &amp; P&amp;L</div>
+<div style="font-size:11px;color:var(--fog);margin-bottom:8px">Trades are counted in the month they executed. Realised P&amp;L is from exits that month; NAV change includes unrealised moves.</div>
 <div class="tbl-wrap"><table>
-<thead><tr><th>Date</th><th>ETF</th><th>Action</th><th class="r">Entry ₹</th><th class="r">Exit ₹</th><th class="r">Days</th><th class="r">P&amp;L %</th></tr></thead>
+<thead><tr><th>Month</th><th class="r">Rebal.</th><th class="r">Buys</th><th class="r">Exits</th><th class="r">W/L</th><th class="r">Realised P&amp;L</th><th class="r">Friction</th><th class="r">NAV chg ₹</th><th class="r">NAV chg %</th></tr></thead>
+<tbody id="dm-bt-months-body"></tbody>
+</table></div>
+</div>
+<div class="card" id="mbt-trades-card" style="display:none">
+<div class="card-title" style="margin-bottom:10px">Simulated Trades — entries and exits</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+<select class="form-input" id="dm-bt-tr-filter" onchange="renderDmBtTradeTable()" style="max-width:140px">
+<option value="all">All rows</option><option value="entries">Entries (BUY)</option><option value="exits">Exits</option><option value="wins">Winning exits</option><option value="losses">Losing exits</option>
+</select>
+<input class="form-input" id="dm-bt-tr-search" oninput="renderDmBtTradeTable()" placeholder="Filter ETF…" style="max-width:130px" type="text"/>
+<span id="dm-bt-tr-count" style="font-size:11px;color:var(--fog)"></span>
+</div>
+<div class="tbl-wrap"><table>
+<thead><tr><th>Signal</th><th>Executed</th><th>ETF</th><th>Action</th><th class="r">Entry Date</th><th class="r">Entry ₹</th><th class="r">Exit ₹</th><th class="r">Qty</th><th class="r">Invested</th><th class="r">Held</th><th class="r">Net P&amp;L ₹</th><th class="r">Net %</th><th>Why</th></tr></thead>
 <tbody id="mbt-trades-body"></tbody>
 </table></div>
+</div>
+<div class="card" id="dm-bt-days-card" style="display:none">
+<div class="card-title" style="margin-bottom:6px">🗓 Day-wise Log — signal, entries, exits and holdings</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+<input class="form-input" id="dm-bt-days-search" oninput="renderDmBtDays()" placeholder="Filter ETF…" style="max-width:130px" type="text"/>
+<span id="dm-bt-days-count" style="font-size:11px;color:var(--fog)"></span>
+</div>
+<div id="dm-bt-days-body"></div>
 </div>
 <div class="card" id="dm-bt-tax-card" style="display:none">
 <div class="card-title" style="margin-bottom:10px">Tax Estimate (FY-wise)</div>
@@ -8020,7 +8048,7 @@ async function runDMBacktest(){
   const toDate=document.getElementById('dm-bt-to').value;
   if(!fromDate||!toDate){statusEl.textContent='Pick a date range.';return;}
 
-  ['dm-bt-verdict','mbt-metrics','dm-bt-equity-card','mbt-trades-card','dm-bt-tax-card'].forEach(id=>{
+  ['dm-bt-verdict','mbt-metrics','dm-bt-summary','dm-bt-equity-card','dm-bt-holdings-card','dm-bt-months-card','mbt-trades-card','dm-bt-days-card','dm-bt-tax-card'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.style.display='none';
   });
   _dmBtResult=null; // reset analytics tab until new result ready
@@ -8144,29 +8172,8 @@ async function runDMBacktest(){
     if(_cv)_cv.dataset.ready=JSON.stringify({equity,bench:benchEq,startNav});
   },50);
 
-  const closed2=tradeLog.filter(t=>t.action!=='BUY');
-  if(closed2.length){
-    const tc=document.getElementById('mbt-trades-card');tc.style.display='block';
-    const th=tc.querySelector('thead tr');
-    if(th)th.innerHTML='<th>Exec Date</th><th>ETF</th><th>Action</th><th class="r">Entry Date</th><th class="r">Entry ₹</th><th class="r">Exit ₹</th><th class="r">Days</th><th class="r">Net P&L ₹</th><th class="r">P&L%</th>';
-    const ch=tc.querySelector('.card-title');if(ch&&!ch.querySelector('.icon-btn'))ch.innerHTML+=' <button class="icon-btn" onclick="exportDmBtCSV()" style="float:right;margin-top:-2px">⬇ Export CSV</button>';
-    document.getElementById('mbt-trades-body').innerHTML=closed2.slice().reverse().map(t=>{
-      const pnlPct=t.pnl!=null&&t.entryPrice&&t.exitPrice?(t.exitPrice/t.entryPrice-1)*100:null;
-      const netPnlAbs=t.pnl!=null?t.pnl*momCapital/100:null;
-      const ac=t.action==='SELL'||t.action==='EXIT'?'var(--stop)':t.action==='SKIM'?'var(--gold)':'var(--fog)';
-      return`<tr>
-        <td class="mono neutral">${t.date}</td>
-        <td class="sym-cell">${escapeHtml(t.sym)}</td>
-        <td><span style="font-size:10px;font-weight:800;color:${ac}">${t.action}</span></td>
-        <td class="r mono neutral">${t.entryDate||'—'}</td>
-        <td class="r mono">${t.entryPrice?'₹'+t.entryPrice.toFixed(2):'—'}</td>
-        <td class="r mono">${t.exitPrice?'₹'+t.exitPrice.toFixed(2):'—'}</td>
-        <td class="r mono">${t.holdDays||'—'}</td>
-        <td class="r mono ${netPnlAbs!=null?(netPnlAbs>=0?'profit':'loss'):''}">${netPnlAbs!=null?fmtINR(netPnlAbs):'—'}</td>
-        <td class="r mono ${pnlPct!=null?(pnlPct>=0?'profit':'loss'):''}">${pnlPct!=null?(pnlPct>=0?'+':'')+pnlPct.toFixed(2)+'%':'—'}</td>
-      </tr>`;
-    }).join('');
-  }
+  // R13: entries + exits, month-wise, holdings and the day-wise log (presentation only, reads `result`)
+  renderDmBtDetail(result,p);
 
   if(taxResult.rows.length){
     const txc=document.getElementById('dm-bt-tax-card');txc.style.display='block';
@@ -13734,6 +13741,218 @@ function exportDmPosLogCSV(){
 // ── DM DEEP ANALYTICS ────────────────────────────────────────────────────────
 // Stored when DM backtest runs
 let _dmBtResult=null;
+let _dmBtModel=null;
+
+// ── R13: DM backtest detail screens ──────────────────────────────────────────
+// Presentation only. Everything below reads the result runDMBacktestCore already returns (tradeLog, dmRebalLog,
+// terminalState, equityDaily, histMap) and never feeds anything back into the engine. The engine works on a NAV-100
+// scale, so every money figure is multiplied by capital/100 to state real rupees, exactly as the CSV export does (R6).
+function dmBtDetailModel(result,p){
+  const cap=(p&&p.momCapital)||S.config.momCapital||100000,sc=cap/100;
+  const log=result.tradeLog||[],rebal=result.dmRebalLog||[],hm=result.histMap||{};
+  const eqD=result.equityDaily||[],M=result.metrics||{};
+  const closeOn=(sym,date)=>{const h=hm[sym];if(!h)return null;let best=null;for(const d in h){if(d<=date&&(best===null||d>best))best=d;}return best?h[best].close:null;};
+  const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
+  const byExec={};rebal.forEach(r=>{byExec[r.execDate]=r;});
+  const buyCost={};log.forEach(t=>{if(t.action==='BUY'&&t.costBasis!=null)buyCost[t.sym+'|'+t.entryDate]=t.costBasis*sc;});
+  const rows=log.map(t=>{
+    const sleeve=t.sym==='LIQUIDBEES',isBuy=t.action==='BUY';
+    const r=byExec[t.date];
+    const cost=t.costBasis!=null?t.costBasis*sc:(buyCost[t.sym+'|'+t.entryDate]!=null?buyCost[t.sym+'|'+t.entryDate]:(t.units!=null&&t.entryPrice?t.units*t.entryPrice*sc:null));
+    const netPnl=t.pnl!=null?t.pnl*sc:null;
+    return{
+      sigDate:r?r.sigDate:'',execDate:t.date,sym:t.sym,action:t.action,sleeve,isBuy,
+      entryDate:t.entryDate||'',
+      entryPrice:!sleeve&&t.entryPrice?t.entryPrice:null,exitPrice:!sleeve&&t.exitPrice?t.exitPrice:null,
+      qty:!sleeve&&t.units!=null?t.units*sc:null,slots:sleeve?t.units:null,
+      invested:cost,friction:t.friction!=null?t.friction*sc:null,holdDays:t.holdDays,
+      netPnl,netPct:netPnl!=null&&cost>0?netPnl/cost*100:null,
+      movePct:!sleeve&&t.entryPrice&&t.exitPrice?(t.exitPrice/t.entryPrice-1)*100:null,
+      reason:t.exitReason||'',niftyOk:r?r.niftyOk:null
+    };
+  });
+  // Same definition of a closed trade as the CSV export, so the two always agree.
+  const closed=rows.filter(x=>!x.isBuy&&x.netPnl!=null);
+  const wins=closed.filter(x=>x.netPnl>0),losses=closed.filter(x=>x.netPnl<=0);
+  const etfClosed=closed.filter(x=>!x.sleeve);
+  const sum=a=>a.reduce((s,x)=>s+x.netPnl,0);
+  const best=etfClosed.length?etfClosed.reduce((a,b)=>b.netPnl>a.netPnl?b:a):null;
+  const worst=etfClosed.length?etfClosed.reduce((a,b)=>b.netPnl<a.netPnl?b:a):null;
+  const summary={
+    closed:closed.length,wins:wins.length,losses:losses.length,winRate:closed.length?wins.length/closed.length*100:null,
+    netPnl:sum(closed),grossWin:sum(wins),grossLoss:sum(losses),
+    avgHold:etfClosed.length?etfClosed.reduce((s,x)=>s+(x.holdDays||0),0)/etfClosed.length:null,
+    avgNetPct:etfClosed.filter(x=>x.netPct!=null).length?etfClosed.filter(x=>x.netPct!=null).reduce((s,x)=>s+x.netPct,0)/etfClosed.filter(x=>x.netPct!=null).length:null,
+    buys:rows.filter(x=>x.isBuy&&!x.sleeve).length,exits:etfClosed.length,sleeveRows:rows.filter(x=>x.sleeve).length,
+    skippedBuys:(result.shortfallLog||[]).length,best,worst,
+    friction:M.totalFrictionAbs!=null?M.totalFrictionAbs*1:null,rebalances:rebal.length,
+    tax:result.taxResult?result.taxResult.totalTax:null
+  };
+  // Month-wise: trade stats by execution month; NAV change from the daily NAV (month-end to month-end).
+  const mm={};
+  const mrow=ym=>mm[ym]||(mm[ym]={ym,rebalances:0,buys:0,exits:0,wins:0,losses:0,pnl:0,friction:0,navEnd:null,navChgPct:null,navChgRs:null});
+  rebal.forEach(r=>{mrow(r.execDate.slice(0,7)).rebalances++;});
+  rows.forEach(x=>{
+    const m=mrow(x.execDate.slice(0,7));
+    if(x.isBuy&&!x.sleeve)m.buys++;
+    if(!x.isBuy&&x.netPnl!=null){m.exits++;if(x.netPnl>0)m.wins++;else m.losses++;m.pnl+=x.netPnl;}
+    if(x.friction)m.friction+=x.friction;
+  });
+  eqD.forEach(e=>{mrow(e.date.slice(0,7)).navEnd=e.nav;});
+  const months=Object.values(mm).sort((a,b)=>a.ym.localeCompare(b.ym));
+  let prevNav=M.startNav!=null?M.startNav:100;
+  months.forEach(m=>{if(m.navEnd!=null){m.navChgPct=prevNav>0?(m.navEnd/prevNav-1)*100:null;m.navChgRs=(m.navEnd-prevNav)*sc;prevNav=m.navEnd;}});
+  // Replay the log to get the holdings after each rebalance day.
+  const pos={};let liqSlots=0;
+  const days=rebal.map(r=>{
+    const dayRows=rows.filter(x=>x.execDate===r.execDate);
+    log.filter(t=>t.date===r.execDate).forEach(t=>{
+      if(t.sym==='LIQUIDBEES'){liqSlots+=t.action==='BUY'?t.units:-t.units;return;}
+      if(t.action==='BUY')pos[t.sym]={sym:t.sym,qty:t.units*sc,entryDate:t.entryDate,entryPrice:t.entryPrice,cost:t.costBasis!=null?t.costBasis*sc:t.units*t.entryPrice*sc};
+      else delete pos[t.sym];
+    });
+    const held=Object.values(pos).map(q=>{const c=closeOn(q.sym,r.execDate);return{...q,close:c,value:c!=null?q.qty*c:null,gainPct:c!=null&&q.entryPrice?(c/q.entryPrice-1)*100:null,days:daysBetween(q.entryDate,r.execDate)};});
+    return{sigDate:r.sigDate,execDate:r.execDate,niftyOk:r.niftyOk,topPicks:r.topPicks||[],navBefore:r.navBefore,navAfter:r.navAfter,rows:dayRows,held,liqSlots:Math.max(0,Math.round(liqSlots*1e6)/1e6)};
+  });
+  // Holdings at the end of the backtest, marked at the last session of the run.
+  const ts=result.terminalState||{},asOf=eqD.length?eqD[eqD.length-1].date:(rebal.length?rebal[rebal.length-1].execDate:'');
+  const lastExec=rebal.length?rebal[rebal.length-1].execDate:asOf;
+  const open=Object.entries(ts.positions||{}).map(([sym,q])=>{
+    const c=closeOn(sym,asOf),qty=q.units*sc,cost=(q.costBasis!=null?q.costBasis:q.units*q.entryPrice)*sc,value=c!=null?qty*c:qty*q.entryPrice;
+    return{sym,qty,entryDate:q.entryDate,entryPrice:q.entryPrice,close:c,cost,value,unreal:value-cost,unrealPct:cost>0?(value/cost-1)*100:null,days:daysBetween(q.entryDate,asOf)};
+  }).sort((a,b)=>a.entryDate.localeCompare(b.entryDate));
+  let liq=null;
+  if((ts.liqSlots||0)>0&&ts.liqValue>0){
+    const la=closeOn('LIQUIDBEES',lastExec),lb=closeOn('LIQUIDBEES',asOf);
+    const value=ts.liqValue*sc*((la>0&&lb>0)?lb/la:1),cost=(ts.liqCost!=null?ts.liqCost:ts.liqValue)*sc;
+    liq={slots:ts.liqSlots,since:ts.liqEntryDate||'',cost,value,unreal:value-cost};
+  }
+  const cash=(ts.cash||0)*sc;
+  const holdings={asOf,open,liq,cash,total:open.reduce((s,x)=>s+x.value,0)+(liq?liq.value:0)+cash,
+    navDaily:eqD.length?eqD[eqD.length-1].nav*sc:null,unrealTotal:open.reduce((s,x)=>s+x.unreal,0)+(liq?liq.unreal:0)};
+  return{cap,sc,rows,summary,months,days,holdings};
+}
+
+function _dmBtCls(v){return v==null?'':(v>=0?'profit':'loss');}
+function _dmBtPct(v){return v==null?'—':(v>=0?'+':'')+v.toFixed(2)+'%';}
+function _dmBtRs(v){return v==null?'—':fmtINR(v);}
+function _dmBtActionColor(a){return a==='BUY'?'var(--go)':(a==='SELL'||a==='EXIT')?'var(--stop)':a==='SKIM'?'var(--gold)':'var(--fog)';}
+
+function renderDmBtDetail(result,p){
+  const m=_dmBtModel=dmBtDetailModel(result,p);
+  const S_=m.summary;
+  const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?(el.classList&&el.classList.contains('stat-grid')?'grid':'block'):'none';};
+  // 1. summary cards
+  const sg=document.getElementById('dm-bt-summary');
+  if(sg){
+    sg.innerHTML=[
+      ['Closed Trades',S_.closed,`${S_.buys} entries · ${S_.exits} ETF exits${S_.sleeveRows?` · ${S_.sleeveRows} LIQUIDBEES rows`:''}`,''],
+      ['Win Rate (trades)',S_.winRate!=null?S_.winRate.toFixed(1)+'%':'—',`${S_.wins}W / ${S_.losses}L`,S_.winRate!=null&&S_.winRate>=50?'go':'gold'],
+      ['Total Net P&L',_dmBtRs(S_.netPnl),'Realised, after friction',S_.netPnl>=0?'go':'stop'],
+      ['Gross Profit',_dmBtRs(S_.grossWin),'Sum of winning exits','go'],
+      ['Gross Loss',_dmBtRs(S_.grossLoss),'Sum of losing exits','stop'],
+      ['Avg Hold',S_.avgHold!=null?S_.avgHold.toFixed(0)+' d':'—','ETF exits only',''],
+      ['Avg Trade Return',S_.avgNetPct!=null?_dmBtPct(S_.avgNetPct):'—','Net of friction, ETF exits',S_.avgNetPct>=0?'go':'stop'],
+      ['Best Trade',S_.best?_dmBtRs(S_.best.netPnl):'—',S_.best?`${S_.best.sym} · ${S_.best.execDate}`:'','go'],
+      ['Worst Trade',S_.worst?_dmBtRs(S_.worst.netPnl):'—',S_.worst?`${S_.worst.sym} · ${S_.worst.execDate}`:'','stop'],
+      ['Rebalances',S_.rebalances,`${S_.skippedBuys} skipped buy${S_.skippedBuys===1?'':'s'} (cash)`,''],
+      ['Total Friction',_dmBtRs(S_.friction),'Both sides, all trades',''],
+      ['Total Tax (est.)',_dmBtRs(S_.tax),'Approximate',''],
+    ].map(([l,v,sub,c])=>`<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-val ${c}">${v}</div><div class="stat-sub">${sub}</div></div>`).join('');
+  }
+  show('dm-bt-summary',true);
+  // 2. current holdings (end of backtest)
+  const hb=document.getElementById('dm-bt-holdings-body'),H=m.holdings;
+  if(hb){
+    const rowsH=H.open.map(x=>`<tr>
+      <td class="sym-cell">${escapeHtml(x.sym)}</td><td class="mono neutral">${x.entryDate}</td><td class="r mono">${x.days}d</td>
+      <td class="r mono">${x.qty.toFixed(2)}</td><td class="r mono">₹${x.entryPrice.toFixed(2)}</td><td class="r mono">${x.close!=null?'₹'+x.close.toFixed(2):'—'}</td>
+      <td class="r mono">${_dmBtRs(x.cost)}</td><td class="r mono">${_dmBtRs(x.value)}</td>
+      <td class="r mono ${_dmBtCls(x.unreal)}">${_dmBtRs(x.unreal)}</td><td class="r mono ${_dmBtCls(x.unrealPct)}">${_dmBtPct(x.unrealPct)}</td></tr>`).join('');
+    const liqRow=H.liq?`<tr><td class="sym-cell">LIQUIDBEES <span style="font-size:9px;color:var(--fog)">sleeve · ${H.liq.slots} slot${H.liq.slots>1?'s':''}</span></td><td class="mono neutral">${H.liq.since||'—'}</td><td class="r mono">${H.liq.since?Math.round((new Date(H.asOf)-new Date(H.liq.since))/86400000)+'d':'—'}</td><td class="r mono">—</td><td class="r mono">—</td><td class="r mono">—</td><td class="r mono">${_dmBtRs(H.liq.cost)}</td><td class="r mono">${_dmBtRs(H.liq.value)}</td><td class="r mono ${_dmBtCls(H.liq.unreal)}">${_dmBtRs(H.liq.unreal)}</td><td class="r mono">—</td></tr>`:'';
+    hb.innerHTML=`<div style="font-size:11px;color:var(--fog);margin-bottom:8px">As of <b>${H.asOf}</b> (last session in the run) · ${H.open.length} ETF position${H.open.length===1?'':'s'}${H.liq?' + LIQUIDBEES sleeve':''} · unrealised is before the exit cost</div>
+      ${(H.open.length||H.liq)?`<div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Entry Date</th><th class="r">Held</th><th class="r">Qty</th><th class="r">Entry ₹</th><th class="r">Last ₹</th><th class="r">Cost</th><th class="r">Value</th><th class="r">Unrealised</th><th class="r">%</th></tr></thead><tbody>${rowsH}${liqRow}</tbody></table></div>`:'<div class="empty">Fully in cash at the end of the run.</div>'}
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">
+        <div class="stat-card" style="flex:1;min-width:120px"><div class="stat-label">Cash</div><div class="stat-val">${_dmBtRs(H.cash)}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px"><div class="stat-label">Unrealised P&amp;L</div><div class="stat-val ${_dmBtCls(H.unrealTotal)}">${_dmBtRs(H.unrealTotal)}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px"><div class="stat-label">Portfolio Value</div><div class="stat-val">${_dmBtRs(H.total)}</div><div class="stat-sub">Capital ${_dmBtRs(m.cap)}</div></div>
+      </div>`;
+  }
+  show('dm-bt-holdings-card',true);
+  // 3. month-wise
+  const mb=document.getElementById('dm-bt-months-body');
+  if(mb){
+    const tot=m.months.reduce((a,x)=>({buys:a.buys+x.buys,exits:a.exits+x.exits,wins:a.wins+x.wins,losses:a.losses+x.losses,pnl:a.pnl+x.pnl,friction:a.friction+x.friction}),{buys:0,exits:0,wins:0,losses:0,pnl:0,friction:0});
+    mb.innerHTML=m.months.map(x=>`<tr>
+      <td class="mono neutral">${x.ym}</td><td class="r mono">${x.rebalances}</td><td class="r mono">${x.buys}</td><td class="r mono">${x.exits}</td>
+      <td class="r mono">${x.wins}/${x.losses}</td><td class="r mono ${_dmBtCls(x.exits?x.pnl:null)}">${x.exits?_dmBtRs(x.pnl):'—'}</td>
+      <td class="r mono">${x.friction?_dmBtRs(x.friction):'—'}</td>
+      <td class="r mono ${_dmBtCls(x.navChgRs)}">${_dmBtRs(x.navChgRs)}</td><td class="r mono ${_dmBtCls(x.navChgPct)}">${_dmBtPct(x.navChgPct)}</td></tr>`).join('')
+      +`<tr style="font-weight:800"><td>Total</td><td class="r mono">${m.months.reduce((s,x)=>s+x.rebalances,0)}</td><td class="r mono">${tot.buys}</td><td class="r mono">${tot.exits}</td><td class="r mono">${tot.wins}/${tot.losses}</td><td class="r mono ${_dmBtCls(tot.pnl)}">${_dmBtRs(tot.pnl)}</td><td class="r mono">${_dmBtRs(tot.friction)}</td><td class="r mono"></td><td class="r mono"></td></tr>`;
+  }
+  show('dm-bt-months-card',true);
+  // 4. full trade table (entries AND exits) + day-wise log
+  renderDmBtTradeTable();
+  renderDmBtDays();
+  show('dm-bt-days-card',true);
+}
+
+function renderDmBtTradeTable(){
+  const m=_dmBtModel,body=document.getElementById('mbt-trades-body');
+  if(!m||!body)return;
+  const f=document.getElementById('dm-bt-tr-filter'),q=document.getElementById('dm-bt-tr-search');
+  const kind=(f&&f.value)||'all',needle=((q&&q.value)||'').trim().toUpperCase();
+  const list=m.rows.filter(x=>(kind==='all'||(kind==='entries'&&x.isBuy)||(kind==='exits'&&!x.isBuy)||(kind==='wins'&&x.netPnl>0)||(kind==='losses'&&x.netPnl!=null&&x.netPnl<=0))&&(!needle||x.sym.includes(needle)));
+  const cnt=document.getElementById('dm-bt-tr-count');if(cnt)cnt.textContent=`${list.length} of ${m.rows.length} rows`;
+  const tc=document.getElementById('mbt-trades-card');if(tc)tc.style.display=m.rows.length?'block':'none';
+  const ch=tc&&tc.querySelector('.card-title');if(ch&&!ch.querySelector('.icon-btn'))ch.innerHTML+=' <button class="icon-btn" onclick="exportDmBtCSV()" style="float:right;margin-top:-2px">⬇ Export CSV</button>';
+  body.innerHTML=list.slice().reverse().map(x=>`<tr>
+    <td class="mono neutral">${x.sigDate||'—'}</td><td class="mono neutral">${x.execDate}</td>
+    <td class="sym-cell">${escapeHtml(x.sym)}</td>
+    <td><span style="font-size:10px;font-weight:800;color:${_dmBtActionColor(x.action)}">${x.action}</span></td>
+    <td class="r mono neutral">${x.entryDate||'—'}</td>
+    <td class="r mono">${x.entryPrice!=null?'₹'+x.entryPrice.toFixed(2):'—'}</td>
+    <td class="r mono">${x.exitPrice!=null?'₹'+x.exitPrice.toFixed(2):'—'}</td>
+    <td class="r mono">${x.qty!=null?x.qty.toFixed(2):(x.slots!=null?x.slots+' slot'+(x.slots>1?'s':''):'—')}</td>
+    <td class="r mono">${x.invested!=null?_dmBtRs(x.invested):'—'}</td>
+    <td class="r mono">${x.holdDays!=null?x.holdDays+'d':'—'}</td>
+    <td class="r mono ${_dmBtCls(x.netPnl)}">${_dmBtRs(x.netPnl)}</td>
+    <td class="r mono ${_dmBtCls(x.netPct)}">${_dmBtPct(x.netPct)}</td>
+    <td style="font-size:10px;color:var(--fog)">${escapeHtml(x.reason||(x.isBuy?'Entered — in top-'+((_dmBtParams&&_dmBtParams.slots)||'N')+' momentum ranking':''))}</td>
+  </tr>`).join('')||'<tr class="empty-row"><td colspan="13">No rows match this filter</td></tr>';
+}
+
+function renderDmBtDays(){
+  const m=_dmBtModel,body=document.getElementById('dm-bt-days-body');
+  if(!m||!body)return;
+  const q=document.getElementById('dm-bt-days-search'),needle=((q&&q.value)||'').trim().toUpperCase();
+  const days=m.days.filter(d=>!needle||d.rows.some(x=>x.sym.includes(needle))||d.held.some(x=>x.sym.includes(needle))).slice().reverse();
+  const cnt=document.getElementById('dm-bt-days-count');if(cnt)cnt.textContent=`${days.length} of ${m.days.length} rebalance days`;
+  body.innerHTML=days.map(d=>{
+    const nb=d.rows.filter(x=>x.isBuy&&!x.sleeve).length,ne=d.rows.filter(x=>!x.isBuy).length;
+    const chg=d.navBefore>0?(d.navAfter/d.navBefore-1)*100:0;
+    return`<details style="border-bottom:1px solid var(--plate);padding:6px 0">
+      <summary style="cursor:pointer;display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:11px">
+        <b style="color:var(--sky);min-width:78px">${d.execDate}</b>
+        <span style="color:var(--fog)">signal ${d.sigDate===d.execDate?'same session':d.sigDate}</span>
+        <span style="color:${d.niftyOk?'var(--go)':'var(--stop)'}">${d.niftyOk?'Nifty ✓':'Nifty ✗ → LIQ'}</span>
+        <span>${nb} buy${nb===1?'':'s'} · ${ne} exit${ne===1?'':'s'}</span>
+        <span class="${_dmBtCls(chg)}">NAV ${d.navBefore.toFixed(2)} → ${d.navAfter.toFixed(2)} (${_dmBtPct(chg)})</span>
+      </summary>
+      <div style="padding:8px 0 4px 8px">
+        <div style="font-size:11px;color:var(--fog);margin-bottom:6px">Picks: ${d.topPicks.length?d.topPicks.map(escapeHtml).join(', '):'none — in LIQUIDBEES'}</div>
+        ${d.rows.length?`<div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Action</th><th class="r">Entry Date</th><th class="r">Entry ₹</th><th class="r">Exit ₹</th><th class="r">Qty</th><th class="r">Net P&amp;L</th><th class="r">%</th><th>Why</th></tr></thead><tbody>${d.rows.map(x=>`<tr>
+          <td class="sym-cell">${escapeHtml(x.sym)}</td><td><span style="font-size:10px;font-weight:800;color:${_dmBtActionColor(x.action)}">${x.action}</span></td>
+          <td class="r mono neutral">${x.entryDate||'—'}</td><td class="r mono">${x.entryPrice!=null?'₹'+x.entryPrice.toFixed(2):'—'}</td><td class="r mono">${x.exitPrice!=null?'₹'+x.exitPrice.toFixed(2):'—'}</td>
+          <td class="r mono">${x.qty!=null?x.qty.toFixed(2):(x.slots!=null?x.slots+' slot'+(x.slots>1?'s':''):'—')}</td>
+          <td class="r mono ${_dmBtCls(x.netPnl)}">${_dmBtRs(x.netPnl)}</td><td class="r mono ${_dmBtCls(x.netPct)}">${_dmBtPct(x.netPct)}</td>
+          <td style="font-size:10px;color:var(--fog)">${escapeHtml(x.reason)}</td></tr>`).join('')}</tbody></table></div>`:'<div style="font-size:11px;color:var(--fog)">No trades — holdings unchanged.</div>'}
+        <div style="font-size:11px;color:var(--sky);margin:8px 0 4px;font-weight:700">Holding after this rebalance</div>
+        ${(d.held.length||d.liqSlots>0)?`<div class="tbl-wrap"><table><thead><tr><th>ETF</th><th>Entry Date</th><th class="r">Qty</th><th class="r">Entry ₹</th><th class="r">Close ₹</th><th class="r">Value</th><th class="r">Gain %</th></tr></thead><tbody>${d.held.map(x=>`<tr><td class="sym-cell">${escapeHtml(x.sym)}</td><td class="mono neutral">${x.entryDate}</td><td class="r mono">${x.qty.toFixed(2)}</td><td class="r mono">₹${x.entryPrice.toFixed(2)}</td><td class="r mono">${x.close!=null?'₹'+x.close.toFixed(2):'—'}</td><td class="r mono">${_dmBtRs(x.value)}</td><td class="r mono ${_dmBtCls(x.gainPct)}">${_dmBtPct(x.gainPct)}</td></tr>`).join('')}${d.liqSlots>0?`<tr><td class="sym-cell">LIQUIDBEES</td><td colspan="6" style="font-size:10px;color:var(--fog)">${d.liqSlots} slot${d.liqSlots>1?'s':''} parked</td></tr>`:''}</tbody></table></div>`:'<div style="font-size:11px;color:var(--fog)">All cash.</div>'}
+      </div></details>`;
+  }).join('')||'<div class="empty">No rebalance days match</div>';
+}
+
 // Params of the last DM backtest run. The export previously declared no capital,
 // slots or friction, so every rupee figure in it was an assumption rather than a
 // stated parameter — the LIFO export has always carried these on row 3.
@@ -14452,8 +14671,10 @@ function exportDmBtCSV(){
     [],
     ['TRADES'],
     ['Exec Date','ETF','Action','Entry Date','Entry ₹','Exit ₹','Units','Cost Basis ₹',
-     'Friction ₹','Hold Days','Net P&L ₹','Net P&L %','Exit Reason','Nifty OK'],
+     'Friction ₹','Hold Days','Net P&L ₹','Net P&L %','Exit Reason','Nifty OK','Signal Date'],   // R13: appended last so existing column positions are unchanged
   ];
+  const _m13=dmBtDetailModel(_dmBtResult,p),_sigByExec={};
+  (_dmBtResult.dmRebalLog||[]).forEach(r=>{_sigByExec[r.execDate]=r.sigDate;});
   const niftyByDate={};
   if(_dmBtResult.dmRebalLog) _dmBtResult.dmRebalLog.forEach(r=>{niftyByDate[r.execDate]=r.niftyOk;});
   _dmBtResult.tradeLog.forEach(t=>{
@@ -14473,8 +14694,16 @@ function exportDmBtCSV(){
       t.friction!=null?+(t.friction*_sc).toFixed(2):'',t.holdDays??'',
       netPnl,retPct,t.exitReason||'',
       niftyByDate[t.date]!=null?(niftyByDate[t.date]?'Y':'N'):'',
+      _sigByExec[t.date]||'',
     ]);
   });
+  // R13: month-wise and end-of-run holdings, same figures as the on-screen cards
+  rows.push([],['MONTH-WISE'],['Month','Rebalances','Buys','Exits','Wins','Losses','Realised P&L ₹','Friction ₹','NAV change ₹','NAV change %']);
+  _m13.months.forEach(x=>rows.push([x.ym,x.rebalances,x.buys,x.exits,x.wins,x.losses,+x.pnl.toFixed(2),+x.friction.toFixed(2),x.navChgRs!=null?+x.navChgRs.toFixed(2):'',x.navChgPct!=null?+x.navChgPct.toFixed(2):'']));
+  rows.push([],['HOLDINGS AT END',_m13.holdings.asOf],['ETF','Entry Date','Held Days','Qty','Entry ₹','Last ₹','Cost ₹','Value ₹','Unrealised ₹','Unrealised %']);
+  _m13.holdings.open.forEach(x=>rows.push([x.sym,x.entryDate,x.days,+x.qty.toFixed(4),x.entryPrice.toFixed(2),x.close!=null?x.close.toFixed(2):'',+x.cost.toFixed(2),+x.value.toFixed(2),+x.unreal.toFixed(2),x.unrealPct!=null?+x.unrealPct.toFixed(2):'']));
+  if(_m13.holdings.liq)rows.push(['LIQUIDBEES (sleeve)',_m13.holdings.liq.since,'',_m13.holdings.liq.slots+' slot(s)','','',+_m13.holdings.liq.cost.toFixed(2),+_m13.holdings.liq.value.toFixed(2),+_m13.holdings.liq.unreal.toFixed(2),'']);
+  rows.push(['Cash','','','','','','',+_m13.holdings.cash.toFixed(2)],['Portfolio value','','','','','','',+_m13.holdings.total.toFixed(2)]);
   // NAV series — without this there is no independent MaxDD or drawdown-depth
   // check, which was the single biggest gap versus the LIFO export.
   if(_dmBtResult.equity?.length){
@@ -14811,8 +15040,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-10-20-v3.22-R12';
-const APP_SOURCE_SHA256='0e73e0829b06b09a75994d34842b0aca2ec09bbadd9ce409ae3c0d213f992cf6';
+const APP_BUILD='2026-11-04-v3.22-R13';
+const APP_SOURCE_SHA256='d1a916cf811ae3474b90f3fff78ddeaa306a62743cce6c7a91e52d3ee4771c97';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
