@@ -2184,6 +2184,8 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div id="dm-config-head"></div>
 <div class="card">
 <div class="settings-section-title">📊 Dual Momentum Defaults</div>
+<div style="margin:4px 0 8px"><button class="preset-btn" id="s-dm-preset-a" onclick="applyDmPresetA()">Apply research preset A</button>
+<div style="font-size:10px;color:var(--fog);margin-top:3px">Lookback 120 · 5 slots · rebalance 10 days · Nifty 200DMA ON · skim 25% · hurdle 6% · compound ON. From the 2019–2026 real-data research (median 22% CAGR, worst drawdown 16% across 21 start dates). Not a guarantee.</div></div>
 <div class="form-row">
 <div class="form-group"><label class="form-label">DM Capital ₹</label><input class="form-input" id="s-mom-capital-disp" readonly="" style="opacity:.6" title="Set on Portfolio → Capital Allocation" type="number"/><div style="font-size:10px;color:var(--sky);margin-top:3px;cursor:pointer" onclick="switchStrategy('portfolio',null)">✏️ Set on Portfolio → Capital Allocation</div></div>
 <div class="form-group"><label class="form-label">Top N Picks (Slots)</label><input class="form-input" id="s-mom-slots" type="number"/></div>
@@ -5175,6 +5177,21 @@ function clearRebalPresets(){
   ['7','15','30','0'].forEach(d=>{ const b=document.getElementById('rb-btn-'+d); if(b)b.classList.remove('active'); });
   const v=parseInt(document.getElementById('dm-bt-rebal-days').value)||30;
   document.getElementById('dm-bt-rebal-label').textContent=REBAL_LABELS[v]||(v+'d custom');
+}
+
+// R16: one-tap DM preset A (Apd's choice from the real-data research). Fills the Settings fields, then saves through the normal path.
+const DM_PRESET_A={dmLookback:120,dmSlots:5,dmRebalanceDays:10,dmNiftyFilter:true,dmSkim:25,dmHurdle:6,dmCompound:true};
+function applyDmPresetA(){
+  const P=DM_PRESET_A;
+  if(!confirm(`Apply DM preset A?
+Lookback ${P.dmLookback} · ${P.dmSlots} slots · rebalance ${P.dmRebalanceDays}d · Nifty filter ON · skim ${P.dmSkim}% · hurdle ${P.dmHurdle}% · compound ON
+
+This replaces your current DM settings and saves them.`))return;
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
+  set('s-lookback',P.dmLookback);set('s-mom-slots',P.dmSlots);set('s-skim',P.dmSkim);set('s-liquid',P.dmHurdle);set('s-dm-rebal-days',P.dmRebalanceDays);
+  ['t-dm-nifty','t-dm-compound'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('on');});
+  setLiveRebalInterval(0,document.getElementById('s-rb-btn-0'));
+  saveAllSettings();
 }
 
 function setLiveRebalInterval(days,btn){
@@ -15040,8 +15057,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-04-v3.22-R15';
-const APP_SOURCE_SHA256='26c9ac8f3d39ffcacb0e3bae88ce305da7f33de5d51f1f21abd99548c8504b48';
+const APP_BUILD='2026-11-05-v3.22-R16';
+const APP_SOURCE_SHA256='a083d8990800cd34623decaecf1d041278b17b228a86eefb26787de78364b212';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
