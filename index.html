@@ -1796,6 +1796,11 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <!-- Universe Tab -->
 <div class="tab-pane" id="mom-universe">
 <div class="stat-grid" id="uni-metrics"></div>
+<div class="card" id="uni-tested-card" style="margin-bottom:14px;border:1px solid var(--violet)">
+<div class="card-head"><div class="card-title">🧪 Research Core list</div><span id="uni-tested-status" style="font-size:11px"></span></div>
+<div style="font-size:11px;color:var(--mist);line-height:1.6;margin-bottom:10px">The ETF lists the May 2024 – Nov 2026 combined backtest used: <b>LIFO 19</b> (Nifty/Next 50/mid/small/momentum/bank, gold, silver, international) and <b>DM 27</b> (the preset A list). One tap makes them the LIFO and DM lists for live signals, the paper account and backtests. ETFs you still hold stay in their engine until you close them.</div>
+<button class="action-btn skim-btn" id="uni-tested-btn" onclick="applyTestedList()" style="padding:8px 16px">Use Research Core list</button>
+</div>
 <div class="two-col">
 <div class="card">
 <div class="card-title" style="margin-bottom:12px">Add ETFs</div>
@@ -11297,7 +11302,8 @@ function renderTaxTradeBreakdown(preRecords=null,preCalc=null){
 // ── UNIVERSE MANAGEMENT ───────────────────────────────────────────────────────
 function getMomUniverse(){rebuildUniverses();return engineList('DM');}
 
-function renderUniverse(){try{renderHoldingsByEtf();}catch(_e){}try{renderCorpActions();}catch(_e){}
+function renderUniverse(){
+  try{renderTestedListStatus();}catch(e){}try{renderHoldingsByEtf();}catch(_e){}try{renderCorpActions();}catch(_e){}
   rebuildUniverses();
   const uni=S.universe;
   const search=(document.getElementById('uni-search')?.value||'').toUpperCase().trim();
@@ -15093,8 +15099,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R19';
-const APP_SOURCE_SHA256='f3bb21687bd68f4f0a4937ff02bcd905b068a82356178ab10ad3d23ec25db926';
+const APP_BUILD='2026-11-11-v3.22-R20';
+const APP_SOURCE_SHA256='a311dc1a3357dd904b061b128ee830297d99c74a8b92284c412f919045e6b54c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17906,6 +17912,50 @@ function paperGoLiveCard(sig){
     <div style="font-size:10px;color:var(--fog);margin-top:8px;line-height:1.6">Largest fall from a peak seen so far: ${g.maxDdPct.toFixed(1)}% (the backtests fell 10–21% at their worst — size real money for that). Return vs Nifty over a short run is mostly noise and is not a pass/fail item. The thresholds are a starting point, not a guarantee.</div></div>`;
 }
 
+
+// ── R20: RESEARCH CORE LIST (TESTED_LIST) — the ETF lists the 2024-05..2026-11 combined backtest ran on (LIFO L2-era 19, DM preset A 27) ──
+// One tap makes them the LIFO and DM engine lists. Live signals, the paper account and every backtest read these lists,
+// so all three move together. ETFs you still hold in a real engine stay in that engine's list (they must be closable).
+const TESTED_LIST=Object.freeze({name:'Research Core list',
+  LIFO:Object.freeze(['NIFTYBEES','JUNIORBEES','NEXT50IETF','EQUAL50ADD','MID150BEES','MIDSMALL','HDFCSML250','MOM100','MOM30IETF','MOMENTUM50','ALPHA','BANKBEES','PSUBNKBEES','GOLDBEES','SILVERBEES','MON100','MONQ50','MAFANG','HNGSNGBEES']),
+  DM:Object.freeze(['JUNIORBEES','MID150BEES','BANKBEES','PSUBNKBEES','ITBEES','PHARMABEES','AUTOBEES','CONSUMBEES','GOLDBEES','SILVERBEES','HDFCSML250','MOM30IETF','MOMENTUM50','MAFANG','MON100','MONQ50','CPSEETF','INFRAIETF','MOREALTY','MODEFENCE','METALIETF','ALPHA','NEXT50IETF','OILIETF','EQUAL50ADD','PVTBANIETF','GROWWPOWER'])});
+function testedAssetClass(sym){return sym==='LIQUIDBEES'?'debt':/GOLD|SILV/.test(sym)?'gold':/MAFANG|MON100|MONQ50|HNGSNG/.test(sym)?'international':'equity';}
+// Pure plan: what applying the Tested list would do to the current registry and lists.
+function testedListPlan(st){
+  st=st||S;const open=openUnitsByEngine(st),plan={add:[],LIFO:[],DM:[],kept:{LIFO:[],DM:[]},removed:{LIFO:[],DM:[]}};
+  const known=new Set((st.instruments||[]).map(e=>String(e&&e.sym||'').toUpperCase()));
+  for(const sym of new Set([...TESTED_LIST.LIFO,...TESTED_LIST.DM,'NIFTYBEES','LIQUIDBEES']))if(!known.has(sym))plan.add.push(sym);
+  for(const eng of ['LIFO','DM']){
+    const want=[...TESTED_LIST[eng]],cur=((st.engineUniverse&&st.engineUniverse[eng])||[]).map(x=>String(x).toUpperCase());
+    for(const sym of cur)if(!want.includes(sym)){if(open[sym]&&open[sym][eng]>1e-9){want.push(sym);plan.kept[eng].push(sym);}else plan.removed[eng].push(sym);}
+    plan[eng]=want;
+  }
+  return plan;
+}
+function testedListActive(){const same=(a,b)=>a.length===b.length&&a.every(x=>b.includes(x));return ['LIFO','DM'].every(eng=>{const cur=engineList(eng);return TESTED_LIST[eng].every(x=>cur.includes(x))&&same(cur.filter(x=>!TESTED_LIST[eng].includes(x)),testedListPlan().kept[eng]);});}
+async function applyTestedList(){
+  rebuildUniverses();
+  const pl=testedListPlan();
+  const msg=`Use the ${TESTED_LIST.name}?\n\nLIFO: ${TESTED_LIST.LIFO.length} ETFs · DM: ${TESTED_LIST.DM.length} ETFs.\nLive signals, the paper account and backtests will all use these lists.`+
+    (pl.add.length?`\n\nNew to the app: ${pl.add.join(', ')}`:'')+
+    ((pl.removed.LIFO.length||pl.removed.DM.length)?`\n\nTaken out — LIFO: ${pl.removed.LIFO.join(', ')||'none'} · DM: ${pl.removed.DM.join(', ')||'none'}`:'')+
+    ((pl.kept.LIFO.length||pl.kept.DM.length)?`\n\nKept because you still hold them — LIFO: ${pl.kept.LIFO.join(', ')||'none'} · DM: ${pl.kept.DM.join(', ')||'none'}`:'');
+  if(!confirm(msg))return false;
+  const ok=await commitState(()=>{
+    for(const sym of pl.add)addInstrumentRow({sym,yf:sym+'.NS',name:sym,assetClass:testedAssetClass(sym)},[]);
+    const nextEU={...S.engineUniverse,LIFO:pl.LIFO,DM:pl.DM};
+    const v=validateUniverseChange(null,null,nextEU);if(!v.ok){_universeBlocked(v.errors);return false;}
+    S.engineUniverse=nextEU;S.config.universeListName=TESTED_LIST.name;rebuildUniverses();
+  },{label:'Research Core list'});
+  if(!ok)return false;
+  try{TENET_RUNTIME.live=null;}catch(e){}
+  try{renderUniverse();populateLifoDropdown();}catch(e){}
+  try{await syncUniverseToSB();}catch(e){}
+  toast(`✅ ${TESTED_LIST.name} is now the LIFO (${pl.LIFO.length}) and DM (${pl.DM.length}) list`+(pl.add.length?` · ${pl.add.length} new ETF(s) — refresh prices`:''),'ok');
+  try{renderTestedListStatus();}catch(e){}
+  return true;
+}
+function renderTestedListStatus(){const el=document.getElementById('uni-tested-status');if(!el)return;const on=testedListActive();el.innerHTML=on?'<span style="color:var(--go)">✓ In use</span>':`<span style="color:var(--fog)">Current lists: LIFO ${engineList('LIFO').length} · DM ${engineList('DM').length}</span>`;}
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
