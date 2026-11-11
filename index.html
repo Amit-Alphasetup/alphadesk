@@ -913,6 +913,8 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('watchlist',this)">👁 Watchlist</button>
 <div class="strat-divider"></div>
+<button class="strat-btn" id="strat-paper" onclick="switchStrategy('paper',this)">📝 Paper</button>
+<div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('universe',this)">🌐 Universe</button>
 <div class="strat-divider"></div>
 <button class="strat-btn" onclick="switchStrategy('data',this)">🗄 Data</button>
@@ -1565,6 +1567,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <input class="form-input" id="dm-exec-date" style="width:130px" type="date"/>
 </div>
 <button class="action-btn azure-btn" onclick="saveMomConfirmed()" style="padding:8px 18px">Save Confirmed Trades</button>
+<button class="icon-btn" id="dm-paper-btn" onclick="switchStrategy('paper',null)" title="Send this signal to the pretend-money paper account">📝 Paper-trade this signal</button>
 <button class="icon-btn" onclick="toggleFullRanking()">Full Ranking</button>
 </div>
 </div>
@@ -2409,6 +2412,11 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 </div>
 </div>
 </div>
+<!-- R18: PAPER TRADING -->
+<div class="strategy-pane" id="strategy-paper">
+<div class="mobile-back-row"><button class="mobile-back-btn" onclick="switchStrategy('lifo',null)">← Back</button><span style="font-size:12px;color:var(--fog)">Paper account</span></div>
+<div id="paper-body"></div>
+</div>
 <!-- WATCHLIST (Phase 4) -->
 <div class="strategy-pane" id="strategy-watchlist">
 <!-- P13 FIX 19: back row — mobile only -->
@@ -2949,6 +2957,7 @@ function rebuildUniverses(){
 // ── APP STATE ────────────────────────────────────────────────────────────────
 let S = {
   lifoLedger: [],
+  paper: {v:1,startedAt:'',lifoCapital:0,dmCapital:0,niftyStart:0,lifoLedger:[],dmTrades:[],journal:[],navLog:[]},   // R18: pretend-money account; never mixed with the real ledgers
   momTrades: [],
   momPositions: {},
   momFyData: {},
@@ -2994,9 +3003,9 @@ let S = {
 const STATE_KEYS=Object.freeze([
   'lifoLedger','momTrades','momPositions','momFyData','momFyLossCf','momPrices','momUniverse',
   'universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','tenet',
-  'corpActions','corporateActions','instruments','engineUniverse','config'
+  'corpActions','corporateActions','instruments','engineUniverse','config','paper'
 ]);
-const OPTIONAL_STATE_KEYS=Object.freeze(['corporateActions','instruments','engineUniverse']);   // backups made before A6/R2 lack these and still restore
+const OPTIONAL_STATE_KEYS=Object.freeze(['corporateActions','instruments','engineUniverse','paper']);   // backups made before A6/R2 lack these and still restore
 function serializeState(){
   const out={};
   STATE_KEYS.forEach(k=>{out[k]=S[k];});
@@ -3007,7 +3016,7 @@ function validateStateSnapshotShape(st,{requireExactKeys=true}={}){
   const errs=[];
   if(!_plainObject(st))return ['State must be an object'];
   const arrayKeys=['lifoLedger','momTrades','momUniverse','universe','priceAlerts','watchlist','trash','brokerImportCandidates','dividends','corpActions',...(('corporateActions' in st)?['corporateActions']:[]),...(('instruments' in st)?['instruments']:[])];
-  const objectKeys=['momPositions','momFyData','momPrices','config','tenet',...(('engineUniverse' in st)?['engineUniverse']:[])];
+  const objectKeys=['momPositions','momFyData','momPrices','config','tenet',...(('engineUniverse' in st)?['engineUniverse']:[]),...(('paper' in st)?['paper']:[])];
   if(requireExactKeys){
     const actual=Object.keys(st).sort(), expected=STATE_KEYS.filter(k=>!OPTIONAL_STATE_KEYS.includes(k)||k in st).sort();
     if(actual.length!==expected.length||actual.some((k,i)=>k!==expected[i]))
@@ -3072,6 +3081,12 @@ function sanitizeStateStringsInPlace(st){
   };
   (st.lifoLedger||[]).forEach(t=>cleanTrade(t,false));
   (st.momTrades||[]).forEach(t=>cleanTrade(t,true));
+  if(st.paper&&typeof st.paper==='object'&&!Array.isArray(st.paper)){   // R18: paper rows are restored data too
+    (Array.isArray(st.paper.lifoLedger)?st.paper.lifoLedger:[]).forEach(t=>cleanTrade(t,false));
+    (Array.isArray(st.paper.dmTrades)?st.paper.dmTrades:[]).forEach(t=>cleanTrade(t,true));
+    (Array.isArray(st.paper.journal)?st.paper.journal:[]).forEach(j=>{if(j&&typeof j==='object'){j.sym=sanSym(j.sym);j.d=sanIsoDate(j.d);j.eng=j.eng==='DM'?'DM':'LIFO';j.action=sanSym(j.action);j.k=sanNote(j.k,200);}});
+    st.paper.startedAt=sanIsoDate(st.paper.startedAt);
+  }
   const cleanInstrument=e=>{if(!e||typeof e!=='object')return;e.sym=sanSym(e.sym);e.yf=sanTicker(e.yf);e.name=sanNote(e.name,100);e.assetClass=normAssetClass(e.assetClass,'equity');e.linkedIndex=sanIndexName(e.linkedIndex);e.linkedIndexYf=sanIndexTicker(e.linkedIndexYf);};
   (st.universe||[]).forEach(cleanInstrument);
   (st.instruments||[]).forEach(cleanInstrument);   // R2: the registry is the stored shape now, so it is hardened too
@@ -4297,7 +4312,7 @@ async function _fetchAllPricesInner(){
   else{if(pill)pill.className='conn-pill';if(srcEl)srcEl.textContent='OFFLINE';toast('⚠️ No market prices available. Open Settings → Verified Market Data: configure/test the Market Bridge (Android local files need ALLOWED_ORIGINS=null).','warn');checkStaleness();}
   if(btn){btn.innerHTML='⟳ Refresh';btn.disabled=false;}return MARKET_DATA_DIAG;
 
-  function finishRender(){updateTicker();const syms=LIFO_ETF_UNIVERSE.map(e=>e.sym);prefetch52WLThenRender(syms,()=>{renderLifo();renderMomPortfolio();renderMomAlerts();renderTax();checkPriceAlerts();brokerAutoSync().catch(()=>{});}).catch(e=>console.warn('52WL prefetch/render:',e));}
+  function finishRender(){updateTicker();const syms=LIFO_ETF_UNIVERSE.map(e=>e.sym);prefetch52WLThenRender(syms,()=>{renderLifo();renderMomPortfolio();renderMomAlerts();renderTax();checkPriceAlerts();if(curStrategy==='paper')renderPaper();brokerAutoSync().catch(()=>{});}).catch(e=>console.warn('52WL prefetch/render:',e));}
 }
 
 // ── PHASE 4: PRICE ALERTS ──────────────────────────────────────────────────
@@ -5973,6 +5988,8 @@ function renderLifoSignals(openLots,targetPct){
       } else {
         actionBtn=`<button class="action-btn sm" disabled style="font-size:10px">Wait for rise</button>`;
       }
+      // R18: with a paper account running, each actionable card can also be sent to it (the paper account's own size)
+      if(paperOn()&&(isSell||e.action==='AVG'||e.action==='BUY'))actionBtn+=` <button class="action-btn sm paper-btn" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeFromLive(${htmlJsArg(e.sym)},'${isSell?'SELL':'BUY'}')">📝 Paper</button>`;
       const netStr=isSell?`Net ₹${e.net?.toFixed(0)} · `:'';
       return`<div class="${cardCls}">
         <div class="act-card-head">
@@ -13455,7 +13472,7 @@ function switchStrategy(name,btn){
   _closeMoreMenu(); // close more menu if open
   const nav=document.getElementById('nav-bar');
   const tabs=TABS[name]||[];
-  if(!tabs.length){nav.innerHTML='';if(SHARED_IN_DM[name]){switchTab('momentum',SHARED_IN_DM[name],null,false);return;}if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='portfolio')renderPortfolioScreen();if(name==='watchlist')renderWatchlist();return;}
+  if(!tabs.length){nav.innerHTML='';if(SHARED_IN_DM[name]){switchTab('momentum',SHARED_IN_DM[name],null,false);return;}if(name==='tax'){renderTax();renderFifoComparison();}if(name==='settings'){renderPriceAlerts();renderTrash();renderBrokerImportPanel();renderCorpActions();renderDividends();}if(name==='portfolio')renderPortfolioScreen();if(name==='watchlist')renderWatchlist();if(name==='paper')renderPaper();return;}
   nav.innerHTML=tabs.map(t=>`<button class="nav-btn" onclick="switchTab('${name}','${t.id}',this)">${t.label}</button>`).join('');
   if(tabs.length)switchTab(name,tabs[0].id,null,true);
   if(name==='tenet'){try{tenetInitBacktestDates();}catch(e){}}      // A4-5 (F25): silent tab switches skipped the date init
@@ -15075,8 +15092,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-09-v3.22-R17';
-const APP_SOURCE_SHA256='f5c1b4ea451e43c3e018e79b8a05bf3dea5bdbaa184f72d0ec3ab98392de1b6e';
+const APP_BUILD='2026-11-11-v3.22-R18';
+const APP_SOURCE_SHA256='f6c71df70ab6795c7c5608cef6d3c2efe36985a20d7c9b06a097027336a842c9';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17337,6 +17354,415 @@ function initTouchGestures(){
   },{passive:true});
 }
 
+// ══ R18: PAPER TRADING ═══════════════════════════════════════════════════════════════════════════
+// A pretend-money account that follows the same live signals, sizing and costs as the real desk.
+// Paper code NEVER writes S.lifoLedger / S.momTrades / S.momPositions, and nothing here goes to Supabase.
+// State lives in S.paper (one STATE_KEYS entry). The accounting below repeats the protected real-desk
+// functions on a ledger passed in; the harness (r18_paper.test.mjs) asserts both give the same numbers.
+function paperDefault(){return{v:1,startedAt:'',lifoCapital:0,dmCapital:0,niftyStart:0,lifoLedger:[],dmTrades:[],journal:[],navLog:[]};}
+function paperState(){
+  let p=S.paper;
+  if(!p||typeof p!=='object'||Array.isArray(p))p=S.paper=paperDefault();
+  for(const k of ['lifoLedger','dmTrades','journal','navLog'])if(!Array.isArray(p[k]))p[k]=[];
+  for(const k of ['lifoCapital','dmCapital','niftyStart'])p[k]=(Number.isFinite(+p[k])&&+p[k]>=0)?+p[k]:0;
+  if(typeof p.startedAt!=='string')p.startedAt='';
+  return p;
+}
+function paperOn(){return !!paperState().startedAt;}
+
+// Same lot matching as computeLifoPortfolio (linked lot first, then the newest lot); rows are not modified.
+function paperLifoLots(ledger){
+  const openLots={},profit={};let realized=0;
+  const sorted=[...(ledger||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  for(const tx of sorted){
+    if(tx.type==='BUY'){
+      if(!openLots[tx.sym])openLots[tx.sym]=[];
+      openLots[tx.sym].push({date:tx.date,units:tx.qty,buyPrice:tx.price,buyFrictionPerUnit:tx.qty>0?(tx.friction||0)/tx.qty:0,id:tx.id});
+    }else{
+      let toSell=tx.qty,costBasis=0;const lots=openLots[tx.sym];
+      if(lots){
+        if(tx.linkedBuyId){
+          const idx=lots.findIndex(l=>l.id===tx.linkedBuyId);
+          if(idx!==-1){const lot=lots[idx],take=Math.min(toSell,lot.units);costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.splice(idx,1);}
+        }
+        while(toSell>0&&lots.length>0){const lot=lots[lots.length-1],take=Math.min(toSell,lot.units);costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.pop();}
+      }
+      const pr=+((tx.price*tx.qty)-costBasis-(tx.friction||0)).toFixed(2);
+      profit[tx.id]=pr;realized+=pr;
+    }
+  }
+  return{openLots,profit,realized};
+}
+// Same average-cost book as momRebuildState (buy friction in cost, SKIM keeps the average, 99% exit closes).
+function paperDmBook(trades){
+  const positions={},pnl={};let realized=0;
+  const sorted=[...(trades||[])].sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  for(const tr of sorted){
+    if(tr.type==='BUY'){
+      if(!positions[tr.etf])positions[tr.etf]={units:0,avgPrice:0,costBasis:0,entryDate:tr.date};
+      const pos=positions[tr.etf],assetCost=tr.units*tr.price+(tr.friction||0),tot=pos.units*pos.avgPrice+assetCost;
+      pos.units+=tr.units;pos.avgPrice=tot/pos.units;pos.costBasis=tot;
+      if(!pos.entryDate)pos.entryDate=tr.date;
+    }else if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM'){
+      const pos=positions[tr.etf];if(!pos)continue;
+      const v=(tr.price*tr.units)-pos.costBasis*(tr.units/pos.units)-(tr.friction||0);
+      pnl[tr.id]=v;realized+=v;
+      if(tr.type==='SKIM'){const fk=(pos.units-tr.units)/pos.units;pos.units-=tr.units;pos.costBasis*=fk;pos.avgPrice=pos.costBasis/pos.units;}
+      else if(tr.units>=pos.units*0.99)delete positions[tr.etf];
+      else{pos.units-=tr.units;pos.costBasis=pos.units*pos.avgPrice;}
+    }
+  }
+  return{positions,pnl,realized};
+}
+function paperPx(sym){const a=+PRICES[sym]?.cmp;if(a>0)return a;const b=+S.momPrices?.[sym]?.current;return b>0?b:0;}
+// Cash, holdings and value of the paper account at the prices the app has now.
+function paperBook(){
+  const p=paperState(),c=S.config,L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades);
+  let lifoCash=p.lifoCapital,dmCash=p.dmCapital,lifoDeployed=0,lifoMkt=0,dmDeployed=0,dmMkt=0;
+  for(const t of p.lifoLedger){const turn=t.qty*t.price;lifoCash+=t.type==='BUY'?-(turn+(t.friction||0)):(turn-(t.friction||0));}
+  for(const t of p.dmTrades){const v=t.units*t.price;dmCash+=t.type==='BUY'?-(v+(t.friction||0)):(v-(t.friction||0));}
+  const holdings=[];
+  for(const sym of Object.keys(L.openLots))for(const l of L.openLots[sym]){
+    if(!(l.units>0))continue;
+    const live=paperPx(sym),cmp=live||l.buyPrice,cost=l.units*l.buyPrice;
+    lifoDeployed+=cost;lifoMkt+=l.units*cmp;
+    holdings.push({eng:'LIFO',sym,date:l.date,units:l.units,buy:l.buyPrice,cmp,cost,value:l.units*cmp,pnl:l.units*cmp-cost,id:l.id,priced:live>0});
+  }
+  for(const sym of Object.keys(D.positions)){
+    const pos=D.positions[sym],live=paperPx(sym),cmp=live||pos.avgPrice;
+    dmDeployed+=pos.costBasis;dmMkt+=pos.units*cmp;
+    holdings.push({eng:'DM',sym,date:pos.entryDate,units:pos.units,buy:pos.avgPrice,cmp,cost:pos.costBasis,value:pos.units*cmp,pnl:pos.units*cmp-pos.costBasis,priced:live>0});
+  }
+  const lifoEq=lifoCash+lifoMkt,dmEq=dmCash+dmMkt;
+  return{L,D,holdings,lifoCash,dmCash,lifoDeployed,dmDeployed,lifoEq,dmEq,total:lifoEq+dmEq,base:p.lifoCapital+p.dmCapital,
+    lifoCap:c.lifoCompound?Math.max(p.lifoCapital+L.realized,0):p.lifoCapital,     // sizing capital, same rule as lifoCompoundedCapital
+    dmCap:c.dmCompound?Math.max(p.dmCapital+D.realized,0):p.dmCapital};
+}
+
+// ── The LIFO "Act Today" rules for ANY account ─────────────────────────────────────────────────
+// Rule for rule the same as renderLifoSignals (rank by distance from the 52-week low, scan limit, peak
+// guard, buy-on-rise, capital and cash limits, no same-day re-entry, new buys first and averaging only
+// when there is no new buy, target + minimum profit, sell-on-fall). The harness feeds it the REAL account
+// and requires exactly the buttons renderLifoSignals draws. buysToday/avgsToday: fills already made today.
+function lifoActionPlan({openLots,ledger,equity,targetPct,buysToday=0,avgsToday=0}){
+  const c=S.config;
+  const slots=finiteParam(c.slots,40,{min:1,integer:true}),slot=equity/slots;
+  const minVol=finiteParam(c.minVol,0,{min:0}),maxLots=finiteParam(c.maxLots,3,{min:1,integer:true}),maxScan=finiteParam(c.maxScan,20,{min:1,integer:true});
+  const maxBuysPerDay=finiteParam(c.maxBuysPerDay,3,{min:0,integer:true}),avgFall=finiteParam(c.avgFall,6,{min:0});
+  const highGuardOn=!!c.highGuard,highGuardPct=finiteParam(c.highGuardPct,5,{min:0}),buyOnRise=!!c.buyOnRise;
+  const maxAvgPerDay=(c.maxAvgPerDay!=null?c.maxAvgPerDay:1);
+  const noData=[];
+  const matrix=LIFO_ETF_UNIVERSE.filter(e=>{
+    if(typeof DHC_EXCLUDED!=='undefined'&&DHC_EXCLUDED.has(e.sym))return false;
+    const p=PRICES[e.sym],l=getLive52WLSync(e.sym);
+    if(!p?.cmp||!live52Usable(l)){noData.push(e.sym);return false;}
+    if(minVol>0&&p.vol>0&&p.vol<minVol)return false;
+    return true;
+  }).map(e=>{
+    const p=PRICES[e.sym],low52=getLive52WLSync(e.sym).low52;
+    const prox=((p.cmp-low52)/low52)*100,distHigh=p.high52>0?((p.high52-p.cmp)/p.high52)*100:null;
+    const lots=openLots[e.sym]?.filter(l=>l.units>0)||[],isHeld=lots.length>0,lotCount=lots.length;
+    let avgEligible=false,fallFromLast=0;
+    if(isHeld){const last=lots[lots.length-1];fallFromLast=((p.cmp-last.buyPrice)/last.buyPrice)*100;avgEligible=fallFromLast<=-avgFall&&lotCount<maxLots;}
+    const peakBlocked=highGuardOn&&!isHeld&&distHigh!==null&&distHigh<=highGuardPct;
+    return{sym:e.sym,name:e.name,p,prox,distHigh,isHeld,avgEligible,fallFromLast,lotCount,peakBlocked};
+  }).sort((a,b)=>a.prox-b.prox);
+  let deployed=0;Object.values(openLots).forEach(arr=>arr.forEach(l=>{if(l.units>0)deployed+=l.units*l.buyPrice;}));
+  const free=Math.max(0,equity-deployed),today=localDate();
+  const soldOutToday=new Set((ledger||[]).filter(t=>t.type==='SELL'&&t.date===today).map(t=>t.sym).filter(sym=>!(openLots[sym]||[]).some(l=>l.units>0)));
+  const actionable=[],blocked=[];
+  let buysQueued=buysToday,avgQueued=avgsToday,projectedDeployed=deployed,capCommit=0,cashCommit=0;
+  const afford=e=>{
+    const qty=Math.ceil(slot/e.p.cmp)||1,buyCost=qty*e.p.cmp+lifoFriction('BUY',qty,e.p.cmp).friction;
+    const cap=lifoCapacityDecision({deployed,committedCapacity:capCommit,slot,equity,freeCash:free,committedCash:cashCommit,buyCost});
+    return{qty,buyCost,capitalBlocked:cap.capitalBlocked,cashBlocked:cap.cashBlocked,freeNow:Math.max(0,free-cashCommit)};
+  };
+  const queue=(e,i,action)=>{
+    const f=afford(e);
+    if(f.capitalBlocked){blocked.push({sym:e.sym,rank:i+1,blockReason:`Capital limit — ${fmtINR(projectedDeployed)} of ${fmtINR(equity)} deployed`});return false;}
+    if(f.cashBlocked){blocked.push({sym:e.sym,rank:i+1,blockReason:`Insufficient free capital — need ${fmtINR(f.buyCost)}, have ${fmtINR(Math.max(0,f.freeNow))}`});return false;}
+    actionable.push({sym:e.sym,name:e.name,action,rank:i+1,qty:f.qty,price:e.p.cmp,chg:e.p.chg,prox:e.prox,fallFromLast:e.fallFromLast,lotCount:e.lotCount});
+    projectedDeployed+=f.qty*e.p.cmp;capCommit+=slot;cashCommit+=f.buyCost;return true;
+  };
+  for(let i=0;i<Math.min(matrix.length,maxScan);i++){           // pass 1 — new ETFs
+    if(buysQueued>=maxBuysPerDay)break;
+    const e=matrix[i];if(e.isHeld)continue;
+    const gate=evaluateLifoEntryGate({isHeld:false,peakBlocked:e.peakBlocked,soldOutToday:soldOutToday.has(e.sym),buyOnRise,dailyChg:e.p.chg,avgEligible:false});
+    if(gate==='peak-guard')continue;
+    if(gate==='same-day-reentry'){blocked.push({sym:e.sym,rank:i+1,blockReason:'Sold out today — no same-day re-entry'});continue;}
+    if(gate==='rise-gate')continue;
+    if(queue(e,i,'BUY'))buysQueued++;
+  }
+  if(buysQueued===0){                                            // pass 2 — averaging, only when there is no new buy
+    for(let i=0;i<Math.min(matrix.length,maxScan);i++){
+      if(avgQueued>=maxAvgPerDay)break;
+      const e=matrix[i];if(!e.isHeld||!e.avgEligible)continue;
+      const gate=evaluateLifoEntryGate({isHeld:true,peakBlocked:false,soldOutToday:soldOutToday.has(e.sym),buyOnRise,dailyChg:e.p.chg,avgEligible:e.avgEligible});
+      if(gate==='same-day-reentry'||gate==='rise-gate')continue;
+      if(queue(e,i,'AVG'))avgQueued++;
+    }
+  }
+  Object.keys(openLots).forEach(sym=>{                           // target hits
+    const lots2=openLots[sym];if(!lots2?.length)return;
+    const p=PRICES[sym];if(!p?.cmp)return;
+    lots2.forEach(lot=>{
+      if(lot.units<=0)return;
+      const cost=lot.units*lot.buyPrice,gain=lot.units*p.cmp-cost,gainPct=(gain/cost)*100;
+      const net=gain-lifoFriction('SELL',lot.units,p.cmp).friction-lifoFriction('BUY',lot.units,lot.buyPrice).friction;
+      const hit=gainPct>=targetPct&&net>=resolveMinProfit();
+      const canSellNow=!(c.sellOnFall!==false)||(p.chg<0);
+      if(hit)actionable.unshift({sym,name:LIFO_ETF_UNIVERSE.find(x=>x.sym===sym)?.name||sym,action:canSellNow?'SELL':'TRAILING',lotId:lot.id,qty:lot.units,price:p.cmp,chg:p.chg,gainPct,net,lotCount:lots2.filter(l=>l.units>0).length});
+    });
+  });
+  return{actionable,blocked,noData,ranked:matrix.length,slot,maxLots,maxScan,targetPct};
+}
+
+// DM actions for the paper account from the latest verified signal: exits, skims, then buys.
+function paperDmPlan(book){
+  const p=paperState(),c=S.config,sig=dmSignalData,b=book||paperBook();
+  if(!sig)return{ok:false,reason:'No DM signal yet — open Dual Momentum → Signals and tap Compute Signal.',actions:[]};
+  if(sig.dataQualityOk!==true||!Array.isArray(sig.topPicks)||!sig.topPicks.length)return{ok:false,reason:'DM signal is not verified (data checks failed) — no paper actions.',actions:[]};
+  const n=sig.slots||c.dmSlots||3,slotVal=Math.floor(b.dmCap/n),fr=dmTotalFrictionFraction(),skimAt=c.dmSkim||25;
+  const picks=sig.topPicks.filter(x=>!x.isLiquid),top=picks.map(x=>x.sym),pos=b.D.positions,actions=[];
+  let free=b.dmCash;
+  for(const etf of Object.keys(pos)){
+    if(top.includes(etf))continue;
+    const price=paperPx(etf)||pos[etf].avgPrice;
+    actions.push({sym:etf,action:'EXIT',units:pos[etf].units,price,note:'Dropped out of the top picks'});
+    free+=pos[etf].units*price*(1-fr);
+  }
+  for(const etf of Object.keys(pos)){
+    if(!top.includes(etf))continue;
+    const price=paperPx(etf)||pos[etf].avgPrice,r=pos[etf].costBasis>0?(price*pos[etf].units-pos[etf].costBasis)/pos[etf].costBasis*100:0;
+    if(r>=skimAt)actions.push({sym:etf,action:'SKIM',units:+(pos[etf].units*0.25).toFixed(3),price,note:`Up ${r.toFixed(1)}% — skim 25%`});
+  }
+  for(const x of picks){
+    if(pos[x.sym])continue;
+    const live=paperPx(x.sym),price=live||(+x.lastClose||0);
+    if(!(price>0)){actions.push({sym:x.sym,action:'BUY',units:0,price:0,blocked:'No price'});continue;}
+    const units=Math.floor(slotVal/price),cost=units*price*(1+fr);
+    if(units<1){actions.push({sym:x.sym,action:'BUY',units:0,price,blocked:`Slot ${fmtINR(slotVal)} is smaller than one unit`});continue;}
+    if(cost>free+0.005){actions.push({sym:x.sym,action:'BUY',units,price,blocked:`Not enough paper cash — need ${fmtINR(cost)}, have ${fmtINR(Math.max(0,free))}`});continue;}
+    free-=cost;
+    actions.push({sym:x.sym,action:'BUY',units,price,note:`${getLookbackLabel(sig.lookback||182)} return ${x.ret>=0?'+':''}${(+x.ret).toFixed(1)}%${live?'':' · priced at last close'}`});
+  }
+  const last=p.dmTrades.reduce((m,t)=>t.date>m?t.date:m,'');
+  let sessions=null;
+  if(last){sessions=0;const d=new Date(last+'T00:00:00Z'),e=new Date(localDate()+'T00:00:00Z');while(d<e){d.setUTCDate(d.getUTCDate()+1);const w=d.getUTCDay();if(w!==0&&w!==6)sessions++;}}
+  const every=c.dmRebalanceDays||30;
+  return{ok:true,actions,slotVal,slots:n,liquidSlots:n-picks.length,asOf:sig.commonAsOf||'',lastTrade:last,sessionsSince:sessions,every,due:sessions==null||sessions>=every};
+}
+function paperSigKey(eng,a){return [eng,a.sym,a.action,a.lotId||''].join('|');}
+// Everything the paper account should do now, both engines.
+function paperSignals(){
+  const p=paperState(),b=paperBook(),today=localDate();
+  const tb=p.lifoLedger.filter(t=>t.type==='BUY'&&t.date===today);
+  const lifo=lifoActionPlan({openLots:b.L.openLots,ledger:p.lifoLedger,equity:b.lifoCap,targetPct:resolveTarget(b.lifoDeployed,p.lifoCapital||100000,S.config),
+    buysToday:tb.filter(t=>t.kind!=='AVG').length,avgsToday:tb.filter(t=>t.kind==='AVG').length});
+  const dm=paperDmPlan(b);
+  const list=[];
+  if(p.lifoCapital>0)for(const a of lifo.actionable)list.push({eng:'LIFO',key:paperSigKey('LIFO',a),...a});
+  if(p.dmCapital>0&&dm.ok)for(const a of dm.actions)list.push({eng:'DM',key:paperSigKey('DM',a),...a});
+  return{book:b,lifo,dm,list};
+}
+function paperMarketOpen(){const t=tenetISTNow(),w=new Date(t.date+'T00:00:00Z').getUTCDay();return w!==0&&w!==6&&t.minutes>=555&&t.minutes<=930;}
+
+// ── Fills ─────────────────────────────────────────────────────────────────────────────────────
+let _paperBusy=false;
+async function paperExec(spec){
+  const p=paperState(),no=m=>{try{toast('⛔ Paper trade refused — '+m,'err');}catch(e){}return null;};
+  if(!p.startedAt)return no('start the paper account first');
+  if(_paperBusy)return null;
+  if(typeof PRICES_STALE_GATE!=='undefined'&&PRICES_STALE_GATE)return no('prices are stale. Refresh first.');
+  const s=spec||{},eng=s.eng==='DM'?'DM':'LIFO',sym=sanSym(s.sym),action=String(s.action||'').toUpperCase(),price=+s.price,date=localDate(),ts=Date.now();
+  if(!sym||!(Number.isFinite(price)&&price>0))return no('symbol or price missing');
+  const rid=ts+'_'+Math.random().toString(36).slice(2,7),off=!paperMarketOpen();
+  let row;
+  if(eng==='LIFO'){
+    const type=action==='SELL'?'SELL':(action==='BUY'||action==='AVG')?'BUY':'',qty=+s.qty;
+    if(!type||!Number.isInteger(qty)||qty<=0)return no('quantity must be a whole number');
+    const lots=(paperLifoLots(p.lifoLedger).openLots[sym]||[]).filter(l=>l.units>0),maxLots=finiteParam(S.config.maxLots,3,{min:1,integer:true});
+    if(type==='BUY'&&lots.length>=maxLots)return no(`max lots (${maxLots}) reached for ${sym}`);
+    if(type==='SELL'){const held=lots.reduce((a,l)=>a+l.units,0);if(qty>held)return no(`only ${held} unit(s) of ${sym} held`);}
+    const f=lifoFriction(type,qty,price);
+    row={id:'px_'+rid,date,sym,type,qty,price,turn:f.turn,friction:f.friction,linkedBuyId:type==='SELL'?sanIdToken(s.lotId||''):'',kind:type==='BUY'?(lots.length?'AVG':'BUY'):'SELL',reason:sanNote(s.reason||''),ts,off};
+  }else{
+    const type=['BUY','EXIT','SKIM','SELL'].includes(action)?action:'',units=+s.units;
+    if(!type||!(Number.isFinite(units)&&units>0))return no('units must be a positive number');
+    const pos=paperDmBook(p.dmTrades).positions[sym];
+    if(type!=='BUY'&&(!pos||units>pos.units+1e-6))return no(`only ${pos?pos.units:0} unit(s) of ${sym} held`);
+    row={id:'pm_'+rid,date,etf:sym,type,units,price,value:units*price,friction:units*price*dmTotalFrictionFraction(),reason:sanNote(s.reason||''),ts,off};
+  }
+  _paperBusy=true;
+  try{
+    const jk=date+'|'+paperSigKey(eng,{sym,action,lotId:s.lotId});
+    const ok=await commitState(()=>{const q=paperState();(eng==='LIFO'?q.lifoLedger:q.dmTrades).push(row);const j=q.journal.find(x=>x.k===jk);if(j)j.taken=1;else q.journal.push({k:jk,d:date,eng,sym,action,price,qty:eng==='LIFO'?row.qty:row.units,taken:1});},{label:'Paper trade'});
+    if(!ok)return null;
+  }finally{_paperBusy=false;}
+  try{toast(`📝 PAPER ${row.type} ${eng==='LIFO'?row.qty:row.units} × ${sym} @ ₹${price.toFixed(2)} — pretend money, real ledger untouched`,'ok');}catch(e){}
+  return row;
+}
+async function paperTake(key){
+  const sg=paperSignals().list.find(x=>x.key===key);
+  if(!sg){toast('That paper signal is no longer there — prices moved or it was already taken','warn');renderPaper();return null;}
+  if(sg.action==='TRAILING'||sg.blocked)return null;
+  const r=await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,reason:'signal'});
+  renderPaper();if(r&&curStrategy==='lifo')try{renderLifo();}catch(e){}
+  return r;
+}
+async function paperTakeAll(){
+  const keys=paperSignals().list.filter(x=>x.action!=='TRAILING'&&!x.blocked).map(x=>x.key);
+  if(!keys.length){toast('No paper signals to take','warn');return 0;}
+  if(!confirm(`Paper-trade all ${keys.length} signal(s) at the prices shown?\n\nPretend money only.`))return 0;
+  let n=0;
+  for(const k of keys){const sg=paperSignals().list.find(x=>x.key===k);if(!sg||sg.blocked)continue;if(await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,reason:'signal'}))n++;}
+  renderPaper();return n;
+}
+// The "Paper" button on a real Act Today card: takes the paper account's own signal for that ETF, at paper size.
+async function paperTakeFromLive(sym,action){
+  if(!paperOn()){switchStrategy('paper',null);return null;}
+  const buy=action!=='SELL',sg=paperSignals().list.find(x=>x.eng==='LIFO'&&x.sym===sym&&(buy?(x.action==='BUY'||x.action==='AVG'):x.action==='SELL'));
+  if(!sg){toast(`No paper ${buy?'buy':'sell'} signal for ${sym} — the paper account holds different lots. Open Paper to see its signals.`,'warn');return null;}
+  return paperTake(sg.key);
+}
+async function paperStart(){
+  const lc=parseFloat(document.getElementById('paper-lifo-cap')?.value||0)||0,dc=parseFloat(document.getElementById('paper-dm-cap')?.value||0)||0;
+  if(lc<0||dc<0||!(lc+dc>0)){toast('Enter a paper amount for at least one strategy','err');return false;}
+  const ok=await commitState(()=>{S.paper={...paperDefault(),startedAt:localDate(),lifoCapital:lc,dmCapital:dc,niftyStart:+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0};},{label:'Paper account'});
+  if(ok){toast('📝 Paper account started — pretend money only','ok');renderPaper();try{renderLifo();}catch(e){}}
+  return ok;
+}
+async function paperReset(){
+  if(!confirm('Reset the paper account?\n\nAll paper trades, the signal journal and the value history are deleted. Your real ledger is not affected.'))return false;
+  const ok=await commitState(()=>{S.paper=paperDefault();},{label:'Paper reset'});
+  if(ok){renderPaper();try{renderLifo();}catch(e){}}
+  return ok;
+}
+async function paperUndoLast(){
+  const p=paperState(),all=[...p.lifoLedger.map(t=>({t,eng:'LIFO'})),...p.dmTrades.map(t=>({t,eng:'DM'}))].sort((a,b)=>(b.t.ts||0)-(a.t.ts||0));
+  if(!all.length){toast('No paper trades to undo','warn');return false;}
+  const {t,eng}=all[0];
+  if(!confirm(`Undo the last paper trade?\n\n${t.type} ${eng==='LIFO'?t.qty:t.units} × ${eng==='LIFO'?t.sym:t.etf} @ ₹${(+t.price).toFixed(2)} on ${t.date}`))return false;
+  const ok=await commitState(()=>{const q=paperState();if(eng==='LIFO')q.lifoLedger=q.lifoLedger.filter(x=>x.id!==t.id);else q.dmTrades=q.dmTrades.filter(x=>x.id!==t.id);},{label:'Paper undo'});
+  if(ok)renderPaper();
+  return ok;
+}
+
+// ── Journal (signals seen, taken or missed) and the daily value log ───────────────────────────────
+let _paperSavedAt=0;
+function paperTick(sig){
+  const p=paperState();if(!p.startedAt)return false;
+  const today=localDate();let dirty=false;
+  for(const a of sig.list){
+    if(a.action==='TRAILING'||a.blocked)continue;
+    const k=today+'|'+a.key;
+    if(!p.journal.some(x=>x.k===k)){p.journal.push({k,d:today,eng:a.eng,sym:a.sym,action:a.action,price:a.price,qty:a.eng==='LIFO'?a.qty:a.units,taken:0});dirty=true;}
+  }
+  if(p.journal.length>3000)p.journal=p.journal.slice(-3000);
+  const nifty=+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0;
+  if(!(p.niftyStart>0)&&nifty>0){p.niftyStart=nifty;dirty=true;}
+  const priced=sig.book.holdings.every(h=>h.priced);
+  if(priced){
+    const row={d:today,lifo:+sig.book.lifoEq.toFixed(2),dm:+sig.book.dmEq.toFixed(2),nifty};
+    const i=p.navLog.findIndex(x=>x.d===today);
+    if(i<0){p.navLog.push(row);dirty=true;}
+    else if(p.navLog[i].lifo!==row.lifo||p.navLog[i].dm!==row.dm||p.navLog[i].nifty!==row.nifty){p.navLog[i]=row;if(Date.now()-_paperSavedAt>300000)dirty=true;}
+  }
+  if(dirty){_paperSavedAt=Date.now();try{saveState();}catch(e){}}
+  return dirty;
+}
+function paperStats(sig){
+  const p=paperState(),b=sig.book,today=localDate();
+  const nifty=+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0;
+  const days=p.startedAt?Math.max(0,Math.round((new Date(today+'T00:00:00Z')-new Date(p.startedAt+'T00:00:00Z'))/86400000)):0;
+  const past=p.journal.filter(j=>j.d<today),seen=p.journal.length,taken=p.journal.filter(j=>j.taken).length;
+  let pk=0,mdd=0;for(const r of p.navLog){const v=r.lifo+r.dm;if(v>pk)pk=v;if(pk>0)mdd=Math.max(mdd,(1-v/pk)*100);}
+  return{base:b.base,total:b.total,pnl:b.total-b.base,retPct:b.base>0?(b.total/b.base-1)*100:0,
+    niftyPct:(p.niftyStart>0&&nifty>0)?(nifty/p.niftyStart-1)*100:null,days,realized:b.L.realized+b.D.realized,
+    seen,taken,missed:past.filter(j=>!j.taken).length,adherencePct:seen?taken/seen*100:null,maxDdPct:mdd,logDays:p.navLog.length};
+}
+function paperExportCSV(){
+  const p=paperState(),L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades);
+  const rows=[['AlphaDesk — PAPER account (pretend money)'],['Started',p.startedAt,'LIFO capital',p.lifoCapital,'DM capital',p.dmCapital],[],
+    ['TRADES'],['Date','Engine','ETF','Type','Units','Price','Value','Costs','Realised P&L','After hours']];
+  for(const t of p.lifoLedger)rows.push([t.date,'LIFO',t.sym,t.kind||t.type,t.qty,t.price,(t.qty*t.price).toFixed(2),(t.friction||0).toFixed(2),t.type==='SELL'?(L.profit[t.id]??''):'',t.off?'yes':'']);
+  for(const t of p.dmTrades)rows.push([t.date,'DM',t.etf,t.type,t.units,t.price,(t.units*t.price).toFixed(2),(t.friction||0).toFixed(2),t.type!=='BUY'&&D.pnl[t.id]!=null?D.pnl[t.id].toFixed(2):'',t.off?'yes':'']);
+  rows.push([],['SIGNAL JOURNAL'],['Date','Engine','ETF','Signal','Price','Units','Taken']);
+  for(const j of p.journal)rows.push([j.d,j.eng,j.sym,j.action,j.price,j.qty,j.taken?'yes':'no']);
+  rows.push([],['DAILY VALUE'],['Date','LIFO Rs','DM Rs','Total Rs','NIFTYBEES']);
+  for(const r of p.navLog)rows.push([r.d,r.lifo,r.dm,(r.lifo+r.dm).toFixed(2),r.nifty||'']);
+  dlCSV(rows,'paper_account');
+  return rows;
+}
+
+// ── Screen ───────────────────────────────────────────────────────────────────────────────────
+function paperChartSvg(p){
+  const pts=p.navLog.filter(r=>r.nifty>0&&p.niftyStart>0);if(pts.length<2)return '';
+  const base=p.lifoCapital+p.dmCapital,a=pts.map(r=>r.lifo+r.dm),n=pts.map(r=>base*r.nifty/p.niftyStart),all=[...a,...n,base];
+  const lo=Math.min(...all),hi=Math.max(...all),W=600,H=140,X=i=>(i/(pts.length-1))*W,Y=v=>hi===lo?H/2:H-4-((v-lo)/(hi-lo))*(H-8);
+  const line=s=>s.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:140px;display:block"><line x1="0" x2="${W}" y1="${Y(base).toFixed(1)}" y2="${Y(base).toFixed(1)}" stroke="var(--wire)" stroke-dasharray="4 4"/><polyline fill="none" stroke="var(--fog)" stroke-width="1.5" points="${line(n)}"/><polyline fill="none" stroke="var(--violet)" stroke-width="2" points="${line(a)}"/></svg>
+    <div style="font-size:10px;color:var(--fog);margin-top:4px"><span style="color:var(--violet)">━</span> Paper account &nbsp; <span>━</span> Same money in Nifty (NIFTYBEES) &nbsp; ${escapeHtml(pts[0].d)} → ${escapeHtml(pts[pts.length-1].d)}</div>`;
+}
+function renderPaper(){
+  const el=document.getElementById('paper-body');if(!el)return;
+  const p=paperState(),c=S.config;
+  const tag=`<div id="paper-tag" style="font-size:11px;font-weight:700;color:var(--violet);background:rgba(139,92,246,.10);border:1px dashed var(--violet);border-radius:var(--r8);padding:8px 12px;margin-bottom:12px">📝 PAPER ACCOUNT — pretend money. Nothing on this screen touches your real ledger, tax or cloud sync.</div>`;
+  if(!p.startedAt){
+    el.innerHTML=`${tag}<div class="card"><div class="card-title" style="margin-bottom:8px">Start a paper account</div>
+      <p style="font-size:12px;color:var(--mist);margin-bottom:12px;line-height:1.6">The paper account gets the same live signals, position sizes and costs as the real desk, using your current LIFO and Dual Momentum settings. You tap <b>Paper Buy / Sell</b>; the app keeps the paper holdings, value and a record of every signal you took or missed.</p>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Paper LIFO amount ₹</label><input class="form-input" id="paper-lifo-cap" type="number" min="0" value="${+c.capital||0}"/></div>
+        <div class="form-group"><label class="form-label">Paper DM amount ₹</label><input class="form-input" id="paper-dm-cap" type="number" min="0" value="${+c.momCapital||0}"/></div>
+      </div>
+      <button class="action-btn skim-btn" id="paper-start-btn" onclick="paperStart()" style="padding:9px 20px">Start paper account</button>
+      <div style="font-size:10px;color:var(--fog);margin-top:10px;line-height:1.6">Limits: fills use the last price the app has (the backtest fills at the next day's open) · signals are only recorded on days you open the app and refresh prices · idle paper DM cash earns nothing · the paper account stays on this device and in the full backup.</div></div>`;
+    return;
+  }
+  const sig=paperSignals();paperTick(sig);
+  const b=sig.book,st=paperStats(sig),pc=v=>v>=0?'profit':'loss',sg=v=>(v>=0?'+':'')+v.toFixed(2)+'%',stale=typeof PRICES_STALE_GATE!=='undefined'&&PRICES_STALE_GATE;
+  const edge=st.niftyPct==null?null:st.retPct-st.niftyPct;
+  const stats=`<div class="stat-grid" id="paper-stats">
+    <div class="stat-card violet"><div class="stat-label">Paper value</div><div class="stat-val violet">${fmtINR(st.total)}</div><div class="stat-sub">started ${escapeHtml(p.startedAt)} with ${fmtINR(st.base)} · ${st.days} day(s)</div></div>
+    <div class="stat-card ${st.pnl>=0?'go':'stop'}"><div class="stat-label">Paper P&amp;L</div><div class="stat-val ${st.pnl>=0?'go':'stop'}">${st.pnl>=0?'+':''}${fmtINR(st.pnl)}</div><div class="stat-sub">${sg(st.retPct)} · realised ${st.realized>=0?'+':''}${fmtINR(st.realized)}</div></div>
+    <div class="stat-card"><div class="stat-label">Nifty since start</div><div class="stat-val">${st.niftyPct==null?'—':sg(st.niftyPct)}</div><div class="stat-sub">${edge==null?'needs a NIFTYBEES price':`paper is <b class="${pc(edge)}">${sg(edge)}</b> vs Nifty`}</div></div>
+    <div class="stat-card"><div class="stat-label">Signals taken</div><div class="stat-val">${st.taken} / ${st.seen}</div><div class="stat-sub">${st.adherencePct==null?'no signals recorded yet':`${st.adherencePct.toFixed(0)}% followed · ${st.missed} missed on earlier days`}</div></div>
+    <div class="stat-card"><div class="stat-label">LIFO paper</div><div class="stat-val azure">${fmtINR(b.lifoEq)}</div><div class="stat-sub">${fmtINR(b.lifoDeployed)} in lots · ${fmtINR(b.lifoCash)} cash</div></div>
+    <div class="stat-card"><div class="stat-label">DM paper</div><div class="stat-val azure">${fmtINR(b.dmEq)}</div><div class="stat-sub">${fmtINR(b.dmDeployed)} in positions · ${fmtINR(b.dmCash)} cash</div></div>
+  </div>`;
+  const card=a=>{
+    const isL=a.eng==='LIFO',sell=a.action==='SELL'||a.action==='EXIT',trail=a.action==='TRAILING',units=isL?a.qty:a.units;
+    const badge=trail?'<span class="badge b-hold">TRAILING</span>':a.action==='SELL'?'<span class="badge b-target">TARGET HIT</span>':a.action==='EXIT'?'<span class="badge b-sell">EXIT</span>':a.action==='SKIM'?'<span class="badge b-skim">SKIM</span>':a.action==='AVG'?'<span class="badge b-avg">AVG DOWN</span>':'<span class="badge b-new">NEW BUY</span>';
+    const meta=isL?(sell||trail?`<span>Gain <b class="profit">+${(+a.gainPct).toFixed(2)}%</b></span><span>Net ₹${(+a.net).toFixed(0)}</span>`:`<span>52WL dist <b class="profit">${(+a.prox).toFixed(2)}%</b></span>${a.action==='AVG'?`<span>Fall from last lot <b>${(+a.fallFromLast).toFixed(1)}%</b></span>`:''}<span>Lots <b>${a.lotCount||0}/${sig.lifo.maxLots}</b></span>`):`<span>${escapeHtml(a.note||'')}</span>`;
+    const btn=trail?'<button class="action-btn sm" disabled style="font-size:10px">Holding for more</button>'
+      :a.blocked?`<span style="font-size:10px;color:var(--gold)">${escapeHtml(a.blocked)}</span>`
+      :`<button class="action-btn ${sell?'sell-btn':a.action==='SKIM'?'skim-btn':'buy-btn'} sm" ${stale?'disabled title="Prices are stale — refresh first"':''} onclick="paperTake(${htmlJsArg(a.key)})">📝 Paper ${sell?(isL?'Sell':'Exit'):a.action==='SKIM'?'Skim':'Buy'} ${units}× ₹${(+a.price).toFixed(2)}</button>`;
+    return `<div class="act-card ${sell?'act-sell':trail?'act-trail':a.action==='AVG'?'act-avg':''}"><div class="act-card-head"><div><div class="act-sym">${escapeHtml(a.sym)} ${badge} <span style="font-size:10px;color:var(--fog)">${a.eng}${a.rank?' · #'+a.rank:''}</span></div>${a.name?`<div class="act-name">${escapeHtml(a.name)}</div>`:''}</div>
+      <div style="text-align:right;flex-shrink:0"><div style="font-size:16px;font-weight:800;color:var(--white)">₹${(+a.price).toFixed(2)}</div>${a.chg!=null&&Number.isFinite(+a.chg)?`<div class="${pc(+a.chg)}" style="font-size:11px;font-weight:700">${sg(+a.chg)}</div>`:''}</div></div>
+      <div class="act-meta">${meta}</div><div class="act-actions">${btn}</div></div>`;
+  };
+  const can=sig.list.filter(a=>a.action!=='TRAILING'&&!a.blocked).length;
+  const dmNote=!(p.dmCapital>0)?'':!sig.dm.ok?`<div style="font-size:11px;color:var(--gold);margin:6px 0">DM: ${escapeHtml(sig.dm.reason)}</div>`
+    :`<div style="font-size:10px;color:var(--fog);margin:6px 0">DM signal data date ${escapeHtml(sig.dm.asOf||'—')} · slot ${fmtINR(sig.dm.slotVal)} × ${sig.dm.slots}${sig.dm.liquidSlots>0?` · ${sig.dm.liquidSlots} slot(s) stay in cash (signal says LIQUIDBEES)`:''} · ${sig.dm.lastTrade?`last paper DM trade ${escapeHtml(sig.dm.lastTrade)} (${sig.dm.sessionsSince} session(s) ago; the backtest rebalances every ${sig.dm.every}) — ${sig.dm.due?'<b style="color:var(--go)">rebalance due</b>':'<b style="color:var(--gold)">not due yet</b>'}`:'no paper DM trades yet'}</div>`;
+  const lifoNote=!(p.lifoCapital>0)?'':`<div style="font-size:10px;color:var(--fog);margin:6px 0">LIFO: ${sig.lifo.ranked} ETF(s) ranked · slot ${fmtINR(sig.lifo.slot)} · target ${sig.lifo.targetPct}%${sig.lifo.blocked.length?` · ${sig.lifo.blocked.length} blocked (${escapeHtml(sig.lifo.blocked[0].sym+': '+sig.lifo.blocked[0].blockReason)})`:''}${!sig.lifo.ranked?' · refresh prices to load signals':''}</div>`;
+  const signals=`<div class="section-head"><div class="section-title">⚡ Paper signals now <span class="section-count" id="paper-signal-count">${sig.list.length}</span></div>${can>1?`<button class="icon-btn" id="paper-take-all" onclick="paperTakeAll()">📝 Take all ${can}</button>`:''}</div>
+    ${stale?'<div style="font-size:11px;color:var(--stop);margin-bottom:8px">Prices are stale — paper fills are switched off until you refresh.</div>':''}
+    <div id="paper-signal-list">${sig.list.length?sig.list.map(card).join(''):'<div class="empty" style="padding:18px 0"><div class="empty-icon">✅</div><div style="font-size:12px;color:var(--mist)">No paper action right now</div></div>'}</div>${lifoNote}${dmNote}`;
+  const hold=b.holdings.length?`<div style="overflow-x:auto"><table><thead><tr><th>Engine</th><th>ETF</th><th>Since</th><th class="r">Units</th><th class="r">Buy ₹</th><th class="r">Now ₹</th><th class="r">Value</th><th class="r">P&amp;L</th></tr></thead><tbody>${b.holdings.map(h=>`<tr><td>${h.eng}</td><td class="sym-cell">${escapeHtml(h.sym)}</td><td class="mono neutral">${escapeHtml(h.date||'')}</td><td class="r mono">${+(+h.units).toFixed(3)}</td><td class="r mono">${(+h.buy).toFixed(2)}</td><td class="r mono">${h.priced?(+h.cmp).toFixed(2):'—'}</td><td class="r mono">${fmtINR(h.value)}</td><td class="r mono ${pc(h.pnl)}">${h.pnl>=0?'+':''}${fmtINR(h.pnl)} (${h.cost>0?sg(h.pnl/h.cost*100):'—'})</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">No paper holdings yet</div>';
+  const trades=[...p.lifoLedger.map(t=>({d:t.date,ts:t.ts||0,eng:'LIFO',sym:t.sym,type:t.kind||t.type,u:t.qty,price:t.price,fr:t.friction||0,pnl:t.type==='SELL'?b.L.profit[t.id]:null,off:t.off})),
+    ...p.dmTrades.map(t=>({d:t.date,ts:t.ts||0,eng:'DM',sym:t.etf,type:t.type,u:t.units,price:t.price,fr:t.friction||0,pnl:t.type!=='BUY'?b.D.pnl[t.id]:null,off:t.off}))].sort((x,y)=>y.ts-x.ts);
+  const ledger=trades.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Type</th><th class="r">Units</th><th class="r">Price</th><th class="r">Costs</th><th class="r">Realised</th></tr></thead><tbody>${trades.slice(0,200).map(t=>`<tr><td class="mono neutral">${escapeHtml(t.d)}${t.off?' <span title="Filled outside market hours at the last price">🌙</span>':''}</td><td>${t.eng}</td><td class="sym-cell">${escapeHtml(t.sym)}</td><td>${escapeHtml(t.type)}</td><td class="r mono">${+(+t.u).toFixed(3)}</td><td class="r mono">₹${(+t.price).toFixed(2)}</td><td class="r mono neutral">${(+t.fr).toFixed(2)}</td><td class="r mono ${t.pnl==null?'':pc(t.pnl)}">${t.pnl==null?'—':(t.pnl>=0?'+':'')+fmtINR(t.pnl)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">No paper trades yet</div>';
+  const jr=[...p.journal].reverse().slice(0,60),today=localDate();
+  const journal=jr.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Signal</th><th class="r">Price</th><th class="c">Result</th></tr></thead><tbody>${jr.map(j=>`<tr><td class="mono neutral">${escapeHtml(j.d)}</td><td>${escapeHtml(j.eng)}</td><td class="sym-cell">${escapeHtml(j.sym)}</td><td>${escapeHtml(j.action)}</td><td class="r mono">₹${(+j.price).toFixed(2)}</td><td class="c">${j.taken?'<span style="color:var(--go)">✓ taken</span>':j.d===today?'<span style="color:var(--fog)">open</span>':'<span style="color:var(--stop)">✗ missed</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">Signals appear here on days you open the app with fresh prices</div>';
+  const chart=paperChartSvg(p);
+  el.innerHTML=`${tag}${stats}${signals}
+    <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">💼 Paper holdings</div>${hold}</div>
+    <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">📈 Paper vs Nifty</div>${chart||`<div class="empty" style="padding:12px 0">The chart starts after two days of values (${st.logDays} so far). One point is saved each day you open the app with prices loaded.</div>`}${st.logDays>1?`<div style="font-size:10px;color:var(--fog);margin-top:4px">Largest fall from a peak so far: ${st.maxDdPct.toFixed(1)}%</div>`:''}</div>
+    <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">📋 Paper ledger</div><div style="display:flex;gap:6px"><button class="icon-btn" onclick="paperUndoLast()">↶ Undo last</button><button class="icon-btn" onclick="paperExportCSV()">⬇ CSV</button></div></div>${ledger}</div>
+    <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">🧭 Signal journal</div>${journal}</div>
+    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="danger-btn" id="paper-reset-btn" onclick="paperReset()">Reset paper account</button><span style="font-size:10px;color:var(--fog)">Uses your current LIFO and DM settings. Fills use the last price the app has; costs are the same as the real desk.</span></div>`;
+}
+
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
@@ -17368,6 +17794,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('tax',null)"><span style="font-size:18px">🧾</span><span>Tax</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('portfolio',null)"><span style="font-size:18px">💼</span><span>Portfolio</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('watchlist',null)"><span style="font-size:18px">👁</span><span>Watchlist</span></button>
+<button class="mm-item" onclick="_closeMoreMenu();switchStrategy('paper',null)"><span style="font-size:18px">📝</span><span>Paper</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('universe',null)"><span style="font-size:18px">🌐</span><span>Universe</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('data',null)"><span style="font-size:18px">🗄</span><span>Data</span></button>
 <button class="mm-item" onclick="_closeMoreMenu();switchStrategy('settings',null)"><span style="font-size:18px">⚙️</span><span>Settings</span></button>
