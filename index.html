@@ -1093,6 +1093,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
 <button class="action-btn" id="bt-run-btn" onclick="runLifoBacktest()" style="padding:9px 20px">▶ Run Backtest</button>
+<button class="icon-btn" id="bt-use-settings" onclick="fillBacktestsFromSettings();toast('Backtest form filled from your settings','ok')">↺ Use my settings</button>
 <button class="action-btn" id="bt-baseline-btn" onclick="runLifoReferenceBaseline()" style="padding:9px 20px" title="Runs your current backtest configuration twice — once filling at the same close, once at the next open — to isolate the cost of execution timing">◎ Run Execution A/B</button>
 <div id="bt-baseline-out" style="display:none;width:100%;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:6px"></div>
 <button class="icon-btn" onclick="openDataHealthCheck('lifo')" style="padding:7px 12px;font-size:11px" title="Scan all ETF data for gaps, stale sequences and coverage issues">🩺 Data Health</button>
@@ -1712,6 +1713,7 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 </div>
 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
 <button class="action-btn azure-btn" onclick="runDMBacktest()" style="padding:9px 24px">▶ Run DM Backtest</button>
+<button class="icon-btn" id="dm-bt-use-settings" onclick="fillBacktestsFromSettings();toast('Backtest form filled from your settings','ok')">↺ Use my settings</button>
 <button class="icon-btn" onclick="openDataHealthCheck('dm')" style="padding:7px 12px;font-size:11px" title="Scan all ETF data for gaps, stale sequences and coverage issues">🩺 Data Health</button>
 </div>
 <div id="dm-bt-status" style="font-size:11px;color:var(--fog);margin-top:8px"></div>
@@ -12186,7 +12188,7 @@ function saveAllSettings(){
   if(sbKeyEl&&!sbKeyEl.startsWith('●')){if(!safeLsSet('ad_sb_key',sbKeyEl)){toast('❌ Settings not saved: Supabase key persistence failed','err');return;}SB.key=sbKeyEl;}
   if(c.sheetUrl){document.getElementById('sheet-conn-status').className='conn-status live';document.getElementById('sheet-conn-status').textContent='● SET';}
   if(c.gistUrl){document.getElementById('gist-conn-status').className='conn-status live';document.getElementById('gist-conn-status').textContent='● SET';}
-  saveState();startAutoRefresh();syncSettingsUI();renderLifo();renderMomPortfolio();checkRebalanceBanner();
+  saveState();startAutoRefresh();syncSettingsUI();renderLifo();renderMomPortfolio();checkRebalanceBanner();try{fillBacktestsFromSettings();}catch(e){}
   renderMarketDataHealth();toast('✅ Settings saved','ok');
   // P12 FIX 16: if Supabase was just configured, verify RLS is active
   // An open table (no RLS) means anyone with the anon key can read/write your trades
@@ -15106,8 +15108,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R23b';
-const APP_SOURCE_SHA256='df4ae729c36bb95c6c2e7c39ba8d25090a4292af7450b074b9c37e0d70d8402c';
+const APP_BUILD='2026-11-11-v3.22-R24';
+const APP_SOURCE_SHA256='ac074ccc43905d0fe11f20a6f2aca5d72d5b5f308e2bebc348f6baac03f1f4a0';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17974,7 +17976,7 @@ async function applyTestedList(){
   },{label:'Research Core list'});
   if(!ok)return false;
   try{TENET_RUNTIME.live=null;}catch(e){}
-  try{renderUniverse();populateLifoDropdown();syncSettingsUI();}catch(e){}
+  try{renderUniverse();populateLifoDropdown();syncSettingsUI();fillBacktestsFromSettings();}catch(e){}
   try{await syncUniverseToSB();}catch(e){}
   try{prefetch52WL(engineList('LIFO')).then(()=>{try{renderLifo();if(curStrategy==='paper')renderPaper();}catch(e){}}).catch(()=>{});}catch(e){}   // R21: load the 52-week lows of ETFs new to the list now, not at the next refresh
   toast(`✅ ${TESTED_LIST.name} and its settings are now in use — LIFO ${pl.LIFO.length} ETFs, DM ${pl.DM.length} ETFs`+(pl.add.length?` · ${pl.add.length} new ETF(s) — refresh prices`:''),'ok');
@@ -18001,13 +18003,35 @@ async function paperTakeDmPick(sym){
   if(sg.blocked){toast(`Paper buy for ${sym} blocked — ${sg.blocked}`,'warn');return null;}
   return paperTake(sg.key);
 }
+
+// ── R24: backtest forms start from YOUR settings (the preset / Research Core you applied), not fixed defaults ──
+// Filled when the app opens, after Save All Settings / a preset / the Research Core list, and by the
+// "↺ Use my settings" button. Typing in the form afterwards still changes only that backtest run.
+function fillBacktestsFromSettings(){
+  const c=S.config,set=(id,v)=>{const el=document.getElementById(id);if(el&&v!=null&&v!=='')el.value=v;};
+  set('bt-capital',c.capital);set('bt-slots',c.slots);set('bt-avgfall',c.avgFall);set('bt-minprofit',resolveMinProfit());set('bt-minvol',c.minVol);
+  set('bt-maxlots',c.maxLots);set('bt-maxscan',c.maxScan);set('bt-maxbuys',c.maxBuysPerDay);set('bt-high-guard-pct',c.highGuard?(c.highGuardPct||5):0);
+  {const el=document.getElementById('bt-lifo-compound');if(el)el.checked=!!c.lifoCompound;}
+  const lb=finiteParam(c.dmLookback,182,{min:1,integer:true});
+  set('dm-bt-lookback',lb);
+  {const lab=document.getElementById('dm-bt-lookback-label');if(lab)lab.textContent=lb+' days';
+   const inp=document.getElementById('dm-bt-lookback'),preset=[30,91,182].includes(lb);if(inp)inp.style.display=preset?'none':'';
+   document.querySelectorAll('[onclick^="setDmBtLookback("]').forEach(b=>{const m=/setDmBtLookback\((\d+)/.exec(b.getAttribute('onclick')||'');b.classList.toggle('active',!!m&&(+m[1]===lb||(+m[1]===0&&!preset)));});}
+  set('dm-bt-hurdle',c.dmHurdle);set('dm-bt-slots',c.dmSlots);set('dm-bt-skim',c.dmSkim);set('dm-bt-minvol',c.minVol);
+  set('dm-bt-friction',+(dmTotalFrictionFraction()*100).toFixed(4));
+  {const t=document.getElementById('dm-bt-nifty');if(t)t.classList.toggle('on',c.dmNiftyFilter!==false);}
+  const rb=finiteParam(c.dmRebalanceDays,30,{min:1,integer:true});set('dm-bt-rebal-days',rb);
+  try{clearRebalPresets();const b=document.getElementById('rb-btn-'+([7,15,30].includes(rb)?rb:0));if(b)b.classList.add('active');}catch(e){}
+  {const el=document.getElementById('bt-dm-compound');if(el)el.checked=!!c.dmCompound;}
+  return true;
+}
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
 // listener runs each init step in a known order, and a failure in one step
 // (wrapped try/catch) doesn't prevent the others from running.
 document.addEventListener('DOMContentLoaded', () => {
-  const steps=[initMain,initLifoSweepWiring,initDmSweepWiring,initWalkForwardToggles,initDataCenterPatch];
+  const steps=[initMain,initLifoSweepWiring,initDmSweepWiring,initWalkForwardToggles,initDataCenterPatch,fillBacktestsFromSettings];
   steps.forEach(fn=>{
     try{ fn(); }catch(e){ console.error(`init step ${fn.name} failed:`,e); }
   });
