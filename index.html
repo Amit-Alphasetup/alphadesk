@@ -7605,6 +7605,7 @@ function renderDMSignal(){
   const slotVal=Math.floor(dmCompoundedCapital()/n);
   const cols=['r1','r2','r3'];
 
+  const _dmPaperHeld=new Set(paperOn()?Object.keys(paperDmBook(paperState().dmTrades).positions):[]);   // R23b
   const top3El=document.getElementById('mom-top3');
   top3El.innerHTML=topPicks.map((p,i)=>{
     const qty=p.isLiquid?'—':(p.lastClose?Math.floor(slotVal*(1-dmTotalFrictionFraction())/p.lastClose):'—');   // R22: slot pays its costs, as the backtest and the paper account size it
@@ -7623,7 +7624,7 @@ function renderDMSignal(){
                ${p.lastClose?`<span>CMP <b>₹${p.lastClose.toFixed(2)}</b></span>`:''}
                ${qty!=='—'?`<span>Qty/slot <b>${qty}</b></span>`:''}`}
         </div>
-        ${(!p.isLiquid&&qty!=='—')?`<div class="act-actions" style="margin-top:6px">${dataQualityOk?`<button class="action-btn buy-btn sm" id="dm-buy-${i}" onclick="stageDmPick(${i},${qty})">Buy ${qty}× ₹${p.lastClose.toFixed(2)}</button>`:'<span style="font-size:10px;color:var(--stop)">Blocked — data checks failed</span>'}${dataQualityOk?` <button class="action-btn sm paper-btn" id="dm-paper-${i}" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeDmPick(${htmlJsArg(p.sym)})">📝 Paper</button>`:''}</div>`:''}
+        ${(!p.isLiquid&&qty!=='—')?`<div class="act-actions" style="margin-top:6px">${dataQualityOk?`<button class="action-btn buy-btn sm" id="dm-buy-${i}" onclick="stageDmPick(${i},${qty})">Buy ${qty}× ₹${p.lastClose.toFixed(2)}</button>`:'<span style="font-size:10px;color:var(--stop)">Blocked — data checks failed</span>'}${dataQualityOk&&_dmPaperHeld.has(p.sym)?` <span class="paper-none" id="dm-paper-${i}" style="font-size:10px;color:var(--fog)">📝 in paper account</span>`:dataQualityOk?` <button class="action-btn sm paper-btn" id="dm-paper-${i}" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeDmPick(${htmlJsArg(p.sym)})">📝 Paper</button>`:''}</div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -15105,8 +15106,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R23';
-const APP_SOURCE_SHA256='81e4c40baa970f701d7d3340df89f67dc252065bf5f905e53d37870206a13c5b';
+const APP_BUILD='2026-11-11-v3.22-R23b';
+const APP_SOURCE_SHA256='df4ae729c36bb95c6c2e7c39ba8d25090a4292af7450b074b9c37e0d70d8402c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
