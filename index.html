@@ -7602,7 +7602,7 @@ function renderDMSignal(){
 
   const top3El=document.getElementById('mom-top3');
   top3El.innerHTML=topPicks.map((p,i)=>{
-    const qty=p.isLiquid?'—':(p.lastClose?Math.floor(slotVal/p.lastClose):'—');
+    const qty=p.isLiquid?'—':(p.lastClose?Math.floor(slotVal*(1-dmTotalFrictionFraction())/p.lastClose):'—');   // R22: slot pays its costs, as the backtest and the paper account size it
     const cls=p.ret>=0?'profit':'loss';
     const badge=p.isLiquid
       ?`<span class="badge b-liquid">LIQUIDBEES</span> <span style="font-size:10px;color:var(--fog)">${escapeHtml(p.reason||'')}</span>`
@@ -7618,6 +7618,7 @@ function renderDMSignal(){
                ${p.lastClose?`<span>CMP <b>₹${p.lastClose.toFixed(2)}</b></span>`:''}
                ${qty!=='—'?`<span>Qty/slot <b>${qty}</b></span>`:''}`}
         </div>
+        ${(!p.isLiquid&&qty!=='—')?`<div class="act-actions" style="margin-top:6px">${dataQualityOk?`<button class="action-btn buy-btn sm" id="dm-buy-${i}" onclick="stageDmPick(${i},${qty})">Buy ${qty}× ₹${p.lastClose.toFixed(2)}</button>`:'<span style="font-size:10px;color:var(--stop)">Blocked — data checks failed</span>'}${dataQualityOk?` <button class="action-btn sm paper-btn" id="dm-paper-${i}" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeDmPick(${htmlJsArg(p.sym)})">📝 Paper</button>`:''}</div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -15099,8 +15100,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R21';
-const APP_SOURCE_SHA256='4b9be090b182a08fca3fd09542c600d2271b7a65cbf329c6439b5627413a15d6';
+const APP_BUILD='2026-11-11-v3.22-R22';
+const APP_SOURCE_SHA256='bc6abec4c47a7a268dffccc288d11190aa10b9a317f902b9da1dd0b33ec0aeb0';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17962,6 +17963,25 @@ async function applyTestedList(){
   return true;
 }
 function renderTestedListStatus(){const el=document.getElementById('uni-tested-status');if(!el)return;const on=testedListActive();const d=testedSettingsDiff();el.innerHTML=on?'<span style="color:var(--go)">✓ In use</span>':`<span style="color:var(--fog)">Not in use — lists LIFO ${engineList('LIFO').length} · DM ${engineList('DM').length}${d.length?` · ${d.length} setting(s) differ`:''}</span>`;}
+
+// ── R22: buttons on the DM Top Picks ─────────────────────────────────────────────────────────────
+// Buy: fills that pick's row in "Confirm Executed Trades" (units + price) and scrolls to it; you confirm after the broker fill.
+function stageDmPick(i,qty){
+  const u=document.getElementById(`dm-units-${i}`),ck=document.getElementById(`dm-ck-${i}`);
+  if(!u){toast('Compute the signal first','warn');return false;}
+  u.value=qty;if(ck)ck.checked=true;
+  try{u.scrollIntoView({behavior:'smooth',block:'center'});u.focus();}catch(e){}
+  toast(`BUY ${qty} × ${pendingMomConfirms[i]?.etf||''} staged — check the price, then Save Confirmed Trades`,'ok');
+  return true;
+}
+// Paper: takes the paper account's own DM signal for that ETF (paper size). Starts at the Paper screen if no account yet.
+async function paperTakeDmPick(sym){
+  if(!paperOn()){switchStrategy('paper',null);toast('Start the paper account first','warn');return null;}
+  const sg=paperSignals().list.find(x=>x.eng==='DM'&&x.sym===sym&&x.action==='BUY');
+  if(!sg){const held=paperDmBook(paperState().dmTrades).positions[sym];toast(held?`${sym} is already in the paper account`:`No paper buy for ${sym} — open Paper to see why`,'warn');return null;}
+  if(sg.blocked){toast(`Paper buy for ${sym} blocked — ${sg.blocked}`,'warn');return null;}
+  return paperTake(sg.key);
+}
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
