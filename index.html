@@ -15093,8 +15093,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R18b';
-const APP_SOURCE_SHA256='8ae9cbd9b411a25751e2c0a334aedd920f2f18deacb832b479eb5721163b2b8c';
+const APP_BUILD='2026-11-11-v3.22-R19';
+const APP_SOURCE_SHA256='f3bb21687bd68f4f0a4937ff02bcd905b068a82356178ab10ad3d23ec25db926';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17367,13 +17367,14 @@ function paperState(){
   for(const k of ['lifoLedger','dmTrades','journal','navLog'])if(!Array.isArray(p[k]))p[k]=[];
   for(const k of ['lifoCapital','dmCapital','niftyStart'])p[k]=(Number.isFinite(+p[k])&&+p[k]>=0)?+p[k]:0;
   if(typeof p.startedAt!=='string')p.startedAt='';
+  if(!p.replay||typeof p.replay!=='object'||Array.isArray(p.replay))p.replay=null;
   return p;
 }
 function paperOn(){return !!paperState().startedAt;}
 
 // Same lot matching as computeLifoPortfolio (linked lot first, then the newest lot); rows are not modified.
 function paperLifoLots(ledger){
-  const openLots={},profit={};let realized=0;
+  const openLots={},profit={},closed=[];let realized=0;
   const sorted=[...(ledger||[])].sort((a,b)=>new Date(a.date)-new Date(b.date));
   for(const tx of sorted){
     if(tx.type==='BUY'){
@@ -17384,19 +17385,19 @@ function paperLifoLots(ledger){
       if(lots){
         if(tx.linkedBuyId){
           const idx=lots.findIndex(l=>l.id===tx.linkedBuyId);
-          if(idx!==-1){const lot=lots[idx],take=Math.min(toSell,lot.units);costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.splice(idx,1);}
+          if(idx!==-1){const lot=lots[idx],take=Math.min(toSell,lot.units);closed.push({sym:tx.sym,buyDate:lot.date,sellDate:tx.date,qty:take,pnl:take*(tx.price-lot.buyPrice-(lot.buyFrictionPerUnit||0))-(tx.friction||0)*take/tx.qty});costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.splice(idx,1);}
         }
-        while(toSell>0&&lots.length>0){const lot=lots[lots.length-1],take=Math.min(toSell,lot.units);costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.pop();}
+        while(toSell>0&&lots.length>0){const lot=lots[lots.length-1],take=Math.min(toSell,lot.units);closed.push({sym:tx.sym,buyDate:lot.date,sellDate:tx.date,qty:take,pnl:take*(tx.price-lot.buyPrice-(lot.buyFrictionPerUnit||0))-(tx.friction||0)*take/tx.qty});costBasis+=take*(lot.buyPrice+(lot.buyFrictionPerUnit||0));lot.units-=take;toSell-=take;if(lot.units<=0)lots.pop();}
       }
       const pr=+((tx.price*tx.qty)-costBasis-(tx.friction||0)).toFixed(2);
       profit[tx.id]=pr;realized+=pr;
     }
   }
-  return{openLots,profit,realized};
+  return{openLots,profit,realized,closed};
 }
 // Same average-cost book as momRebuildState (buy friction in cost, SKIM keeps the average, 99% exit closes).
 function paperDmBook(trades){
-  const positions={},pnl={};let realized=0;
+  const positions={},pnl={},closed=[];let realized=0;
   const sorted=[...(trades||[])].sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   for(const tr of sorted){
     if(tr.type==='BUY'){
@@ -17407,13 +17408,13 @@ function paperDmBook(trades){
     }else if(tr.type==='EXIT'||tr.type==='SELL'||tr.type==='SKIM'){
       const pos=positions[tr.etf];if(!pos)continue;
       const v=(tr.price*tr.units)-pos.costBasis*(tr.units/pos.units)-(tr.friction||0);
-      pnl[tr.id]=v;realized+=v;
+      pnl[tr.id]=v;realized+=v;closed.push({sym:tr.etf,buyDate:pos.entryDate,sellDate:tr.date,qty:tr.units,pnl:v});
       if(tr.type==='SKIM'){const fk=(pos.units-tr.units)/pos.units;pos.units-=tr.units;pos.costBasis*=fk;pos.avgPrice=pos.costBasis/pos.units;}
       else if(tr.units>=pos.units*0.99)delete positions[tr.etf];
       else{pos.units-=tr.units;pos.costBasis=pos.units*pos.avgPrice;}
     }
   }
-  return{positions,pnl,realized};
+  return{positions,pnl,realized,closed};
 }
 function paperPx(sym){const a=+PRICES[sym]?.cmp;if(a>0)return a;const b=+S.momPrices?.[sym]?.current;return b>0?b:0;}
 // Cash, holdings and value of the paper account at the prices the app has now.
@@ -17680,7 +17681,7 @@ function paperStats(sig){
   let pk=0,mdd=0;for(const r of p.navLog){const v=r.lifo+r.dm;if(v>pk)pk=v;if(pk>0)mdd=Math.max(mdd,(1-v/pk)*100);}
   return{base:b.base,total:b.total,pnl:b.total-b.base,retPct:b.base>0?(b.total/b.base-1)*100:0,
     niftyPct:(p.niftyStart>0&&nifty>0)?(nifty/p.niftyStart-1)*100:null,days,realized:b.L.realized+b.D.realized,
-    seen,taken,missed:past.filter(j=>!j.taken).length,adherencePct:seen?taken/seen*100:null,maxDdPct:mdd,logDays:p.navLog.length};
+    seen,taken,missed:past.filter(j=>!j.taken).length,adherencePct:seen?taken/seen*100:null,maxDdPct:mdd,logDays:p.navLog.length,tax:paperTax(b).totalTax};
 }
 function paperExportCSV(){
   const p=paperState(),L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades);
@@ -17725,7 +17726,7 @@ function renderPaper(){
   const edge=st.niftyPct==null?null:st.retPct-st.niftyPct;
   const stats=`<div class="stat-grid" id="paper-stats">
     <div class="stat-card violet"><div class="stat-label">Paper value</div><div class="stat-val violet">${fmtINR(st.total)}</div><div class="stat-sub">started ${escapeHtml(p.startedAt)} with ${fmtINR(st.base)} · ${st.days} day(s)</div></div>
-    <div class="stat-card ${st.pnl>=0?'go':'stop'}"><div class="stat-label">Paper P&amp;L</div><div class="stat-val ${st.pnl>=0?'go':'stop'}">${st.pnl>=0?'+':''}${fmtINR(st.pnl)}</div><div class="stat-sub">${sg(st.retPct)} · realised ${st.realized>=0?'+':''}${fmtINR(st.realized)}</div></div>
+    <div class="stat-card ${st.pnl>=0?'go':'stop'}"><div class="stat-label">Paper P&amp;L</div><div class="stat-val ${st.pnl>=0?'go':'stop'}">${st.pnl>=0?'+':''}${fmtINR(st.pnl)}</div><div class="stat-sub">${sg(st.retPct)} · realised ${st.realized>=0?'+':''}${fmtINR(st.realized)}${st.tax>0?` · est. tax ${fmtINR(st.tax)} → after tax ${st.pnl-st.tax>=0?'+':''}${fmtINR(st.pnl-st.tax)}`:''}</div></div>
     <div class="stat-card"><div class="stat-label">Nifty since start</div><div class="stat-val">${st.niftyPct==null?'—':sg(st.niftyPct)}</div><div class="stat-sub">${edge==null?'needs a NIFTYBEES price':`paper is <b class="${pc(edge)}">${sg(edge)}</b> vs Nifty`}</div></div>
     <div class="stat-card"><div class="stat-label">Signals taken</div><div class="stat-val">${st.taken} / ${st.seen}</div><div class="stat-sub">${st.adherencePct==null?'no signals recorded yet':`${st.adherencePct.toFixed(0)}% followed · ${st.missed} missed on earlier days`}</div></div>
     <div class="stat-card"><div class="stat-label">LIFO paper</div><div class="stat-val azure">${fmtINR(b.lifoEq)}</div><div class="stat-sub">${fmtINR(b.lifoDeployed)} in lots · ${fmtINR(b.lifoCash)} cash</div></div>
@@ -17759,9 +17760,150 @@ function renderPaper(){
   el.innerHTML=`${tag}${stats}${signals}
     <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">💼 Paper holdings</div>${hold}</div>
     <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">📈 Paper vs Nifty</div>${chart||`<div class="empty" style="padding:12px 0">The chart starts after two days of values (${st.logDays} so far). One point is saved each day you open the app with prices loaded.</div>`}${st.logDays>1?`<div style="font-size:10px;color:var(--fog);margin-top:4px">Largest fall from a peak so far: ${st.maxDdPct.toFixed(1)}%</div>`:''}</div>
+    ${paperReplayCard(sig)}${paperGoLiveCard(sig)}
     <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">📋 Paper ledger</div><div style="display:flex;gap:6px"><button class="icon-btn" onclick="paperUndoLast()">↶ Undo last</button><button class="icon-btn" onclick="paperExportCSV()">⬇ CSV</button></div></div>${ledger}</div>
     <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">🧭 Signal journal</div>${journal}</div>
     <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="danger-btn" id="paper-reset-btn" onclick="paperReset()">Reset paper account</button><span style="font-size:10px;color:var(--fog)">Uses your current LIFO and DM settings. Fills use the last price the app has; costs are the same as the real desk.</span></div>`;
+}
+
+// ── R19: tax estimate, rules replay + reconciliation, go-live checklist ───────────────────────────
+// Tax estimate on closed paper trades with the app's own tax ledger (same call shape as the DM backtest).
+function paperTax(book){
+  const b=book||paperBook(),ac=s=>(S.universe||[]).find(e=>e.sym===s)?.assetClass||'equity';
+  const hd=(a,z)=>a&&z?Math.max(0,Math.round((new Date(z)-new Date(a))/86400000)):0;
+  const recs=[...b.L.closed,...b.D.closed].map((x,i)=>({id:'ptax-'+i,strategy:'DM',sym:x.sym,sellDate:x.sellDate,buyDate:x.buyDate||'',netPnl:x.pnl,holdDays:hd(x.buyDate,x.sellDate),assetClass:ac(x.sym)}));
+  const r=computeBtTax(recs);
+  return{totalTax:r.totalTax,rows:r.rows,count:recs.length};
+}
+function paperActions(){
+  const p=paperState(),cls=t=>t==='BUY'?'BUY':t==='SKIM'?'SKIM':'SELL';
+  return[...p.lifoLedger.map(t=>({eng:'LIFO',sym:t.sym,cls:cls(t.type),date:t.date,price:+t.price,units:t.qty})),
+    ...p.dmTrades.map(t=>({eng:'DM',sym:t.etf,cls:cls(t.type),date:t.date,price:+t.price,units:t.units}))];
+}
+// Pure: pair each replay trade with the nearest paper trade of the same engine, ETF and side within tolDays.
+// missed = the rules traded and you did not; extra = you traded and the rules did not; pending = too recent to judge.
+function paperReconcile(replay,mine,today,tolDays=4){
+  const dd=(a,b)=>Math.abs((new Date(a+'T00:00:00Z')-new Date(b+'T00:00:00Z'))/86400000),used=new Set(),rows=[];
+  for(const r of [...replay].sort((a,b)=>String(a.date).localeCompare(String(b.date)))){
+    let best=-1,bd=Infinity;
+    mine.forEach((m,i)=>{if(used.has(i)||m.eng!==r.eng||m.sym!==r.sym||m.cls!==r.cls)return;const d=dd(m.date,r.date);if(d<=tolDays&&d<bd){bd=d;best=i;}});
+    if(best>=0){used.add(best);const m=mine[best];rows.push({status:'matched',eng:r.eng,sym:r.sym,cls:r.cls,rDate:r.date,rPrice:r.price,mDate:m.date,mPrice:m.price,pxDiffPct:r.price>0?(m.price/r.price-1)*100:null});}
+    else rows.push({status:'missed',eng:r.eng,sym:r.sym,cls:r.cls,rDate:r.date,rPrice:r.price});
+  }
+  mine.forEach((m,i)=>{if(!used.has(i))rows.push({status:today&&dd(m.date,today)<=tolDays?'pending':'extra',eng:m.eng,sym:m.sym,cls:m.cls,mDate:m.date,mPrice:m.price});});
+  const n=s=>rows.filter(x=>x.status===s).length;
+  rows.sort((a,b)=>String(b.rDate||b.mDate).localeCompare(String(a.rDate||a.mDate)));
+  return{rows,matched:n('matched'),missed:n('missed'),extra:n('extra'),pending:n('pending'),matchPct:replay.length?n('matched')/replay.length*100:null};
+}
+// The real desk's settings as backtest parameters, with the paper amounts and the paper start date.
+function paperReplayParams(endDate){
+  const p=paperState(),c=S.config,today=endDate||localDate();
+  return{lifo:{startDate:p.startedAt,endDate:today,capital:p.lifoCapital,slots:c.slots,avgFall:c.avgFall,minProfit:resolveMinProfit(),minVol:c.minVol,maxLots:c.maxLots,maxScan:c.maxScan,maxBuysPerDay:c.maxBuysPerDay,
+      maxAvgPerDay:(c.maxAvgPerDay!=null?c.maxAvgPerDay:1),wl52Method:get52WLMethod(),fixedTargetOn:!!c.fixedTargetOn,fixedTargetPct:(c.fixedTargetPct||8),btHighGuard:!!c.highGuard,btHighGuardPct:c.highGuardPct,
+      btCompound:!!c.lifoCompound,btLiquidRate:0,sellOnFall:c.sellOnFall!==false,buyOnRise:!!c.buyOnRise,executionMode:'next-open'},
+    dm:{fromDate:p.startedAt,toDate:today,lookback:c.dmLookback,hurdle:c.dmHurdle,slots:c.dmSlots,skimPct:(c.dmSkim||25)/100,frPct:dmTotalFrictionFraction(),niftyOn:c.dmNiftyFilter!==false,minVol:c.minVol,
+      btDmCompound:!!c.dmCompound,rebalDays:c.dmRebalanceDays||30,momCapital:p.dmCapital,executionMode:'next-open'}};
+}
+// Rules replay: the two backtest engines run from the paper start date to the last published market day.
+// It is what the rules alone would have done — no missed days, fills at the next day's open.
+let _paperReplay=null,_paperReplayBusy=false;
+// Same data preflight the backtest screens run, without drawing their panels: which ETFs must be left out for missing data.
+async function paperPreflight(eng,params){
+  let own=null;
+  try{own=await EOD2Store.startRun('PREFLIGHT',{mode:'preview'});const pf=await preflight(buildRunContract(eng,params,own.snapshot,null),own.snapshot);
+    return{ok:!!pf.canResearch,ex:(pf.exclusions||[]).map(x=>x.symbol),msg:pf.canResearch?'':'required data unavailable — '+(pf.rows||[]).filter(r=>r.action==='BLOCKS_RESEARCH').map(r=>`${r.symbol} ${r.code}`).join(', ')};}
+  catch(e){return{ok:false,ex:[],msg:'data check failed: '+(e&&e.message||e)};}
+  finally{if(own)EOD2Store.endRun(own);}
+}
+async function paperReplay(){
+  const p=paperState();if(!p.startedAt||_paperReplayBusy)return null;
+  _paperReplayBusy=true;
+  const st=m=>{const e=document.getElementById('paper-replay-status');if(e)e.textContent=m;};
+  const out={at:localDate(),from:p.startedAt,to:'',actions:[],lifoEnd:null,dmEnd:null,errors:[],excluded:[]};
+  try{
+    // the replay ends at the last market day the dataset has published (never "today" before its data exists)
+    let own=null,last='';
+    try{own=await EOD2Store.startRun('PREFLIGHT',{mode:'preview'});last=String(own.snapshot.latestCompleted||'');}catch(e){out.errors.push('Market data not available: '+(e&&e.message||e));}finally{if(own)EOD2Store.endRun(own);}
+    out.to=last&&last<out.at?last:out.at;
+    const q=paperReplayParams(out.to),tooEarly=!out.errors.length&&out.to<=p.startedAt;
+    if(tooEarly)out.errors.push(`No completed market day after the start date yet (data is published up to ${last||'—'}). Run the replay again from the next market day.`);
+    if(out.errors.length){/* nothing to run */}else{
+    if(p.lifoCapital>0){
+      st('Replaying the LIFO rules…');
+      try{
+        const g=await paperPreflight('LIFO',q.lifo);if(!g.ok)throw new Error(g.msg);
+        g.ex.forEach(x=>out.excluded.push('LIFO '+x));
+        const r=await runLifoBacktestCore({...q.lifo,...(g.ex.length?{excludeSyms:g.ex}:{}),statusCb:st}),ref=r.error?{message:r.error}:runRefusal(r);
+        if(ref)out.errors.push('LIFO: '+ref.message);
+        else{
+          out.lifoEnd=r.equity&&r.equity.length?r.equity[r.equity.length-1].eq:p.lifoCapital;
+          for(const t of r.trades||[]){out.actions.push({eng:'LIFO',sym:t.sym,cls:'BUY',date:t.buyDate,price:+t.buyPrice,units:t.qty});out.actions.push({eng:'LIFO',sym:t.sym,cls:'SELL',date:t.sellDate,price:+t.sellPrice,units:t.qty});}
+          for(const l of (r.metrics&&r.metrics.openInventory&&r.metrics.openInventory.lots)||[])out.actions.push({eng:'LIFO',sym:l.sym,cls:'BUY',date:l.date,price:+l.buyPrice,units:l.qty});
+        }
+      }catch(e){out.errors.push('LIFO: '+(e&&e.message||e));}
+    }
+    if(p.dmCapital>0){
+      st('Replaying the Dual Momentum rules…');
+      try{
+        const g=await paperPreflight('DM',q.dm);if(!g.ok)throw new Error(g.msg);
+        g.ex.forEach(x=>out.excluded.push('DM '+x));
+        const r=await runDMBacktestCore({...q.dm,...(g.ex.length?{etfs:getMomUniverse().filter(sy=>!DHC_EXCLUDED.has(sy)&&!g.ex.includes(sy))}:{}),statusCb:st}),ref=r.error?{message:r.error}:runRefusal(r),k=p.dmCapital/100;
+        if(ref)out.errors.push('DM: '+(/Not enough months simulated/.test(ref.message)?`the DM engine needs at least 3 rebalances to replay — about ${2*q.dm.rebalDays+2} market days after the start date at your ${q.dm.rebalDays}-day interval. Run it again later.`:ref.message));
+        else{
+          out.dmEnd=r.equityDaily&&r.equityDaily.length?r.equityDaily[r.equityDaily.length-1].nav*k:p.dmCapital;
+          for(const t of r.tradeLog||[]){if(t.sym==='LIQUIDBEES')continue;const cls=t.action==='BUY'?'BUY':t.action==='SKIM'?'SKIM':'SELL';out.actions.push({eng:'DM',sym:t.sym,cls,date:t.date,price:+(cls==='BUY'?t.entryPrice:t.exitPrice),units:+((+t.units||0)*k).toFixed(3)});}
+        }
+      }catch(e){out.errors.push('DM: '+(e&&e.message||e));}
+    }
+    }
+  }finally{_paperReplayBusy=false;}
+  st('');
+  out.total=(out.lifoEnd!=null?out.lifoEnd:p.lifoCapital)+(out.dmEnd!=null?out.dmEnd:p.dmCapital);
+  out.rec=paperReconcile(out.actions,paperActions(),out.at);
+  _paperReplay=out;
+  await commitState(()=>{paperState().replay={at:out.at,from:out.from,to:out.to,lifoEnd:out.lifoEnd,dmEnd:out.dmEnd,total:out.total,trades:out.actions.length,matched:out.rec.matched,missed:out.rec.missed,extra:out.rec.extra,pending:out.rec.pending,matchPct:out.rec.matchPct,errors:out.errors.map(e=>sanNote(e,300)),excluded:out.excluded.map(e=>sanNote(e,40))};},{label:'Paper replay'});
+  renderPaper();
+  return out;
+}
+// Go-live checklist. The thresholds are a starting point chosen by the builder, not a guarantee of future results.
+const PAPER_GO_LIVE=Object.freeze({minDays:60,minTrades:20,minFollowPct:90,maxTrackPct:2,minMatchPct:80});
+function paperGoLive(sig){
+  const p=paperState(),G=PAPER_GO_LIVE,st=paperStats(sig),rp=p.replay,today=localDate(),trades=p.lifoLedger.length+p.dmTrades.length;
+  const stale=rp&&rp.at===today&&(rp.errors||[]).length?'replay incomplete — see Rules replay':'run the rules replay today';
+  const fresh=!!rp&&rp.at===today&&!(rp.errors||[]).length,track=fresh&&st.base>0?(st.total-rp.total)/st.base*100:null;
+  const checks=[
+    {id:'days',label:`Ran for at least ${G.minDays} days`,value:`${st.days} day(s)`,pass:st.days>=G.minDays},
+    {id:'trades',label:`At least ${G.minTrades} paper trades`,value:String(trades),pass:trades>=G.minTrades},
+    {id:'follow',label:`Followed at least ${G.minFollowPct}% of the signals`,value:st.adherencePct==null?'no signals yet':st.adherencePct.toFixed(0)+'%',pass:st.adherencePct!=null&&st.adherencePct>=G.minFollowPct},
+    {id:'track',label:`Paper value within ${G.maxTrackPct}% of the rules replay`,value:track==null?stale:(track>=0?'+':'')+track.toFixed(2)+'%',pass:track!=null&&Math.abs(track)<=G.maxTrackPct},
+    {id:'match',label:`At least ${G.minMatchPct}% of the replay's trades matched yours`,value:fresh&&rp.matchPct!=null?rp.matchPct.toFixed(0)+'%':stale,pass:fresh&&rp.matchPct!=null&&rp.matchPct>=G.minMatchPct}];
+  const passed=checks.filter(c=>c.pass).length;
+  return{checks,passed,ready:passed===checks.length,maxDdPct:st.maxDdPct,retPct:st.retPct,niftyPct:st.niftyPct};
+}
+function paperReplayCard(sig){
+  const p=paperState(),rp=p.replay,st=sig?paperStats(sig):null,m=_paperReplay&&_paperReplay.from===p.startedAt?_paperReplay:null;
+  let body='<div class="empty" style="padding:10px 0">Not run yet</div>';
+  if(rp){
+    const diff=st?st.total-rp.total:0,dp=st&&st.base>0?diff/st.base*100:0;
+    const has=rp.lifoEnd!=null||rp.dmEnd!=null;
+    body=`<div style="font-size:12px;line-height:1.7">Run on <b>${escapeHtml(rp.at||'')}</b>, covering ${escapeHtml(rp.from||'')} → ${escapeHtml(rp.to||'')}.${has?'':' No result.'}<span style="${has?'':'display:none'}"> Rules alone: <b>${fmtINR(+rp.total||0)}</b>${rp.lifoEnd!=null?` (LIFO ${fmtINR(+rp.lifoEnd)})`:''}${rp.dmEnd!=null?` (DM ${fmtINR(+rp.dmEnd)})`:''}${st?` · your paper account: <b>${fmtINR(st.total)}</b> · difference <b class="${diff>=0?'profit':'loss'}">${diff>=0?'+':''}${fmtINR(diff)} (${dp>=0?'+':''}${dp.toFixed(2)}%)</b>`:''}</span></div>
+      <div style="font-size:12px;margin-top:4px;${has?'':'display:none'}">${+rp.trades||0} replay trade(s): <b style="color:var(--go)">${+rp.matched||0} matched</b> · <b style="color:var(--stop)">${+rp.missed||0} you missed</b> · <b style="color:var(--gold)">${+rp.extra||0} only you made</b>${+rp.pending?` · ${+rp.pending} too recent to judge`:''}${rp.matchPct!=null?` · match ${(+rp.matchPct).toFixed(0)}%`:''}</div>
+      ${Array.isArray(rp.excluded)&&rp.excluded.length?`<div style="font-size:10px;color:var(--gold);margin-top:4px">Left out of the replay for missing data: ${escapeHtml(rp.excluded.join(', '))}</div>`:''}
+      ${(Array.isArray(rp.errors)?rp.errors:[]).map(e=>`<div style="font-size:11px;color:var(--stop);margin-top:4px">${escapeHtml(e)}</div>`).join('')}`;
+    if(m&&m.rec.rows.length){
+      const lab={matched:'<span style="color:var(--go)">✓ matched</span>',missed:'<span style="color:var(--stop)">✗ you missed</span>',extra:'<span style="color:var(--gold)">only you</span>',pending:'<span style="color:var(--fog)">too recent</span>'};
+      body+=`<div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Engine</th><th>ETF</th><th>Side</th><th>Rules date</th><th class="r">Rules ₹</th><th>Your date</th><th class="r">Your ₹</th><th class="r">Price gap</th><th class="c">Result</th></tr></thead><tbody>${m.rec.rows.slice(0,120).map(r=>`<tr><td>${r.eng}</td><td class="sym-cell">${escapeHtml(r.sym)}</td><td>${r.cls}</td><td class="mono neutral">${escapeHtml(r.rDate||'—')}</td><td class="r mono">${r.rPrice!=null?(+r.rPrice).toFixed(2):'—'}</td><td class="mono neutral">${escapeHtml(r.mDate||'—')}</td><td class="r mono">${r.mPrice!=null?(+r.mPrice).toFixed(2):'—'}</td><td class="r mono">${r.pxDiffPct!=null?(r.pxDiffPct>=0?'+':'')+r.pxDiffPct.toFixed(2)+'%':'—'}</td><td class="c">${lab[r.status]}</td></tr>`).join('')}</tbody></table></div>`;
+    }else if(+rp.trades)body+='<div style="font-size:10px;color:var(--fog);margin-top:6px">Run it again to see the trade-by-trade list.</div>';
+  }
+  return `<div class="card" id="paper-replay-card" style="margin-top:14px"><div class="card-head"><div class="card-title">🔁 Rules replay — the rules alone, no missed days</div><button class="icon-btn" id="paper-replay-btn" onclick="paperReplay()">▶ Run</button></div>
+    <div style="font-size:11px;color:var(--fog);margin-bottom:8px;line-height:1.6">Runs the backtest engines from your start date to the last published market day with your paper amounts and current settings, then compares its trades with yours. The replay buys and sells at the next day's open, so prices differ a little from your fills.</div>
+    <div id="paper-replay-status" style="font-size:11px;color:var(--azure);margin-bottom:6px"></div>${body}</div>`;
+}
+function paperGoLiveCard(sig){
+  const g=paperGoLive(sig);
+  return `<div class="card" id="paper-golive" style="margin-top:14px"><div class="card-head"><div class="card-title">🚦 Go-live checklist</div><span id="paper-golive-verdict" style="font-size:11px;font-weight:800;color:${g.ready?'var(--go)':'var(--gold)'}">${g.ready?'READY FOR A SMALL REAL STEP':`KEEP TESTING — ${g.passed} of ${g.checks.length} met`}</span></div>
+    ${g.checks.map(c=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--plate);font-size:12px"><span>${c.pass?'✅':'⬜'} ${escapeHtml(c.label)}</span><b style="color:${c.pass?'var(--go)':'var(--mist)'};white-space:nowrap">${escapeHtml(c.value)}</b></div>`).join('')}
+    <div style="font-size:10px;color:var(--fog);margin-top:8px;line-height:1.6">Largest fall from a peak seen so far: ${g.maxDdPct.toFixed(1)}% (the backtests fell 10–21% at their worst — size real money for that). Return vs Nifty over a short run is mostly noise and is not a pass/fail item. The thresholds are a starting point, not a guarantee.</div></div>`;
 }
 
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
