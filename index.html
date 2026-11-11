@@ -2384,6 +2384,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div id="s-split-dm" style="background:var(--violet);flex:1"></div>
 </div>
 <div style="font-size:11px;color:var(--fog)">Total: <b id="s-capital-total" style="color:var(--paper);font-variant-numeric:tabular-nums">—</b> · <span id="s-split-label">—</span></div>
+<button class="submit-btn" id="pf-save-btn" onclick="saveAllSettings()" style="margin-top:12px">💾 Save Settings</button>
 </div>
 <div class="card" style="margin-bottom:14px">
 <div class="card-title" style="margin-bottom:6px">By engine <span style="font-size:10px;color:var(--fog)">units and market value in each engine's own book</span></div>
@@ -15092,8 +15093,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R18';
-const APP_SOURCE_SHA256='f6c71df70ab6795c7c5608cef6d3c2efe36985a20d7c9b06a097027336a842c9';
+const APP_BUILD='2026-11-11-v3.22-R18b';
+const APP_SOURCE_SHA256='8ae9cbd9b411a25751e2c0a334aedd920f2f18deacb832b479eb5721163b2b8c';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
