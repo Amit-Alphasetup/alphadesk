@@ -2287,6 +2287,9 @@ or one per line" rows="4" style="resize:vertical"></textarea>
 <div class="tab-pane" id="tenet-ledger"></div>
 <div class="tab-pane" id="tenet-config">
 <div id="tenet-config-head"></div>
+<div class="card" id="tenet-seven-card" style="border:1px solid var(--violet)"><div class="card-head"><div class="card-title">🧪 7 tested pairs</div><span id="tenet-seven-status" style="font-size:11px"></span></div>
+<div style="font-size:11px;color:var(--mist);line-height:1.6;margin-bottom:10px">Nifty 50 (NIFTYBEES / NIFTYIETF) · Bank Nifty (BANKBEES / BANKIETF) · Fin Nifty (BFSI) · Midcap 150 (MID150BEES / MIDCAPETF) · Gold (GOLDBEES / GOLDIETF) · Silver (SILVERBEES / TATSILV) · Nifty Next 50 (JUNIORBEES / NEXT50IETF). GREEN buys on a bullish index week, RED on a bearish one. Gold and silver read their weekly candle from GOLDBEES / SILVERBEES. Pools 80% new buys / 20% bids.</div>
+<button class="action-btn skim-btn" id="tenet-seven-btn" onclick="applyTenetSevenPairs()" style="padding:8px 16px">Use the 7 tested pairs</button></div>
 <div class="card"><div class="card-title">⚙ Tenet 2.0 Rule Settings</div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">First target %</label><input class="form-input" id="tenet-cfg-target" type="number" step="0.01" value="3.14"></div>
@@ -2296,7 +2299,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
       <div class="form-group"><label class="form-label">Live signal data safety</label><select class="form-input" id="tenet-cfg-data-safety"><option value="verified">Verified live · Upstox required</option><option value="fallback">Allow fetched Sheet/Yahoo fallback</option></select></div>
       <button class="action-btn" onclick="tenetSaveConfigFromUI()">Save rules</button>
     </div>
-    <div style="font-size:10px;color:var(--fog);line-height:1.6;margin-top:7px">Hard contract: NEW pool 60% · BID pool 40% · one BID/week · largest eligible fall wins · no stop-loss · maximum 20 GREEN slots. <b>Data safety is separate from strategy logic:</b> Verified live is the default for real-money action buttons. The 52W percentage is a <b>universe selection/removal guide</b>, not an automatic live-signal veto in V2.0.</div>
+    <div style="font-size:10px;color:var(--fog);line-height:1.6;margin-top:7px">Hard contract: <span id="tenet-pool-text">NEW pool 60% · BID pool 40%</span> · one BID/week · largest eligible fall wins · no stop-loss · maximum 20 GREEN slots. <b>Data safety is separate from strategy logic:</b> Verified live is the default for real-money action buttons. The 52W percentage is a <b>universe selection/removal guide</b>, not an automatic live-signal veto in V2.0.</div>
     <div class="form-group" style="margin-top:8px"><label class="form-label">Additional NSE holiday dates (YYYY-MM-DD, comma/newline separated)</label><textarea class="form-input" id="tenet-cfg-holidays" rows="2" placeholder="2027-01-26, ..."></textarea></div>
   </div>
   <div class="card"><div class="card-title">🧩 Tenet Scanner Universe</div>
@@ -9104,7 +9107,8 @@ function buildRunContract(strategy,params,snapshot,terminalState){
     const idxSeen=new Set(),etfSeen=new Set();
     for(const pr of pairs){
       const u=sanIndexName(pr.underlying);
-      if(u&&!idxSeen.has(u)){idxSeen.add(u);const me=snapshot&&snapshot.manifest&&snapshot.manifest.files&&(snapshot.manifest.files[u]||snapshot.manifest.files[u.replace(/ /g,'_')]);
+      if(u&&TENET_INDEX_PROXY[u]){if(!idxSeen.has(u)){idxSeen.add(u);add(TENET_INDEX_PROXY[u],'CORE_REFERENCE',['open','close']);}}   // R25: proxy ETF stands in for the index
+      else if(u&&!idxSeen.has(u)){idxSeen.add(u);const me=snapshot&&snapshot.manifest&&snapshot.manifest.files&&(snapshot.manifest.files[u]||snapshot.manifest.files[u.replace(/ /g,'_')]);
         add(u,'CORE_REFERENCE',Array.isArray(me&&me.requiredFields)&&me.requiredFields.length?me.requiredFields:['open','close']);}
       for(const e of [pr.green,pr.red].map(sanSym).filter(Boolean))if(!etfSeen.has(e)){etfSeen.add(e);add(e,'RANKING_CANDIDATE',['open','high','low','close']);}
     }
@@ -12427,6 +12431,8 @@ function tenetAddPairFromBuilder(){const t=tenetState(),u=sanIndexName(document.
   const next=t.pairs.map(x=>({...x})),pair={underlying:u,green:g,red:r||''};if(idx>=0)next[idx]=pair;else next.push(pair);const errs=tenetValidatePairs(next);if(errs.length)return toast(errs[0],'err');t.pairs=next;saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Tenet slot saved: ${u} → GREEN ${g}${r?' / RED '+r:''}`,'ok');}
 function tenetEditPair(underlying){const p=tenetState().pairs.find(x=>x.underlying===underlying);if(!p)return;const u=document.getElementById('tenet-pair-underlying'),g=document.getElementById('tenet-pair-green'),r=document.getElementById('tenet-pair-red');if(!u||!g||!r)return;u.innerHTML=tenetIndexOptions(p.underlying);u.value=p.underlying;g.innerHTML=tenetEtfOptions(p.underlying,p.green,false);r.innerHTML=tenetEtfOptions(p.underlying,p.red||'',true);g.value=p.green;r.value=p.red||'';u.scrollIntoView({behavior:'smooth',block:'center'});}
 function tenetRemovePair(underlying){const t=tenetState(),p=t.pairs.find(x=>x.underlying===underlying);if(!p)return;const held=[p.green,p.red].filter(Boolean).filter(sym=>t.holdings.some(h=>h.etf===sym));if(held.length)return toast(`Keep this scanner slot until holdings are fully sold: ${held.join(', ')}`,'warn');t.pairs=t.pairs.filter(x=>x.underlying!==underlying);saveState();tenetRenderPairList();tenetRenderHoldings();toast(`Removed ${underlying} from Tenet scanner`,'ok');}
+// R25: an 'index' with no index series of its own is read from this ETF (GOLD -> GOLDBEES, SILVER -> SILVERBEES)
+const TENET_INDEX_PROXY=Object.freeze({GOLD:'GOLDBEES',SILVER:'SILVERBEES'});
 function tenetIndexYf(index){return tenetIndexRegistry().find(x=>x.name===sanIndexName(index))?.yf||'';}
 async function editLinkedIndex(sym){const e=S.universe.find(x=>x.sym===sym);if(!e)return;const name=prompt(`Real underlying index for ${sym}\n\nExamples: NIFTY 50, NIFTY BANK, NIFTY IT.\nTenet uses this INDEX candle for both GREEN and RED.`,e.linkedIndex||'');if(name===null)return;const clean=sanIndexName(name);let yf='';if(clean){const same=(S.universe||[]).find(x=>x.sym!==sym&&sanIndexName(x.linkedIndex)===clean&&x.linkedIndexYf);yf=prompt(`Yahoo fallback ticker for ${clean}\n\nExample: ^NSEI. Upstox uses the canonical index name; this ticker is only the Yahoo fallback.`,same?.linkedIndexYf||e.linkedIndexYf||'')??(e.linkedIndexYf||'');yf=sanIndexTicker(yf);}{const _nx=S.universe.map(x=>x.sym===sym?{...x,linkedIndex:clean}:x);const _v=validateUniverseChange(_nx);if(!_v.ok){_universeBlocked(_v.errors);return;}}TENET_RUNTIME.live=null;rebuildUniverses();const _f=instrumentFacts(sym);if(!_f)return;_f.linkedIndex=clean;_f.linkedIndexYf=yf;rebuildUniverses();saveState();renderUniverse();tenetPopulatePairBuilder();toast(clean?`${sym} linked to ${clean}${yf?' · Yahoo '+yf:''}`:`${sym} index link cleared`,'ok');}
 // ── TENET LEDGER (R3-4) ─────────────────────────────────────────────────────────────────────────
@@ -12501,7 +12507,7 @@ function tenetSaveConfigFromUI(){const t=tenetState();
   t.config.targetStepPct=Math.max(0,num('tenet-cfg-step',1.5));
   t.config.avgTriggerPct=Math.max(0,num('tenet-cfg-bid',3.14));
   t.config.selectionDistancePct=Math.min(100,Math.max(0,num('tenet-cfg-52w',5)));t.config.requireVerifiedLive=(document.getElementById('tenet-cfg-data-safety')?.value||'verified')==='verified';const raw=document.getElementById('tenet-cfg-holidays')?.value||'';t.config.extraHolidays=[...new Set(raw.split(/[\s,;]+/).map(x=>x.trim()).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)))];saveState();tenetRenderPairList();tenetRenderSignals();toast('Tenet 2.0 rule + data-safety settings saved','ok');}
-function tenetFillConfigUI(){const t=tenetState(),set=(id,v)=>{const e=document.getElementById(id);if(e&&document.activeElement!==e)e.value=v??'';};set('tenet-cfg-target',t.config.firstTargetPct);set('tenet-cfg-step',t.config.targetStepPct);set('tenet-cfg-bid',t.config.avgTriggerPct);set('tenet-cfg-52w',t.config.selectionDistancePct);set('tenet-cfg-data-safety',t.config.requireVerifiedLive===false?'fallback':'verified');set('tenet-cfg-holidays',(t.config.extraHolidays||[]).join(', '));}
+function tenetFillConfigUI(){try{renderTenetSevenStatus();}catch(e){}const t=tenetState(),set=(id,v)=>{const e=document.getElementById(id);if(e&&document.activeElement!==e)e.value=v??'';};set('tenet-cfg-target',t.config.firstTargetPct);set('tenet-cfg-step',t.config.targetStepPct);set('tenet-cfg-bid',t.config.avgTriggerPct);set('tenet-cfg-52w',t.config.selectionDistancePct);set('tenet-cfg-data-safety',t.config.requireVerifiedLive===false?'fallback':'verified');set('tenet-cfg-holidays',(t.config.extraHolidays||[]).join(', '));}
 
 // Dedicated Tenet history adapter. It deliberately does NOT call fetchHistDaily()
 // for short index windows because that shared loader has long-history thresholds.
@@ -12661,6 +12667,7 @@ async function tenetRunCoverageProbe(){
 async function tenetFetchHistory(kind,key,providerSymbol,yahooSymbol,startDate,endDate,ctx){
   // V3.21: EOD2 certified export only. Upstox/Yahoo history removed.
   const isIdx=kind==='IDX'||kind==='INDEX';
+  const _px=isIdx&&TENET_INDEX_PROXY[sanIndexName(key)];if(_px)return EOD2Store.getHist(_px,'ETF',startDate,endDate,ctx);   // R25
   return EOD2Store.getHist(isIdx?sanIndexName(key):sanSym(key),isIdx?'INDEX':'ETF',startDate,endDate,ctx);
 }
 async function tenetYahooQuote(yf){if(!yf)return null;try{const u=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yf)}`,j=await yahooProxyFetch(u,8000,'Tenet index '+yf),q=j?.quoteResponse?.result?.[0];if(!q)return null;return{price:+q.regularMarketPrice||0,open:+q.regularMarketOpen||0,high:+q.regularMarketDayHigh||0,low:+q.regularMarketDayLow||0,asOf:q.regularMarketTime?new Date(q.regularMarketTime*1000).toISOString():null,fetchedAt:Date.now(),source:'yahoo'};}catch(e){return null;}}
@@ -12679,7 +12686,7 @@ async function tenetBridgeQuote(symbol,kind){if(!S.config.marketBridgeUrl||!symb
     source:'upstox',
     quality:stamped?(ageSec>900?'stale':'fresh'):'untimestamped'};}
 function tenetBarsInWeek(h,date){const wk=tenetWeekKey(date);return Object.keys(h||{}).filter(d=>tenetWeekKey(d)===wk&&d<=date&&h[d]?.close>0&&!isSpecialSession(d)).sort();}
-async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){quote=await tenetBridgeQuote(index,'INDEX');if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+h[firstDate].open:0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
+async function tenetIndexSnapshot(index,date,{live=false,startOverride=null,endOverride=null}={}){const yf=tenetIndexYf(index),histStart=startOverride||new Date(new Date(date+'T00:00:00Z').getTime()-370*86400000).toISOString().slice(0,10),histEnd=endOverride||date,h=await tenetFetchHistory('IDX',index,index,yf,histStart,histEnd);let quote=null;if(live&&date===tenetISTNow().date){const _px=TENET_INDEX_PROXY[sanIndexName(index)];quote=await tenetBridgeQuote(_px||index,_px?'ETF':'INDEX');if(!quote&&tenetState().config.requireVerifiedLive===false)quote=await tenetYahooQuote(yf);}const ds=tenetBarsInWeek(h,date),todayQuote=quote?.price>0?quote:null;let firstDate=ds[0]||null,lastDate=ds.at(-1)||null,open=firstDate?+h[firstDate].open:0,close=lastDate?+h[lastDate].close:0;if(todayQuote){close=todayQuote.price;lastDate=date;if(!firstDate){firstDate=date;open=todayQuote.open||todayQuote.price;}else if(firstDate===date&&todayQuote.open>0)open=todayQuote.open;}
   const yearDates=Object.keys(h).filter(d=>d<=date&&d>=histStart).sort().slice(-260),highs=yearDates.map(d=>(+h[d].high||0)||0).filter(v=>v>0);if(todayQuote?.high>0)highs.push(todayQuote.high);const high52=highs.length?Math.max(...highs):0,distance=high52>0&&close>0?(high52-close)/high52*100:null,direction=close>open?'BULLISH':close<open?'BEARISH':'FLAT';return{index,yf,h,weekStart:firstDate,weekEnd:lastDate,open,close,direction,high52,distance,source:todayQuote?.source||(lastDate?h[lastDate]?._src:null),quote:todayQuote,quoteFreshness:todayQuote?_tenetQuoteFreshness(todayQuote,date):null,liveFresh:!!todayQuote&&_tenetQuoteFreshness(todayQuote,date).ok,verifiedLive:!!todayQuote&&_tenetQuoteFreshness(todayQuote,date).ok&&todayQuote.source==='upstox'};}
 // A2-1: freshness of a scanner quote object ({asOf,fetchedAt,...}) against the session date it is used for
 function _tenetQuoteFreshness(q,sessionDate){return quoteFreshness({_observedAt:q&&q.asOf?Date.parse(q.asOf):null,_fetchedAt:q&&q.fetchedAt},Date.now(),{maxAgeSec:900,sessionDate});}
@@ -15108,8 +15115,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R24';
-const APP_SOURCE_SHA256='ac074ccc43905d0fe11f20a6f2aca5d72d5b5f308e2bebc348f6baac03f1f4a0';
+const APP_BUILD='2026-11-12-v3.22-R25';
+const APP_SOURCE_SHA256='0f6054f557183a2db07022fa67ddf6804137efe18bf7517377de44619bf6cc24';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17375,12 +17382,13 @@ function initTouchGestures(){
 // Paper code NEVER writes S.lifoLedger / S.momTrades / S.momPositions, and nothing here goes to Supabase.
 // State lives in S.paper (one STATE_KEYS entry). The accounting below repeats the protected real-desk
 // functions on a ledger passed in; the harness (r18_paper.test.mjs) asserts both give the same numbers.
-function paperDefault(){return{v:1,startedAt:'',lifoCapital:0,dmCapital:0,niftyStart:0,lifoLedger:[],dmTrades:[],journal:[],navLog:[]};}
+function paperDefault(){return{v:1,startedAt:'',lifoCapital:0,dmCapital:0,tenetCapital:0,niftyStart:0,lifoLedger:[],dmTrades:[],tenetTrades:[],tenetBidWeeks:{},journal:[],navLog:[]};}
 function paperState(){
   let p=S.paper;
   if(!p||typeof p!=='object'||Array.isArray(p))p=S.paper=paperDefault();
-  for(const k of ['lifoLedger','dmTrades','journal','navLog'])if(!Array.isArray(p[k]))p[k]=[];
-  for(const k of ['lifoCapital','dmCapital','niftyStart'])p[k]=(Number.isFinite(+p[k])&&+p[k]>=0)?+p[k]:0;
+  for(const k of ['lifoLedger','dmTrades','tenetTrades','journal','navLog'])if(!Array.isArray(p[k]))p[k]=[];
+  if(!p.tenetBidWeeks||typeof p.tenetBidWeeks!=='object'||Array.isArray(p.tenetBidWeeks))p.tenetBidWeeks={};
+  for(const k of ['lifoCapital','dmCapital','tenetCapital','niftyStart'])p[k]=(Number.isFinite(+p[k])&&+p[k]>=0)?+p[k]:0;
   if(typeof p.startedAt!=='string')p.startedAt='';
   if(!p.replay||typeof p.replay!=='object'||Array.isArray(p.replay))p.replay=null;
   return p;
@@ -17434,7 +17442,7 @@ function paperDmBook(trades){
 function paperPx(sym){const a=+PRICES[sym]?.cmp;if(a>0)return a;const b=+S.momPrices?.[sym]?.current;return b>0?b:0;}
 // Cash, holdings and value of the paper account at the prices the app has now.
 function paperBook(){
-  const p=paperState(),c=S.config,L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades);
+  const p=paperState(),c=S.config,L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades),T=paperTenetBook(p.tenetTrades,p.tenetCapital);
   let lifoCash=p.lifoCapital,dmCash=p.dmCapital,lifoDeployed=0,lifoMkt=0,dmDeployed=0,dmMkt=0;
   for(const t of p.lifoLedger){const turn=t.qty*t.price;lifoCash+=t.type==='BUY'?-(turn+(t.friction||0)):(turn-(t.friction||0));}
   for(const t of p.dmTrades){const v=t.units*t.price;dmCash+=t.type==='BUY'?-(v+(t.friction||0)):(v-(t.friction||0));}
@@ -17450,8 +17458,11 @@ function paperBook(){
     dmDeployed+=pos.costBasis;dmMkt+=pos.units*cmp;
     holdings.push({eng:'DM',sym,date:pos.entryDate,units:pos.units,buy:pos.avgPrice,cmp,cost:pos.costBasis,value:pos.units*cmp,pnl:pos.units*cmp-pos.costBasis,priced:live>0});
   }
-  const lifoEq=lifoCash+lifoMkt,dmEq=dmCash+dmMkt;
-  return{L,D,holdings,lifoCash,dmCash,lifoDeployed,dmDeployed,lifoEq,dmEq,total:lifoEq+dmEq,base:p.lifoCapital+p.dmCapital,
+  let tenetDeployed=0,tenetMkt=0;
+  for(const l of T.lots){const live=paperPx(l.etf),cmp=live||l.buyPrice,cost=l.qty*l.buyPrice;tenetDeployed+=cost;tenetMkt+=l.qty*cmp;
+    holdings.push({eng:'TENET',sym:l.etf,date:l.buyDate,units:l.qty,buy:l.buyPrice,cmp,cost,value:l.qty*cmp,pnl:l.qty*cmp-cost,id:l.id,priced:live>0});}
+  const lifoEq=lifoCash+lifoMkt,dmEq=dmCash+dmMkt,tenetEq=T.cash+tenetMkt;
+  return{L,D,T,holdings,lifoCash,dmCash,lifoDeployed,dmDeployed,lifoEq,dmEq,tenetEq,tenetDeployed,total:lifoEq+dmEq+tenetEq,base:p.lifoCapital+p.dmCapital+p.tenetCapital,
     lifoCap:c.lifoCompound?Math.max(p.lifoCapital+L.realized,0):p.lifoCapital,     // sizing capital, same rule as lifoCompoundedCapital
     dmCap:c.dmCompound?Math.max(p.dmCapital+D.realized,0):p.dmCapital};
 }
@@ -17580,7 +17591,9 @@ function paperSignals(){
   const list=[];
   if(p.lifoCapital>0)for(const a of lifo.actionable)list.push({eng:'LIFO',key:paperSigKey('LIFO',a),...a});
   if(p.dmCapital>0&&dm.ok)for(const a of dm.actions)list.push({eng:'DM',key:paperSigKey('DM',a),...a});
-  return{book:b,lifo,dm,list};
+  const tenet=paperTenetPlan(b);
+  for(const a of tenet.actions)list.push({eng:'TENET',key:paperSigKey('TENET',a),...a});
+  return{book:b,lifo,dm,tenet,list};
 }
 function paperMarketOpen(){const t=tenetISTNow(),w=new Date(t.date+'T00:00:00Z').getUTCDay();return w!==0&&w!==6&&t.minutes>=555&&t.minutes<=930;}
 
@@ -17602,7 +17615,7 @@ async function paperExec(spec){
   if(!p.startedAt)return no('start the paper account first');
   if(_paperBusy)return null;
   if(typeof PRICES_STALE_GATE!=='undefined'&&PRICES_STALE_GATE)return no('prices are stale. Refresh first.');
-  const s=spec||{},eng=s.eng==='DM'?'DM':'LIFO',sym=sanSym(s.sym),action=String(s.action||'').toUpperCase(),price=+s.price,date=localDate(),ts=Date.now();
+  const s=spec||{},eng=s.eng==='DM'?'DM':s.eng==='TENET'?'TENET':'LIFO',sym=sanSym(s.sym),action=String(s.action||'').toUpperCase(),price=+s.price,date=localDate(),ts=Date.now();
   if(!sym||!(Number.isFinite(price)&&price>0))return no('symbol or price missing');
   const rid=ts+'_'+Math.random().toString(36).slice(2,7),off=!paperMarketOpen();
   let row;
@@ -17614,6 +17627,23 @@ async function paperExec(spec){
     if(type==='SELL'){const held=lots.reduce((a,l)=>a+l.units,0);if(qty>held)return no(`only ${held} unit(s) of ${sym} held`);}
     const f=lifoFriction(type,qty,price);
     row={id:'px_'+rid,date,sym,type,qty,price,turn:f.turn,friction:f.friction,linkedBuyId:type==='SELL'?sanIdToken(s.lotId||''):'',kind:type==='BUY'?(lots.length?'AVG':'BUY'):'SELL',reason:sanNote(s.reason||''),ts,off};
+  }else if(eng==='TENET'){
+    const qty=+s.qty;if(!['BUY','BID','SELL'].includes(action)||!Number.isInteger(qty)||qty<=0)return no('quantity must be a whole number');
+    if(!(p.tenetCapital>0))return no('add a Tenet amount to the paper account first');
+    const T=paperTenetBook(p.tenetTrades,p.tenetCapital),ac=tenetAssetClassOf(sym);
+    if(action==='SELL'){
+      const l=T.lots.find(x=>x.id===s.lotId),newest=tenetLatestLot(sym,T.lots);
+      if(!l||l.etf!==sym)return no('that paper Tenet lot is not open');
+      if(!newest||newest.id!==l.id)return no('LIFO lock — the newest lot of '+sym+' must sell first');
+      if(qty!==l.qty)return no('a Tenet lot sells whole');
+      const fee=tenetFriction(qty*price,'SELL',ac);
+      row={id:'pt_'+rid,date,etf:sym,type:'SELL',qty,price,fee,lotId:l.id,buyDate:l.buyDate,profit:+(qty*price-fee-(l.qty*l.buyPrice+l.buyFee)).toFixed(2),ts,off};
+    }else{
+      const fee=tenetFriction(qty*price,'BUY',ac);
+      if(T.cash<qty*price+fee)return no('not enough paper Tenet cash');
+      const n=T.lots.filter(x=>x.etf===sym).length+1,tp=tenetTarget(n);
+      row={id:'pt_'+rid,date,etf:sym,type:action,qty,price,fee,team:s.team==='RED'?'RED':'GREEN',underlying:sanIndexName(s.underlying||''),buySeq:n,targetPct:tp,targetPrice:+(price*(1+tp/100)).toFixed(4),week:tenetWeekKey(date),ts,off};
+    }
   }else{
     const type=['BUY','EXIT','SKIM','SELL'].includes(action)?action:'',units=+s.units;
     if(!type||!(Number.isFinite(units)&&units>0))return no('units must be a positive number');
@@ -17624,17 +17654,17 @@ async function paperExec(spec){
   _paperBusy=true;
   try{
     const jk=date+'|'+paperSigKey(eng,{sym,action,lotId:s.lotId});
-    const ok=await commitState(()=>{const q=paperState();(eng==='LIFO'?q.lifoLedger:q.dmTrades).push(row);const j=q.journal.find(x=>x.k===jk);if(j)j.taken=1;else q.journal.push({k:jk,d:date,eng,sym,action,price,qty:eng==='LIFO'?row.qty:row.units,taken:1});},{label:'Paper trade'});
+    const ok=await commitState(()=>{const q=paperState();(eng==='LIFO'?q.lifoLedger:eng==='TENET'?q.tenetTrades:q.dmTrades).push(row);if(eng==='TENET'&&row.type==='BID')q.tenetBidWeeks[row.week]=1;const j=q.journal.find(x=>x.k===jk);if(j)j.taken=1;else q.journal.push({k:jk,d:date,eng,sym,action,price,qty:eng==='DM'?row.units:row.qty,taken:1});},{label:'Paper trade'});
     if(!ok)return null;
   }finally{_paperBusy=false;}
-  try{toast(`📝 PAPER ${row.type} ${eng==='LIFO'?row.qty:row.units} × ${sym} @ ₹${price.toFixed(2)} — pretend money, real ledger untouched`,'ok');}catch(e){}
+  try{toast(`📝 PAPER ${eng==='TENET'?'TENET ':''}${row.type} ${eng==='DM'?row.units:row.qty} × ${sym} @ ₹${price.toFixed(2)} — pretend money, real ledger untouched`,'ok');}catch(e){}
   return row;
 }
 async function paperTake(key){
   const sg=paperSignals().list.find(x=>x.key===key);
   if(!sg){toast('That paper signal is no longer there — prices moved or it was already taken','warn');renderPaper();return null;}
   if(sg.action==='TRAILING'||sg.blocked)return null;
-  const r=await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,reason:'signal'});
+  const r=await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,team:sg.team,underlying:sg.underlying,reason:'signal'});
   renderPaper();if(r&&curStrategy==='lifo')try{renderLifo();}catch(e){}
   return r;
 }
@@ -17643,7 +17673,7 @@ async function paperTakeAll(){
   if(!keys.length){toast('No paper signals to take','warn');return 0;}
   if(!confirm(`Paper-trade all ${keys.length} signal(s) at the prices shown?\n\nPretend money only.`))return 0;
   let n=0;
-  for(const k of keys){const sg=paperSignals().list.find(x=>x.key===k);if(!sg||sg.blocked)continue;if(await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,reason:'signal'}))n++;}
+  for(const k of keys){const sg=paperSignals().list.find(x=>x.key===k);if(!sg||sg.blocked)continue;if(await paperExec({eng:sg.eng,sym:sg.sym,action:sg.action,qty:sg.qty,units:sg.units,price:sg.price,lotId:sg.lotId,team:sg.team,underlying:sg.underlying,reason:'signal'}))n++;}
   renderPaper();return n;
 }
 // The "Paper" button on a real Act Today card: takes the paper account's own signal for that ETF, at paper size.
@@ -17654,9 +17684,9 @@ async function paperTakeFromLive(sym,action){
   return paperTake(sg.key);
 }
 async function paperStart(){
-  const lc=parseFloat(document.getElementById('paper-lifo-cap')?.value||0)||0,dc=parseFloat(document.getElementById('paper-dm-cap')?.value||0)||0;
-  if(lc<0||dc<0||!(lc+dc>0)){toast('Enter a paper amount for at least one strategy','err');return false;}
-  const ok=await commitState(()=>{S.paper={...paperDefault(),startedAt:localDate(),lifoCapital:lc,dmCapital:dc,niftyStart:+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0};},{label:'Paper account'});
+  const lc=parseFloat(document.getElementById('paper-lifo-cap')?.value||0)||0,dc=parseFloat(document.getElementById('paper-dm-cap')?.value||0)||0,tc=parseFloat(document.getElementById('paper-tenet-cap')?.value||0)||0;
+  if(lc<0||dc<0||tc<0||!(lc+dc+tc>0)){toast('Enter a paper amount for at least one strategy','err');return false;}
+  const ok=await commitState(()=>{S.paper={...paperDefault(),startedAt:localDate(),lifoCapital:lc,dmCapital:dc,tenetCapital:tc,niftyStart:+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0};},{label:'Paper account'});
   if(ok){toast('📝 Paper account started — pretend money only','ok');renderPaper();try{renderLifo();}catch(e){}}
   return ok;
 }
@@ -17667,11 +17697,12 @@ async function paperReset(){
   return ok;
 }
 async function paperUndoLast(){
-  const p=paperState(),all=[...p.lifoLedger.map(t=>({t,eng:'LIFO'})),...p.dmTrades.map(t=>({t,eng:'DM'}))].sort((a,b)=>(b.t.ts||0)-(a.t.ts||0));
+  const p=paperState(),all=[...p.lifoLedger.map((t,i)=>({t,eng:'LIFO',i})),...p.dmTrades.map((t,i)=>({t,eng:'DM',i})),...p.tenetTrades.map((t,i)=>({t,eng:'TENET',i}))].sort((a,b)=>(b.t.ts||0)-(a.t.ts||0)||b.i-a.i);   // same timestamp: the later entry is the newer one
   if(!all.length){toast('No paper trades to undo','warn');return false;}
   const {t,eng}=all[0];
-  if(!confirm(`Undo the last paper trade?\n\n${t.type} ${eng==='LIFO'?t.qty:t.units} × ${eng==='LIFO'?t.sym:t.etf} @ ₹${(+t.price).toFixed(2)} on ${t.date}`))return false;
-  const ok=await commitState(()=>{const q=paperState();if(eng==='LIFO')q.lifoLedger=q.lifoLedger.filter(x=>x.id!==t.id);else q.dmTrades=q.dmTrades.filter(x=>x.id!==t.id);},{label:'Paper undo'});
+  if(!confirm(`Undo the last paper trade?\n\n${t.type} ${eng==='DM'?t.units:t.qty} × ${eng==='LIFO'?t.sym:t.etf} @ ₹${(+t.price).toFixed(2)} on ${t.date}`))return false;
+  if(eng==='TENET'&&t.type!=='SELL'&&p.tenetTrades.some(x=>x.lotId===t.id)){toast('Undo the sell of that lot first','warn');return false;}
+  const ok=await commitState(()=>{const q=paperState();if(eng==='LIFO')q.lifoLedger=q.lifoLedger.filter(x=>x.id!==t.id);else if(eng==='TENET'){q.tenetTrades=q.tenetTrades.filter(x=>x.id!==t.id);if(t.type==='BID'&&t.week)delete q.tenetBidWeeks[t.week];}else q.dmTrades=q.dmTrades.filter(x=>x.id!==t.id);},{label:'Paper undo'});
   if(ok)renderPaper();
   return ok;
 }
@@ -17684,7 +17715,7 @@ function paperTick(sig){
   for(const a of sig.list){
     if(a.action==='TRAILING'||a.blocked)continue;
     const k=today+'|'+a.key;
-    if(!p.journal.some(x=>x.k===k)){p.journal.push({k,d:today,eng:a.eng,sym:a.sym,action:a.action,price:a.price,qty:a.eng==='LIFO'?a.qty:a.units,taken:0});dirty=true;}
+    if(!p.journal.some(x=>x.k===k)){p.journal.push({k,d:today,eng:a.eng,sym:a.sym,action:a.action,price:a.price,qty:a.eng==='DM'?a.units:a.qty,taken:0});dirty=true;}
   }
   const live=new Set(sig.list.filter(a=>a.action!=='TRAILING'&&!a.blocked).map(a=>today+'|'+a.key));
   for(const j of p.journal){if(j.d!==today||j.taken)continue;const g=live.has(j.k)?0:1;if((j.gone||0)!==g){j.gone=g;dirty=true;}}
@@ -17693,10 +17724,10 @@ function paperTick(sig){
   if(!(p.niftyStart>0)&&nifty>0){p.niftyStart=nifty;dirty=true;}
   const priced=sig.book.holdings.every(h=>h.priced);
   if(priced){
-    const row={d:today,lifo:+sig.book.lifoEq.toFixed(2),dm:+sig.book.dmEq.toFixed(2),nifty};
+    const row={d:today,lifo:+sig.book.lifoEq.toFixed(2),dm:+sig.book.dmEq.toFixed(2),...(p.tenetCapital>0?{tenet:+sig.book.tenetEq.toFixed(2)}:{}),nifty};
     const i=p.navLog.findIndex(x=>x.d===today);
     if(i<0){p.navLog.push(row);dirty=true;}
-    else if(p.navLog[i].lifo!==row.lifo||p.navLog[i].dm!==row.dm||p.navLog[i].nifty!==row.nifty){p.navLog[i]=row;if(Date.now()-_paperSavedAt>300000)dirty=true;}
+    else if(p.navLog[i].lifo!==row.lifo||p.navLog[i].dm!==row.dm||(p.navLog[i].tenet||0)!==(row.tenet||0)||p.navLog[i].nifty!==row.nifty){p.navLog[i]=row;if(Date.now()-_paperSavedAt>300000)dirty=true;}
   }
   if(dirty){_paperSavedAt=Date.now();try{saveState();}catch(e){}}
   return dirty;
@@ -17706,21 +17737,22 @@ function paperStats(sig){
   const nifty=+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0;
   const days=p.startedAt?Math.max(0,Math.round((new Date(today+'T00:00:00Z')-new Date(p.startedAt+'T00:00:00Z'))/86400000)):0;
   const jj=p.journal.filter(j=>!j.gone),past=jj.filter(j=>j.d<today),seen=jj.length,taken=jj.filter(j=>j.taken).length;
-  let pk=0,mdd=0;for(const r of p.navLog){const v=r.lifo+r.dm;if(v>pk)pk=v;if(pk>0)mdd=Math.max(mdd,(1-v/pk)*100);}
+  let pk=0,mdd=0;for(const r of p.navLog){const v=r.lifo+r.dm+(+r.tenet||0);if(v>pk)pk=v;if(pk>0)mdd=Math.max(mdd,(1-v/pk)*100);}
   return{base:b.base,total:b.total,pnl:b.total-b.base,retPct:b.base>0?(b.total/b.base-1)*100:0,
-    niftyPct:(p.niftyStart>0&&nifty>0)?(nifty/p.niftyStart-1)*100:null,days,realized:b.L.realized+b.D.realized,
+    niftyPct:(p.niftyStart>0&&nifty>0)?(nifty/p.niftyStart-1)*100:null,days,realized:b.L.realized+b.D.realized+b.T.realized,
     seen,taken,missed:past.filter(j=>!j.taken).length,adherencePct:seen?taken/seen*100:null,maxDdPct:mdd,logDays:p.navLog.length,tax:paperTax(b).totalTax};
 }
 function paperExportCSV(){
   const p=paperState(),L=paperLifoLots(p.lifoLedger),D=paperDmBook(p.dmTrades);
-  const rows=[['AlphaDesk — PAPER account (pretend money)'],['Started',p.startedAt,'LIFO capital',p.lifoCapital,'DM capital',p.dmCapital],[],
+  const rows=[['AlphaDesk — PAPER account (pretend money)'],['Started',p.startedAt,'LIFO capital',p.lifoCapital,'DM capital',p.dmCapital,'Tenet capital',p.tenetCapital],[],
     ['TRADES'],['Date','Engine','ETF','Type','Units','Price','Value','Costs','Realised P&L','After hours']];
   for(const t of p.lifoLedger)rows.push([t.date,'LIFO',t.sym,t.kind||t.type,t.qty,t.price,(t.qty*t.price).toFixed(2),(t.friction||0).toFixed(2),t.type==='SELL'?(L.profit[t.id]??''):'',t.off?'yes':'']);
   for(const t of p.dmTrades)rows.push([t.date,'DM',t.etf,t.type,t.units,t.price,(t.units*t.price).toFixed(2),(t.friction||0).toFixed(2),t.type!=='BUY'&&D.pnl[t.id]!=null?D.pnl[t.id].toFixed(2):'',t.off?'yes':'']);
+  for(const t of p.tenetTrades)rows.push([t.date,'TENET',t.etf,t.type,t.qty,t.price,(t.qty*t.price).toFixed(2),(+t.fee||0).toFixed(2),t.type==='SELL'?(+t.profit).toFixed(2):'',t.off?'yes':'']);
   rows.push([],['SIGNAL JOURNAL'],['Date','Engine','ETF','Signal','Price','Units','Taken']);
   for(const j of p.journal)rows.push([j.d,j.eng,j.sym,j.action,j.price,j.qty,j.taken?'yes':'no']);
-  rows.push([],['DAILY VALUE'],['Date','LIFO Rs','DM Rs','Total Rs','NIFTYBEES']);
-  for(const r of p.navLog)rows.push([r.d,r.lifo,r.dm,(r.lifo+r.dm).toFixed(2),r.nifty||'']);
+  rows.push([],['DAILY VALUE'],['Date','LIFO Rs','DM Rs','Tenet Rs','Total Rs','NIFTYBEES']);
+  for(const r of p.navLog)rows.push([r.d,r.lifo,r.dm,r.tenet||'',(r.lifo+r.dm+(+r.tenet||0)).toFixed(2),r.nifty||'']);
   dlCSV(rows,'paper_account');
   return rows;
 }
@@ -17728,7 +17760,7 @@ function paperExportCSV(){
 // ── Screen ───────────────────────────────────────────────────────────────────────────────────
 function paperChartSvg(p){
   const pts=p.navLog.filter(r=>r.nifty>0&&p.niftyStart>0);if(pts.length<2)return '';
-  const base=p.lifoCapital+p.dmCapital,a=pts.map(r=>r.lifo+r.dm),n=pts.map(r=>base*r.nifty/p.niftyStart),all=[...a,...n,base];
+  const base=p.lifoCapital+p.dmCapital+p.tenetCapital,a=pts.map(r=>r.lifo+r.dm+(+r.tenet||0)),n=pts.map(r=>base*r.nifty/p.niftyStart),all=[...a,...n,base];
   const lo=Math.min(...all),hi=Math.max(...all),W=600,H=140,X=i=>(i/(pts.length-1))*W,Y=v=>hi===lo?H/2:H-4-((v-lo)/(hi-lo))*(H-8);
   const line=s=>s.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:140px;display:block"><line x1="0" x2="${W}" y1="${Y(base).toFixed(1)}" y2="${Y(base).toFixed(1)}" stroke="var(--wire)" stroke-dasharray="4 4"/><polyline fill="none" stroke="var(--fog)" stroke-width="1.5" points="${line(n)}"/><polyline fill="none" stroke="var(--violet)" stroke-width="2" points="${line(a)}"/></svg>
@@ -17744,6 +17776,7 @@ function renderPaper(){
       <div class="form-row">
         <div class="form-group"><label class="form-label">Paper LIFO amount ₹</label><input class="form-input" id="paper-lifo-cap" type="number" min="0" value="${+c.capital||0}"/></div>
         <div class="form-group"><label class="form-label">Paper DM amount ₹</label><input class="form-input" id="paper-dm-cap" type="number" min="0" value="${+c.momCapital||0}"/></div>
+        <div class="form-group"><label class="form-label">Paper Tenet amount ₹ (optional)</label><input class="form-input" id="paper-tenet-cap" type="number" min="0" value="0"/></div>
       </div>
       <button class="action-btn skim-btn" id="paper-start-btn" onclick="paperStart()" style="padding:9px 20px">Start paper account</button>
       <div style="font-size:10px;color:var(--fog);margin-top:10px;line-height:1.6">Limits: fills use the last price the app has (the backtest fills at the next day's open) · signals are only recorded on days you open the app and refresh prices · idle paper DM cash earns nothing · the paper account stays on this device and in the full backup.</div></div>`;
@@ -17759,27 +17792,31 @@ function renderPaper(){
     <div class="stat-card"><div class="stat-label">Signals taken</div><div class="stat-val">${st.taken} / ${st.seen}</div><div class="stat-sub">${st.adherencePct==null?'no signals recorded yet':`${st.adherencePct.toFixed(0)}% followed · ${st.missed} missed on earlier days`}</div></div>
     <div class="stat-card"><div class="stat-label">LIFO paper</div><div class="stat-val azure">${fmtINR(b.lifoEq)}</div><div class="stat-sub">${fmtINR(b.lifoDeployed)} in lots · ${fmtINR(b.lifoCash)} cash</div></div>
     <div class="stat-card"><div class="stat-label">DM paper</div><div class="stat-val azure">${fmtINR(b.dmEq)}</div><div class="stat-sub">${fmtINR(b.dmDeployed)} in positions · ${fmtINR(b.dmCash)} cash</div></div>
+    ${p.tenetCapital>0?`<div class="stat-card" id="paper-tenet-stat"><div class="stat-label">Tenet paper</div><div class="stat-val azure">${fmtINR(b.tenetEq)}</div><div class="stat-sub">${fmtINR(b.tenetDeployed)} in ${b.T.lots.length} lot(s) · ${fmtINR(b.T.cash)} cash</div></div>`:''}
   </div>`;
   const card=a=>{
-    const isL=a.eng==='LIFO',sell=a.action==='SELL'||a.action==='EXIT',trail=a.action==='TRAILING',units=isL?a.qty:a.units;
-    const badge=trail?'<span class="badge b-hold">TRAILING</span>':a.action==='SELL'?'<span class="badge b-target">TARGET HIT</span>':a.action==='EXIT'?'<span class="badge b-sell">EXIT</span>':a.action==='SKIM'?'<span class="badge b-skim">SKIM</span>':a.action==='AVG'?'<span class="badge b-avg">AVG DOWN</span>':'<span class="badge b-new">NEW BUY</span>';
+    const isL=a.eng==='LIFO',isT=a.eng==='TENET',sell=a.action==='SELL'||a.action==='EXIT',trail=a.action==='TRAILING',units=a.eng==='DM'?a.units:a.qty;
+    const badge=trail?'<span class="badge b-hold">TRAILING</span>':a.action==='SELL'?'<span class="badge b-target">TARGET HIT</span>':a.action==='EXIT'?'<span class="badge b-sell">EXIT</span>':a.action==='SKIM'?'<span class="badge b-skim">SKIM</span>':a.action==='AVG'?'<span class="badge b-avg">AVG DOWN</span>':a.action==='BID'?'<span class="badge b-avg">BID</span>':`<span class="badge b-new">${isT?escapeHtml(a.team||'')+' ':''}NEW BUY</span>`;
     const meta=isL?(sell||trail?`<span>Gain <b class="profit">+${(+a.gainPct).toFixed(2)}%</b></span><span>Net ₹${(+a.net).toFixed(0)}</span>`:`<span>52WL dist <b class="profit">${(+a.prox).toFixed(2)}%</b></span>${a.action==='AVG'?`<span>Fall from last lot <b>${(+a.fallFromLast).toFixed(1)}%</b></span>`:''}<span>Lots <b>${a.lotCount||0}/${sig.lifo.maxLots}</b></span>`):`<span>${escapeHtml(a.note||'')}</span>`;
     const btn=trail?'<button class="action-btn sm" disabled style="font-size:10px">Holding for more</button>'
       :a.blocked?`<span style="font-size:10px;color:var(--gold)">${escapeHtml(a.blocked)}</span>`
-      :`<button class="action-btn ${sell?'sell-btn':a.action==='SKIM'?'skim-btn':'buy-btn'} sm" ${stale?'disabled title="Prices are stale — refresh first"':''} onclick="paperTake(${htmlJsArg(a.key)})">📝 Paper ${sell?(isL?'Sell':'Exit'):a.action==='SKIM'?'Skim':'Buy'} ${units}× ₹${(+a.price).toFixed(2)}</button>`;
+      :`<button class="action-btn ${sell?'sell-btn':a.action==='SKIM'?'skim-btn':'buy-btn'} sm" ${stale?'disabled title="Prices are stale — refresh first"':''} onclick="paperTake(${htmlJsArg(a.key)})">📝 Paper ${sell?(a.action==='EXIT'?'Exit':'Sell'):a.action==='SKIM'?'Skim':a.action==='BID'?'Bid':'Buy'} ${units}× ₹${(+a.price).toFixed(2)}</button>`;
     return `<div class="act-card ${sell?'act-sell':trail?'act-trail':a.action==='AVG'?'act-avg':''}"><div class="act-card-head"><div><div class="act-sym">${escapeHtml(a.sym)} ${badge} <span style="font-size:10px;color:var(--fog)">${a.eng}${a.rank?' · #'+a.rank:''}</span></div>${a.name?`<div class="act-name">${escapeHtml(a.name)}</div>`:''}</div>
       <div style="text-align:right;flex-shrink:0"><div style="font-size:16px;font-weight:800;color:var(--white)">₹${(+a.price).toFixed(2)}</div>${a.chg!=null&&Number.isFinite(+a.chg)?`<div class="${pc(+a.chg)}" style="font-size:11px;font-weight:700">${sg(+a.chg)}</div>`:''}</div></div>
       <div class="act-meta">${meta}</div><div class="act-actions">${btn}</div></div>`;
   };
   const can=sig.list.filter(a=>a.action!=='TRAILING'&&!a.blocked).length;
+  const tenetNote=p.tenetCapital>0?`<div id="paper-tenet-note" style="font-size:10px;color:var(--fog);margin:6px 0">Tenet: ${sig.tenet.info||''} <button class="icon-btn" style="font-size:10px;padding:2px 8px" onclick="paperTenetScan()">↻ Refresh Tenet scanner</button></div>`
+    :(!p.tenetTrades.length?`<div id="paper-tenet-add" style="font-size:11px;color:var(--fog);margin:8px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">Add Tenet to this paper account: <input class="form-input" id="paper-tenet-cap" type="number" min="0" placeholder="₹ amount" style="width:120px"/><button class="icon-btn" onclick="paperAddTenet()">Add</button></div>`:'');
   const dmNote=!(p.dmCapital>0)?'':!sig.dm.ok?`<div style="font-size:11px;color:var(--gold);margin:6px 0">DM: ${escapeHtml(sig.dm.reason)}</div>`
     :`<div style="font-size:10px;color:var(--fog);margin:6px 0">DM signal data date ${escapeHtml(sig.dm.asOf||'—')} · slot ${fmtINR(sig.dm.slotVal)} × ${sig.dm.slots}${sig.dm.liquidSlots>0?` · ${sig.dm.liquidSlots} slot(s) stay in cash (signal says LIQUIDBEES)`:''} · ${sig.dm.lastTrade?`last paper DM trade ${escapeHtml(sig.dm.lastTrade)} (${sig.dm.sessionsSince} session(s) ago; the backtest rebalances every ${sig.dm.every}) — ${sig.dm.due?'<b style="color:var(--go)">rebalance due</b>':'<b style="color:var(--gold)">not due yet</b>'}`:'no paper DM trades yet'}</div>`;
   const lifoNote=!(p.lifoCapital>0)?'':`<div style="font-size:10px;color:var(--fog);margin:6px 0">LIFO: ${sig.lifo.ranked} ETF(s) ranked · slot ${fmtINR(sig.lifo.slot)} · target ${sig.lifo.targetPct}%${sig.lifo.blocked.length?` · ${sig.lifo.blocked.length} blocked (${escapeHtml(sig.lifo.blocked[0].sym+': '+sig.lifo.blocked[0].blockReason)})`:''}${!sig.lifo.ranked?' · refresh prices to load signals':''}${sig.lifo.noData.length?`<br><span style="color:var(--gold)">${sig.lifo.noData.length} of ${sig.lifo.noData.length+sig.lifo.ranked+(sig.lifo.lowVol||0)} LIFO ETF(s) not ranked — no live price or no verified 52-week low: ${escapeHtml(sig.lifo.noData.join(', '))}. Tap Refresh; ETFs new to the app need one refresh to load their history.</span>`:''}${sig.lifo.lowVol?`<br>${sig.lifo.lowVol} left out for volume below the minimum.`:''}</div>`;
   const signals=`<div class="section-head"><div class="section-title">⚡ Paper signals now <span class="section-count" id="paper-signal-count">${sig.list.length}</span></div>${can>1?`<button class="icon-btn" id="paper-take-all" onclick="paperTakeAll()">📝 Take all ${can}</button>`:''}</div>
     ${stale?'<div style="font-size:11px;color:var(--stop);margin-bottom:8px">Prices are stale — paper fills are switched off until you refresh.</div>':''}
-    <div id="paper-signal-list">${sig.list.length?sig.list.map(card).join(''):'<div class="empty" style="padding:18px 0"><div class="empty-icon">✅</div><div style="font-size:12px;color:var(--mist)">No paper action right now</div></div>'}</div>${lifoNote}${dmNote}`;
+    <div id="paper-signal-list">${sig.list.length?sig.list.map(card).join(''):'<div class="empty" style="padding:18px 0"><div class="empty-icon">✅</div><div style="font-size:12px;color:var(--mist)">No paper action right now</div></div>'}</div>${lifoNote}${dmNote}${tenetNote}`;
   const hold=b.holdings.length?`<div style="overflow-x:auto"><table><thead><tr><th>Engine</th><th>ETF</th><th>Since</th><th class="r">Units</th><th class="r">Buy ₹</th><th class="r">Now ₹</th><th class="r">Value</th><th class="r">P&amp;L</th></tr></thead><tbody>${b.holdings.map(h=>`<tr><td>${h.eng}</td><td class="sym-cell">${escapeHtml(h.sym)}</td><td class="mono neutral">${escapeHtml(h.date||'')}</td><td class="r mono">${+(+h.units).toFixed(3)}</td><td class="r mono">${(+h.buy).toFixed(2)}</td><td class="r mono">${h.priced?(+h.cmp).toFixed(2):'—'}</td><td class="r mono">${fmtINR(h.value)}</td><td class="r mono ${pc(h.pnl)}">${h.pnl>=0?'+':''}${fmtINR(h.pnl)} (${h.cost>0?sg(h.pnl/h.cost*100):'—'})</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">No paper holdings yet</div>';
   const trades=[...p.lifoLedger.map(t=>({d:t.date,ts:t.ts||0,eng:'LIFO',sym:t.sym,type:t.kind||t.type,u:t.qty,price:t.price,fr:t.friction||0,pnl:t.type==='SELL'?b.L.profit[t.id]:null,off:t.off})),
+    ...p.tenetTrades.map(t=>({d:t.date,ts:t.ts||0,eng:'TENET',sym:t.etf,type:t.type,u:t.qty,price:t.price,fr:+t.fee||0,pnl:t.type==='SELL'?b.T.profit[t.id]:null,off:t.off})),
     ...p.dmTrades.map(t=>({d:t.date,ts:t.ts||0,eng:'DM',sym:t.etf,type:t.type,u:t.units,price:t.price,fr:t.friction||0,pnl:t.type!=='BUY'?b.D.pnl[t.id]:null,off:t.off}))].sort((x,y)=>y.ts-x.ts);
   const ledger=trades.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Type</th><th class="r">Units</th><th class="r">Price</th><th class="r">Costs</th><th class="r">Realised</th></tr></thead><tbody>${trades.slice(0,200).map(t=>`<tr><td class="mono neutral">${escapeHtml(t.d)}${t.off?' <span title="Filled outside market hours at the last price">🌙</span>':''}</td><td>${t.eng}</td><td class="sym-cell">${escapeHtml(t.sym)}</td><td>${escapeHtml(t.type)}</td><td class="r mono">${+(+t.u).toFixed(3)}</td><td class="r mono">₹${(+t.price).toFixed(2)}</td><td class="r mono neutral">${(+t.fr).toFixed(2)}</td><td class="r mono ${t.pnl==null?'':pc(t.pnl)}">${t.pnl==null?'—':(t.pnl>=0?'+':'')+fmtINR(t.pnl)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">No paper trades yet</div>';
   const jr=[...p.journal].reverse().slice(0,60),today=localDate();
@@ -17791,7 +17828,7 @@ function renderPaper(){
     ${paperReplayCard(sig)}${paperGoLiveCard(sig)}
     <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">📋 Paper ledger</div><div style="display:flex;gap:6px"><button class="icon-btn" onclick="paperUndoLast()">↶ Undo last</button><button class="icon-btn" onclick="paperExportCSV()">⬇ CSV</button></div></div>${ledger}</div>
     <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">🧭 Signal journal</div>${journal}</div>
-    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="danger-btn" id="paper-reset-btn" onclick="paperReset()">Reset paper account</button><span style="font-size:10px;color:var(--fog)">Uses your current LIFO and DM settings. Fills use the last price the app has; costs are the same as the real desk.</span></div>`;
+    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="danger-btn" id="paper-reset-btn" onclick="paperReset()">Reset paper account</button><span style="font-size:10px;color:var(--fog)">Uses your current LIFO, DM and Tenet settings. Fills use the last price the app has; costs are the same as the real desk.</span></div>`;
 }
 
 // ── R19: tax estimate, rules replay + reconciliation, go-live checklist ───────────────────────────
@@ -17799,7 +17836,7 @@ function renderPaper(){
 function paperTax(book){
   const b=book||paperBook(),ac=s=>(S.universe||[]).find(e=>e.sym===s)?.assetClass||'equity';
   const hd=(a,z)=>a&&z?Math.max(0,Math.round((new Date(z)-new Date(a))/86400000)):0;
-  const recs=[...b.L.closed,...b.D.closed].map((x,i)=>({id:'ptax-'+i,strategy:'DM',sym:x.sym,sellDate:x.sellDate,buyDate:x.buyDate||'',netPnl:x.pnl,holdDays:hd(x.buyDate,x.sellDate),assetClass:ac(x.sym)}));
+  const recs=[...b.L.closed,...b.D.closed,...(b.T?b.T.closed:[])].map((x,i)=>({id:'ptax-'+i,strategy:'DM',sym:x.sym,sellDate:x.sellDate,buyDate:x.buyDate||'',netPnl:x.pnl,holdDays:hd(x.buyDate,x.sellDate),assetClass:ac(x.sym)}));
   const r=computeBtTax(recs);
   return{totalTax:r.totalTax,rows:r.rows,count:recs.length};
 }
@@ -17898,7 +17935,8 @@ const PAPER_GO_LIVE=Object.freeze({minDays:60,minTrades:20,minFollowPct:90,maxTr
 function paperGoLive(sig){
   const p=paperState(),G=PAPER_GO_LIVE,st=paperStats(sig),rp=p.replay,today=localDate(),trades=p.lifoLedger.length+p.dmTrades.length;
   const stale=rp&&rp.at===today&&(rp.errors||[]).length?'replay incomplete — see Rules replay':'run the rules replay today';
-  const fresh=!!rp&&rp.at===today&&!(rp.errors||[]).length,track=fresh&&st.base>0?(st.total-rp.total)/st.base*100:null;
+  const _tb=st.base-p.tenetCapital,_tv=st.total-(sig&&sig.book?sig.book.tenetEq||0:0);   // R25: the replay covers LIFO + DM; Tenet is left out of this check
+  const fresh=!!rp&&rp.at===today&&!(rp.errors||[]).length,track=fresh&&_tb>0?(_tv-rp.total)/_tb*100:null;
   const checks=[
     {id:'days',label:`Ran for at least ${G.minDays} days`,value:`${st.days} day(s)`,pass:st.days>=G.minDays},
     {id:'trades',label:`At least ${G.minTrades} paper trades`,value:String(trades),pass:trades>=G.minTrades},
@@ -18025,6 +18063,89 @@ function fillBacktestsFromSettings(){
   {const el=document.getElementById('bt-dm-compound');if(el)el.checked=!!c.dmCompound;}
   return true;
 }
+
+// ── R25: TENET — the 7 tested pairs (Apd 2026-11-12: two most-traded ETFs per index, from the master ETF sheet) ──────
+const TENET_SEVEN_PAIRS=Object.freeze([
+  ['NIFTY 50','NIFTYBEES','NIFTYIETF','equity'],['NIFTY BANK','BANKBEES','BANKIETF','equity'],['NIFTY FINANCIAL SERVICES','BFSI','','equity'],
+  ['NIFTY MIDCAP 150','MID150BEES','MIDCAPETF','equity'],['GOLD','GOLDBEES','GOLDIETF','gold'],['SILVER','SILVERBEES','TATSILV','gold'],['NIFTY NEXT 50','JUNIORBEES','NEXT50IETF','equity']]);
+const TENET_SEVEN_CONFIG=Object.freeze({newBuyAllocPct:80,bidAllocPct:20});
+function tenetSevenPlan(st){
+  st=st||S;const t=(st.tenet)||{},want=new Set(TENET_SEVEN_PAIRS.flatMap(p=>[p[1],p[2]]).filter(Boolean));
+  const held=[...new Set((t.holdings||[]).map(h=>h&&h.etf).filter(Boolean))].filter(e=>!want.has(e));
+  const known=new Set((st.instruments||[]).map(e=>String(e&&e.sym||'').toUpperCase()));
+  return{add:[...want].filter(x=>!known.has(x)),heldOutside:held};
+}
+async function applyTenetSevenPairs(){
+  rebuildUniverses();
+  const pl=tenetSevenPlan();
+  if(pl.heldOutside.length){toast(`⛔ Close the Tenet lots in ${pl.heldOutside.join(', ')} first — they are not in the 7 pairs`,'err');return false;}
+  if(!confirm(`Use the 7 tested Tenet pairs?\n\n${TENET_SEVEN_PAIRS.map(p=>`${p[0]}: GREEN ${p[1]}${p[2]?' · RED '+p[2]:''}`).join('\n')}\n\nGOLD and SILVER read their weekly candle from GOLDBEES / SILVERBEES.\nPools: new buys ${TENET_SEVEN_CONFIG.newBuyAllocPct}% · bids ${TENET_SEVEN_CONFIG.bidAllocPct}%.`+(pl.add.length?`\n\nNew to the app: ${pl.add.join(', ')}`:'')))return false;
+  const ok=await commitState(()=>{
+    for(const [ix,g,r,ac] of TENET_SEVEN_PAIRS)for(const sym of [g,r].filter(Boolean)){
+      if(!instrumentFacts(sym))addInstrumentRow({sym,yf:sym+'.NS',name:sym,assetClass:ac},[]);
+      const f=instrumentFacts(sym);f.linkedIndex=ix;f.linkedIndexYf='';
+    }
+    rebuildUniverses();
+    const t=tenetState();t.pairs=TENET_SEVEN_PAIRS.map(([underlying,green,red])=>({underlying,green,red,indexYf:''}));
+    Object.assign(t.config,TENET_SEVEN_CONFIG);
+    const errs=tenetValidatePairs();if(errs.length){toast('⛔ '+errs.slice(0,2).join(' · '),'err');return false;}
+  },{label:'Tenet 7 pairs'});
+  if(!ok)return false;
+  try{TENET_RUNTIME.live=null;tenetRenderPairList();tenetFillConfigUI();renderTenetSevenStatus();}catch(e){}
+  try{await syncUniverseToSB();}catch(e){}
+  toast('✅ Tenet now uses the 7 tested pairs (80/20 pools). Tap Refresh Tenet scanner on Friday after 3 PM.','ok');
+  return true;
+}
+function tenetSevenActive(){const t=tenetState(),cur=(t.pairs||[]).map(p=>[p.underlying,p.green,p.red||''].join('|')).sort().join(',');return cur===TENET_SEVEN_PAIRS.map(p=>[p[0],p[1],p[2]].join('|')).sort().join(',');}
+function renderTenetSevenStatus(){const el=document.getElementById('tenet-seven-status');if(el)el.innerHTML=tenetSevenActive()?'<span style="color:var(--go)">✓ In use</span>':'<span style="color:var(--fog)">Not in use</span>';
+  const pe=document.getElementById('tenet-pool-text');if(pe){const c=tenetState().config;pe.textContent=`NEW pool ${c.newBuyAllocPct}% · BID pool ${c.bidAllocPct}%`;}}
+
+// ── R25: TENET PAPER ACCOUNT ────────────────────────────────────────────────────────────────────────────
+// Same rules as the Tenet engine: weekly BUY/BID only in the final-session window after 3 PM, sized from the paper Tenet
+// amount (new pool / active ETFs), one BID a week (largest fall), each lot sells at its own target, newest lot first.
+function paperTenetBook(trades,capital){
+  const lots=[],closed=[],profit={};let cash=+capital||0,realized=0;
+  for(const t of [...(trades||[])].sort((a,b)=>(a.ts||0)-(b.ts||0))){
+    if(t.type==='BUY'||t.type==='BID'){cash-=t.qty*t.price+(+t.fee||0);lots.push({id:t.id,etf:t.etf,team:t.team,underlying:t.underlying,buyDate:t.date,buyPrice:t.price,qty:t.qty,buySeq:t.buySeq,targetPct:t.targetPct,targetPrice:t.targetPrice,isBid:t.type==='BID',buyFee:+t.fee||0});}
+    else if(t.type==='SELL'){const i=lots.findIndex(l=>l.id===t.lotId);if(i<0)continue;const l=lots[i];cash+=t.qty*t.price-(+t.fee||0);
+      const pr=t.qty*t.price-(+t.fee||0)-(l.qty*l.buyPrice+l.buyFee);profit[t.id]=pr;realized+=pr;closed.push({sym:l.etf,buyDate:l.buyDate,sellDate:t.date,qty:t.qty,pnl:pr});lots.splice(i,1);}
+  }
+  return{lots,closed,profit,realized,cash};
+}
+function paperTenetPlan(book){
+  const p=paperState(),t=tenetState(),cap=p.tenetCapital,b=book||paperBook(),T=b.T,out={ok:false,actions:[],info:''};
+  if(!(cap>0))return out;
+  if(!(t.pairs||[]).length){out.info='Set up the Tenet pairs first: Tenet → Config → Use the 7 tested pairs.';return out;}
+  out.ok=true;
+  for(const etf of [...new Set(T.lots.map(l=>l.etf))]){                      // daily: target exits, newest lot of each ETF first
+    const l=tenetLatestLot(etf,T.lots),px=paperPx(etf);
+    if(l&&px>0&&px>=l.targetPrice)out.actions.push({sym:etf,action:'SELL',qty:l.qty,price:px,lotId:l.id,note:`Lot ${l.buySeq} target ${(+l.targetPct).toFixed(2)}% hit (bought ₹${(+l.buyPrice).toFixed(2)})`});
+  }
+  const gate=tenetLiveGate(),rows=tenetLiveRows();
+  if(!gate.actionable){out.info=`Weekly BUY/BID: ${gate.blockedReason||'outside the action window'} — sells are checked every day.`;return out;}
+  if(!rows||Date.now()-TENET_RUNTIME.liveAt>600000){out.info='Weekly window is open — tap “Refresh Tenet scanner” to load this week’s index candles.';out.needScan=true;return out;}
+  const wk=tenetWeekKey(gate.date),sig=tenetSignalsFromPairs(rows,{actionable:true,priceMap:PRICES,holdings:T.lots,weekKey:wk,bidLocks:p.tenetBidWeeks});
+  const n=tenetActiveEtfs(t.pairs).length,per=n?cap*t.config.newBuyAllocPct/100/n:0,newMax=cap*t.config.newBuyAllocPct/100,bidMax=cap*t.config.bidAllocPct/100;
+  let usage=tenetPoolUsage(T.lots),cash=T.cash;
+  for(const c of sig.buys){const q=Math.floor(per/c.price),cost=q*c.price,fee=tenetFriction(cost,'BUY',tenetAssetClassOf(c.etf));
+    const a={sym:c.etf,action:'BUY',qty:q,price:c.price,team:c.team,underlying:c.underlying,note:`${c.team} · ${c.underlying} ${String(c.direction||'').toLowerCase()} week`};
+    if(q<1)a.blocked='slot smaller than one unit';else if(usage.newUsed+cost>newMax+1e-6)a.blocked=`new-buy pool full (${t.config.newBuyAllocPct}%)`;else if(cash<cost+fee)a.blocked='not enough paper cash';
+    if(!a.blocked){usage={...usage,newUsed:usage.newUsed+cost};cash-=cost+fee;}out.actions.push(a);}
+  if(sig.bids.length&&!p.tenetBidWeeks[wk]){const c=sig.bids[0],q=Math.floor(per/c.price),cost=q*c.price,fee=tenetFriction(cost,'BUY',tenetAssetClassOf(c.etf));
+    const a={sym:c.etf,action:'BID',qty:q,price:c.price,team:c.team,underlying:c.underlying,note:`down ${(+c.fall).toFixed(2)}% from its latest lot (largest fall this week)`};
+    if(q<1)a.blocked='slot smaller than one unit';else if(usage.bidUsed+cost>bidMax+1e-6)a.blocked=`bid pool full (${t.config.bidAllocPct}%)`;else if(cash<cost+fee)a.blocked='not enough paper cash';
+    out.actions.push(a);}
+  out.info=`Weekly window open (${escapeHtml(gate.date)}) · ${sig.buys.length} buy(s)${sig.bids.length&&!p.tenetBidWeeks[wk]?' · 1 bid':''} · slot ${fmtINR(per)}`;
+  return out;
+}
+async function paperAddTenet(){
+  const v=parseFloat(document.getElementById('paper-tenet-cap')?.value||0)||0;
+  if(!(v>0)){toast('Enter a paper Tenet amount','err');return false;}
+  const ok=await commitState(()=>{const q=paperState();if(q.tenetTrades.length)return false;q.tenetCapital=v;},{label:'Paper Tenet'});
+  if(ok){toast('📝 Tenet added to the paper account','ok');renderPaper();}
+  return ok;
+}
+async function paperTenetScan(){try{await tenetRefreshSignals();}catch(e){toast('Tenet scanner: '+(e&&e.message||e),'err');}renderPaper();}
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
