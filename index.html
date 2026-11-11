@@ -5967,6 +5967,7 @@ function renderLifoSignals(openLots,targetPct){
   } else if(!actionable.length){
     actEl.innerHTML='<div class="empty" style="padding:20px 0"><div class="empty-icon">✅</div><div style="font-size:12px;color:var(--mist)">No action required today</div><div style="font-size:11px;color:var(--fog);margin-top:4px">All positions tracking normally</div></div>';
   } else {
+    const _paperL=paperOn()?paperSignals().list.filter(x=>x.eng==='LIFO'&&!x.blocked):null;   // R23
     actEl.innerHTML=actionable.map(e=>{
       // D6: prefer the qty computed during selection (already CEILING'd); fall back to ceil
       const qty=e.action==='SELL'?e.units:(e.qty||Math.ceil(slot/e.p.cmp)||1);
@@ -5995,7 +5996,11 @@ function renderLifoSignals(openLots,targetPct){
         actionBtn=`<button class="action-btn sm" disabled style="font-size:10px">Wait for rise</button>`;
       }
       // R18: with a paper account running, each actionable card can also be sent to it (the paper account's own size)
-      if(paperOn()&&(isSell||e.action==='AVG'||e.action==='BUY'))actionBtn+=` <button class="action-btn sm paper-btn" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeFromLive(${htmlJsArg(e.sym)},'${isSell?'SELL':'BUY'}')">📝 Paper</button>`;
+      if(_paperL&&(isSell||e.action==='AVG'||e.action==='BUY')){
+        const _ps=_paperL.find(x=>x.sym===e.sym&&(isSell?x.action==='SELL':(x.action==='BUY'||x.action==='AVG')));
+        actionBtn+=_ps?` <button class="action-btn sm paper-btn" style="border:1px dashed var(--violet);color:var(--violet);background:transparent" onclick="paperTakeFromLive(${htmlJsArg(e.sym)},'${isSell?'SELL':'BUY'}')">📝 Paper</button>`
+          :` <span class="paper-none" style="font-size:10px;color:var(--fog)" title="The paper account has its own holdings, cash and daily buy limit">📝 ${_paperWhy(e.sym,isSell)}</span>`;
+      }
       const netStr=isSell?`Net ₹${e.net?.toFixed(0)} · `:'';
       return`<div class="${cardCls}">
         <div class="act-card-head">
@@ -15100,8 +15105,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-11-v3.22-R22';
-const APP_SOURCE_SHA256='bc6abec4c47a7a268dffccc288d11190aa10b9a317f902b9da1dd0b33ec0aeb0';
+const APP_BUILD='2026-11-11-v3.22-R23';
+const APP_SOURCE_SHA256='81e4c40baa970f701d7d3340df89f67dc252065bf5f905e53d37870206a13c5b';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17578,6 +17583,17 @@ function paperMarketOpen(){const t=tenetISTNow(),w=new Date(t.date+'T00:00:00Z')
 
 // ── Fills ─────────────────────────────────────────────────────────────────────────────────────
 let _paperBusy=false;
+// R23: why the paper account has no matching LIFO signal for an ETF the real desk shows
+function _paperWhy(sym,isSell){
+  const p=paperState(),today=localDate(),L=paperLifoLots(p.lifoLedger).openLots[sym]||[],held=L.some(l=>l.units>0);
+  if(isSell)return held?'paper lot not at target yet':'paper does not hold it';
+  const bt=p.lifoLedger.filter(t=>t.type==='BUY'&&t.date===today),max=finiteParam(S.config.maxBuysPerDay,3,{min:0,integer:true});
+  if(bt.some(t=>t.sym===sym))return 'paper bought it today';
+  if(!held&&bt.filter(t=>t.kind!=='AVG').length>=max)return `paper daily limit reached (${max} buys)`;
+  if(held)return 'paper already holds it';
+  return 'not a paper signal now';
+}
+
 async function paperExec(spec){
   const p=paperState(),no=m=>{try{toast('⛔ Paper trade refused — '+m,'err');}catch(e){}return null;};
   if(!p.startedAt)return no('start the paper account first');
@@ -17667,6 +17683,8 @@ function paperTick(sig){
     const k=today+'|'+a.key;
     if(!p.journal.some(x=>x.k===k)){p.journal.push({k,d:today,eng:a.eng,sym:a.sym,action:a.action,price:a.price,qty:a.eng==='LIFO'?a.qty:a.units,taken:0});dirty=true;}
   }
+  const live=new Set(sig.list.filter(a=>a.action!=='TRAILING'&&!a.blocked).map(a=>today+'|'+a.key));
+  for(const j of p.journal){if(j.d!==today||j.taken)continue;const g=live.has(j.k)?0:1;if((j.gone||0)!==g){j.gone=g;dirty=true;}}
   if(p.journal.length>3000)p.journal=p.journal.slice(-3000);
   const nifty=+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0;
   if(!(p.niftyStart>0)&&nifty>0){p.niftyStart=nifty;dirty=true;}
@@ -17684,7 +17702,7 @@ function paperStats(sig){
   const p=paperState(),b=sig.book,today=localDate();
   const nifty=+PRICES.NIFTYBEES?.cmp>0?+PRICES.NIFTYBEES.cmp:0;
   const days=p.startedAt?Math.max(0,Math.round((new Date(today+'T00:00:00Z')-new Date(p.startedAt+'T00:00:00Z'))/86400000)):0;
-  const past=p.journal.filter(j=>j.d<today),seen=p.journal.length,taken=p.journal.filter(j=>j.taken).length;
+  const jj=p.journal.filter(j=>!j.gone),past=jj.filter(j=>j.d<today),seen=jj.length,taken=jj.filter(j=>j.taken).length;
   let pk=0,mdd=0;for(const r of p.navLog){const v=r.lifo+r.dm;if(v>pk)pk=v;if(pk>0)mdd=Math.max(mdd,(1-v/pk)*100);}
   return{base:b.base,total:b.total,pnl:b.total-b.base,retPct:b.base>0?(b.total/b.base-1)*100:0,
     niftyPct:(p.niftyStart>0&&nifty>0)?(nifty/p.niftyStart-1)*100:null,days,realized:b.L.realized+b.D.realized,
@@ -17762,7 +17780,7 @@ function renderPaper(){
     ...p.dmTrades.map(t=>({d:t.date,ts:t.ts||0,eng:'DM',sym:t.etf,type:t.type,u:t.units,price:t.price,fr:t.friction||0,pnl:t.type!=='BUY'?b.D.pnl[t.id]:null,off:t.off}))].sort((x,y)=>y.ts-x.ts);
   const ledger=trades.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Type</th><th class="r">Units</th><th class="r">Price</th><th class="r">Costs</th><th class="r">Realised</th></tr></thead><tbody>${trades.slice(0,200).map(t=>`<tr><td class="mono neutral">${escapeHtml(t.d)}${t.off?' <span title="Filled outside market hours at the last price">🌙</span>':''}</td><td>${t.eng}</td><td class="sym-cell">${escapeHtml(t.sym)}</td><td>${escapeHtml(t.type)}</td><td class="r mono">${+(+t.u).toFixed(3)}</td><td class="r mono">₹${(+t.price).toFixed(2)}</td><td class="r mono neutral">${(+t.fr).toFixed(2)}</td><td class="r mono ${t.pnl==null?'':pc(t.pnl)}">${t.pnl==null?'—':(t.pnl>=0?'+':'')+fmtINR(t.pnl)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">No paper trades yet</div>';
   const jr=[...p.journal].reverse().slice(0,60),today=localDate();
-  const journal=jr.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Signal</th><th class="r">Price</th><th class="c">Result</th></tr></thead><tbody>${jr.map(j=>`<tr><td class="mono neutral">${escapeHtml(j.d)}</td><td>${escapeHtml(j.eng)}</td><td class="sym-cell">${escapeHtml(j.sym)}</td><td>${escapeHtml(j.action)}</td><td class="r mono">₹${(+j.price).toFixed(2)}</td><td class="c">${j.taken?'<span style="color:var(--go)">✓ taken</span>':j.d===today?'<span style="color:var(--fog)">open</span>':'<span style="color:var(--stop)">✗ missed</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">Signals appear here on days you open the app with fresh prices</div>';
+  const journal=jr.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Engine</th><th>ETF</th><th>Signal</th><th class="r">Price</th><th class="c">Result</th></tr></thead><tbody>${jr.map(j=>`<tr><td class="mono neutral">${escapeHtml(j.d)}</td><td>${escapeHtml(j.eng)}</td><td class="sym-cell">${escapeHtml(j.sym)}</td><td>${escapeHtml(j.action)}</td><td class="r mono">₹${(+j.price).toFixed(2)}</td><td class="c">${j.taken?'<span style="color:var(--go)">✓ taken</span>':j.gone?'<span style="color:var(--fog)" title="No longer a signal — daily limit reached, price moved or list changed. Not counted.">— withdrawn</span>':j.d===today?'<span style="color:var(--fog)">open</span>':'<span style="color:var(--stop)">✗ missed</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:12px 0">Signals appear here on days you open the app with fresh prices</div>';
   const chart=paperChartSvg(p);
   el.innerHTML=`${tag}${stats}${signals}
     <div class="card" style="margin-top:14px"><div class="card-title" style="margin-bottom:8px">💼 Paper holdings</div>${hold}</div>
