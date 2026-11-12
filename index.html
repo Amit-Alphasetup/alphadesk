@@ -1130,7 +1130,8 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="stat-grid" id="bt-report-cards"></div>
 <div class="card" id="bt-equity-card" style="display:none">
 <div class="card-title" style="margin-bottom:10px">📈 Equity Curve — strategy vs NIFTYBEES buy &amp; hold <span style="font-size:10px;color:var(--fog)">(after friction+slippage, before tax)</span></div>
-<canvas id="bt-equity-canvas" style="width:100%;height:230px;display:block"></canvas>
+<canvas id="bt-equity-canvas" style="width:100%;height:230px;display:none"></canvas>
+<div id="bt-equity-chart"></div>
 </div>
 <div class="card" id="bt-tax-card" style="display:none">
 <div class="card-title" style="margin-bottom:10px">🧾 Backtest Tax — FY Apr–Mar · STCG 20% / LTCG 12.5% · ₹1.25L LTCG exemption · loss offset &amp; carryforward</div>
@@ -1739,7 +1740,8 @@ body.preview-mode button[onclick*="tenetRecordBuy"],body.preview-mode button[onc
 <div class="stat-grid" id="dm-bt-summary" style="display:none"></div>
 <div class="card" id="dm-bt-equity-card" style="display:none">
 <div class="card-title" style="margin-bottom:10px">Equity Curve vs NIFTYBEES</div>
-<canvas id="dm-bt-canvas" style="width:100%;height:230px;display:block"></canvas>
+<canvas id="dm-bt-canvas" style="width:100%;height:230px;display:none"></canvas>
+<div id="dm-bt-chart"></div>
 </div>
 <div class="card" id="dm-bt-holdings-card" style="display:none;border-left:3px solid var(--sky)">
 <div class="card-title" style="margin-bottom:6px">📦 Current Holdings — end of backtest</div>
@@ -2282,6 +2284,7 @@ or one per line" rows="4" style="resize:vertical"></textarea>
     <div id="tenet-bt-status" style="font-size:11px;color:var(--mist);margin-top:8px"></div>
   </div>
   <div class="stat-grid"><div class="stat-card"><div class="stat-label">CAGR</div><div class="stat-value" id="tenet-bt-cagr">—</div></div><div class="stat-card"><div class="stat-label">XIRR</div><div class="stat-value" id="tenet-bt-xirr">—</div></div><div class="stat-card"><div class="stat-label">Realized Profit</div><div class="stat-value" id="tenet-bt-profit">—</div></div><div class="stat-card"><div class="stat-label">Max Invested</div><div class="stat-value" id="tenet-bt-maxinv">—</div></div><div class="stat-card"><div class="stat-label">Avg Hold Days</div><div class="stat-value" id="tenet-bt-avgdays">—</div></div><div class="stat-card"><div class="stat-label">Max DD</div><div class="stat-value" id="tenet-bt-dd">—</div></div><div class="stat-card"><div class="stat-label">Trades</div><div class="stat-value" id="tenet-bt-trades">—</div></div></div>
+  <div class="card" id="tenet-bt-equity-card" style="display:none"><div class="card-title" style="margin-bottom:10px">📈 Account value and money in lots</div><div id="tenet-bt-chart"></div></div>
   <div class="card"><div class="card-title">Trade log</div><div id="tenet-bt-log" class="tbl-wrap"></div></div>
 </div>
 <div class="tab-pane" id="tenet-ledger"></div>
@@ -2876,7 +2879,7 @@ const DEFAULT_LIFO_UNIVERSE = [
 
 const DEFAULT_MOM_UNIVERSE = [
   'SILVERBEES','GOLDBEES','NIFTYBEES','TATSILV','HDFCSILVER','SILVERIETF',
-  'TATAGOLD','GOLDIETF','ITBEES','SETFGOLD','BANKBEES','HDFCGOLD','SBISILVER',
+  'TATAGOLD','GOLDIETF','ITBEES','BANKBEES','HDFCGOLD','SBISILVER',
   'PVTBANIETF','SILVER','PSUBNKBEES','JUNIORBEES','GOLD1','HDFCSML250',
   'MON100','MODEFENCE','MID150BEES','PHARMABEES','METALIETF','CPSEETF',
   'MOREALTY','NEXT50IETF','AUTOBEES','ALPHA','MOMENTUM50','GROWWPOWER',
@@ -5025,8 +5028,8 @@ function checkStaleness(){
   if(age>threshold){
     el.style.display='block';
     const mins=Math.round(age/60000);
-    const ageStr=mins>=60?`${Math.floor(mins/60)}h ${mins%60}m`:`${mins}m`;
-    el.textContent=`⚠️ Prices are ${ageStr} old — tap Refresh`;
+    const ageStr=!(lastPriceTs>0)?'':mins>=60?`${Math.floor(mins/60)}h ${mins%60}m`:`${mins}m`;   // R26: '' = no price has ever loaded
+    el.textContent=ageStr?`⚠️ Prices are ${ageStr} old — tap Refresh`:'⚠️ No prices loaded yet — tap Refresh';
     // B3 FIX: set gate so signal cards show a blocking overlay instead of actionable signals
     PRICES_STALE_GATE=true;
     _applyStaleGateOverlays(ageStr);
@@ -5052,7 +5055,7 @@ function _applyStaleGateOverlays(ageStr){
     const ov=document.createElement('div');
     ov.className='stale-gate-overlay';
     ov.style.cssText='position:absolute;inset:0;z-index:50;background:rgba(9,13,20,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-radius:inherit;backdrop-filter:blur(2px)';
-    ov.innerHTML=`<div style="font-size:22px">⚠️</div><div style="color:var(--gold);font-size:12px;font-weight:700;text-align:center">Prices are ${ageStr} old</div><div style="color:var(--fog);font-size:11px;text-align:center">Refresh before acting</div>`;
+    ov.innerHTML=`<div style="font-size:22px">⚠️</div><div style="color:var(--gold);font-size:12px;font-weight:700;text-align:center">${ageStr?`Prices are ${ageStr} old`:'No prices loaded yet'}</div><div style="color:var(--fog);font-size:11px;text-align:center">Refresh before acting</div>`;
     el.appendChild(ov);
   });
 }
@@ -6620,6 +6623,7 @@ function buildPosLogRecords(){
 }
 // ── END POSITION LIFECYCLE LOG ────────────────────────────────────────────────
 function renderPosLog(){
+  const openLots=computeLifoPortfolio();   // R26: was read below without ever being defined
   const filter=document.getElementById('poslog-filter')?.value||'all';
   const records=buildPosLogRecords();
   const openForTarget=buildPosLogRecords().filter(r=>!r.closed);
@@ -8240,6 +8244,7 @@ async function runDMBacktest(){
     // Store for resize redraws (BUG-24)
     const _cv=document.getElementById('dm-bt-canvas');
     if(_cv)_cv.dataset.ready=JSON.stringify({equity,bench:benchEq,startNav});
+    adChartRefresh('dm');   // R26: reads _dmBtResult, set just below before this timer fires
   },50);
 
   // R13: entries + exits, month-wise, holdings and the day-wise log (presentation only, reads `result`)
@@ -10538,7 +10543,7 @@ function renderBtReport(){
   document.getElementById('bt-verdict').innerHTML=`<div style="font-size:14px;font-weight:800;color:${cls};margin-bottom:6px">${head}</div><div style="font-size:12px;color:var(--mist);line-height:1.9">${body}</div>`;
 
   document.getElementById('bt-equity-card').style.display=BT.equity.length?'block':'none';
-  if(BT.equity.length)requestAnimationFrame(()=>drawEquityCurve(BT.equity,BT.bench,m.capital));
+  if(BT.equity.length)requestAnimationFrame(()=>{drawEquityCurve(BT.equity,BT.bench,m.capital);adChartRefresh('lifo');});
 
   document.getElementById('bt-tax-card').style.display=BT.tax?.rows?.length?'block':'none';
   if(BT.tax?.rows?.length){
@@ -13212,7 +13217,7 @@ async function runTenetBacktestV3(inputsArg){
         firstTradableDate,exclusions:[..._tenetEx].map(x=>({symbol:x,code:'EXCLUDED_BY_PREFLIGHT'})),
         assumptions:{entry:'weekly final-session close',exit:'daily HIGH ('+(conservativeExits?'conservative':'canonical')+')',slippage:'none',feePolicyVersion:FEE_POLICY_VERSION}});
      TENET_LAST_RESULT={provenance:_tprov,trades:trades.map(x=>({...x})),equity:eq.map(x=>({...x})),skips:skips.map(x=>({...x})),
-       metrics:{initial,finalValue,cagr,xirr:xi,maxDD:dd,realized,maxInvested,avgHoldDays:avgDays,cash,openMV:hold.reduce((a,h)=>a+(lastMark[h.etf]?lastMark[h.etf].px:h.buyPrice)*h.qty,0)}};}
+       metrics:{initial,finalValue,cagr,xirr:xi,maxDD:dd,realized,maxInvested,avgHoldDays:avgDays,cash,openMV:hold.reduce((a,h)=>a+(lastMark[h.etf]?lastMark[h.etf].px:h.buyPrice)*h.qty,0)}};adChartRefresh('tenet');}
     const _pfE=PREFLIGHT_LAST.TENET&&PREFLIGHT_LAST.TENET.pf,_cE=_pfE&&_pfE.counts;
     const _dataLine=_pfE?('dataset '+(_pfE.datasetId||'—')+' ('+(_pfE.source||'')+') · candidates '+_cE.candidatesRetained+'/'+_cE.candidates+' · excluded '+_cE.excluded+' · '+resultLabel('TENET',_pfE,{mode:RUN_MODE.TENET||'research',executionGaps:[],valuationGaps})):'preflight not run';
     const evBox=document.getElementById('tenet-bt-evidence');
@@ -15115,8 +15120,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-12-v3.22-R25';
-const APP_SOURCE_SHA256='0f6054f557183a2db07022fa67ddf6804137efe18bf7517377de44619bf6cc24';
+const APP_BUILD='2026-11-12-v3.22-R26';
+const APP_SOURCE_SHA256='b84250612ba011a18d74803a7fce6d242711a97eeac99942f511cf40a1110487';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -15569,6 +15574,7 @@ function renderDhcTable() {
   document.getElementById('dhc-badge-clean').textContent = `✅ ${clean} Clean`;
   document.getElementById('dhc-badge-warn').textContent  = warn ? `⚠️ ${warn} Gaps` : '';
   document.getElementById('dhc-badge-err').textContent   = err  ? `❌ ${err} Insufficient` : '';
+  document.getElementById('dhc-badge-warn').style.display=warn?'':'none';document.getElementById('dhc-badge-err').style.display=err?'':'none';   // R26: an empty coloured pill was left on screen
   document.getElementById('dhc-summary').style.display = 'flex';
   const order = {error: 0, warn: 1, clean: 2};
   const sorted = [...DHC_RESULTS].sort((a, b) => order[a.status] - order[b.status] || a.sym.localeCompare(b.sym));
@@ -17913,7 +17919,7 @@ async function paperReplay(){
         const g=await paperPreflight('DM',q.dm);if(!g.ok)throw new Error(g.msg);
         g.ex.forEach(x=>out.excluded.push('DM '+x));
         const r=await runDMBacktestCore({...q.dm,...(g.ex.length?{etfs:getMomUniverse().filter(sy=>!DHC_EXCLUDED.has(sy)&&!g.ex.includes(sy))}:{}),statusCb:st}),ref=r.error?{message:r.error}:runRefusal(r),k=p.dmCapital/100;
-        if(ref)out.errors.push('DM: '+(/Not enough months simulated/.test(ref.message)?`the DM engine needs at least 3 rebalances to replay — about ${2*q.dm.rebalDays+2} market days after the start date at your ${q.dm.rebalDays}-day interval. Run it again later.`:ref.message));
+        if(ref)out.errors.push('DM: '+(/Not enough data in range/.test(ref.message)?'the DM engine needs at least 30 market days after the start date to replay. Run it again later.':/Not enough months simulated/.test(ref.message)?`the DM engine needs at least 3 rebalances to replay — about ${2*q.dm.rebalDays+2} market days after the start date at your ${q.dm.rebalDays}-day interval. Run it again later.`:ref.message));
         else{
           out.dmEnd=r.equityDaily&&r.equityDaily.length?r.equityDaily[r.equityDaily.length-1].nav*k:p.dmCapital;
           for(const t of r.tradeLog||[]){if(t.sym==='LIQUIDBEES')continue;const cls=t.action==='BUY'?'BUY':t.action==='SKIM'?'SKIM':'SELL';out.actions.push({eng:'DM',sym:t.sym,cls,date:t.date,price:+(cls==='BUY'?t.entryPrice:t.exitPrice),units:+((+t.units||0)*k).toFixed(3)});}
@@ -18146,6 +18152,213 @@ async function paperAddTenet(){
   return ok;
 }
 async function paperTenetScan(){try{await tenetRefreshSignals();}catch(e){toast('Tenet scanner: '+(e&&e.message||e),'err');}renderPaper();}
+// ── R26: INTERACTIVE RESEARCH CHART ─────────────────────────────────────────────────────────────────────
+// One chart for the LIFO, DM and Tenet backtests. Move the pointer (or tap) to read any day: value, gain,
+// that day's move, fall from the peak, benchmark, money invested and the trades made that day.
+// model = {capital, benchName, invName, points:[{d,v,b,inv}], events:{'YYYY-MM-DD':[{k:'buy'|'sell',t:'text'}]}}
+const AD_CHARTS={};
+function adChartStats(pts,i0,i1){
+  const a=pts[i0],b=pts[i1];let pk=-Infinity,dd=0,ddAt=i0,best=null,worst=null;
+  for(let i=i0;i<=i1;i++){const v=pts[i].v;if(v>pk)pk=v;const x=pk>0?(1-v/pk)*100:0;if(x>dd){dd=x;ddAt=i;}
+    if(i>i0&&pts[i-1].v>0){const ch=(v/pts[i-1].v-1)*100;if(!best||ch>best.ch)best={ch,d:pts[i].d};if(!worst||ch<worst.ch)worst={ch,d:pts[i].d};}}
+  return{from:a.d,to:b.d,sessions:i1-i0+1,ret:a.v>0?(b.v/a.v-1)*100:0,bench:(a.b>0&&b.b>0)?(b.b/a.b-1)*100:null,maxDD:dd,maxDDDate:pts[ddAt].d,best,worst};
+}
+function adChartPoint(pts,i,capital){
+  const base=capital>0?capital:pts[0].v;let pk=base,pkD=pts[0].d;
+  for(let k=0;k<=i;k++)if(pts[k].v>=pk){pk=pts[k].v;pkD=pts[k].d;}
+  const p=pts[i],prev=i>0?pts[i-1]:null;
+  return{d:p.d,v:p.v,gain:p.v-base,gainPct:(p.v/base-1)*100,dayAbs:prev?p.v-prev.v:null,dayPct:prev&&prev.v>0?(p.v/prev.v-1)*100:null,peak:pk,peakDate:pkD,ddPct:pk>0?(1-p.v/pk)*100:0,
+    b:p.b>0?p.b:null,benchPct:p.b>0?(p.b/base-1)*100:null,vsBench:p.b>0?(p.v/p.b-1)*100:null,inv:p.inv!=null?p.inv:null,invPct:p.inv!=null&&p.v>0?p.inv/p.v*100:null};
+}
+function adChartSlice(pts,range){
+  const n=pts.length-1,days={'3m':92,'6m':183,'1y':366}[range];if(!days)return[0,n];
+  const end=Date.parse(pts[n].d),i0=pts.findIndex(p=>end-Date.parse(p.d)<=days*86400000);
+  return[Math.max(0,Math.min(i0<0?0:i0,n-1)),n];
+}
+function adChartMount(hostId,model){
+  const host=document.getElementById(hostId);
+  if(!host||!model||!Array.isArray(model.points)||model.points.length<2)return false;
+  const old=AD_CHARTS[hostId];
+  AD_CHARTS[hostId]={model,range:old?old.range:'all',sel:null,geo:null};
+  adChartDraw(hostId);return true;
+}
+function adChartRange(hostId,range){const c=AD_CHARTS[hostId];if(!c)return;c.range=range;c.sel=null;adChartDraw(hostId);}
+function adChartDraw(hostId){
+  const c=AD_CHARTS[hostId],host=document.getElementById(hostId);if(!c||!host)return;
+  const m=c.model,pts=m.points,[i0,i1]=adChartSlice(pts,c.range),n=i1-i0;
+  const W=Math.max(300,Math.round(host.clientWidth||host.offsetWidth||640)),H1=230,H2=64,G=14,L=46,R=8,T=8,H=H1+G+H2+18;
+  const X=i=>L+(n?((i-i0)/n):0)*(W-L-R);
+  const vis=pts.slice(i0,i1+1),vals=vis.flatMap(p=>[p.v,p.b>0?p.b:p.v]);if(m.capital>0)vals.push(m.capital);
+  let lo=Math.min(...vals),hi=Math.max(...vals);if(hi===lo){hi+=1;lo-=1;}const pad=(hi-lo)*0.06;lo-=pad;hi+=pad;
+  const Y=v=>T+(1-(v-lo)/(hi-lo))*(H1-T);
+  let pk=m.capital>0?m.capital:pts[0].v;const dds=pts.map(p=>{if(p.v>pk)pk=p.v;return pk>0?(1-p.v/pk)*100:0;});
+  const ddMax=Math.max(1,...dds.slice(i0,i1+1)),Yd=x=>H1+G+(x/ddMax)*H2;
+  const line=f=>vis.map((p,k)=>X(i0+k).toFixed(1)+','+f(p,i0+k).toFixed(1)).join(' ');
+  const short=v=>v>=1e7?(v/1e7).toFixed(2)+'Cr':v>=1e5?(v/1e5).toFixed(2)+'L':v>=1e3?(v/1e3).toFixed(0)+'k':v.toFixed(0);
+  let grid='';for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4;grid+=`<line x1="${L}" x2="${W-R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--plate)"/><text x="${L-5}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--fog)">${short(v)}</text>`;}
+  let xl='',lastLab='';const byMonth=n<400;vis.forEach((p,k)=>{const lab=byMonth?p.d.slice(0,7):p.d.slice(0,4);if(lab!==lastLab){if(k>0&&(!byMonth||+p.d.slice(5,7)%3===1||n<130))xl+=`<line x1="${X(i0+k).toFixed(1)}" x2="${X(i0+k).toFixed(1)}" y1="${T}" y2="${H1+G+H2}" stroke="var(--plate)" stroke-dasharray="2 4"/><text x="${(X(i0+k)+3).toFixed(1)}" y="${H-4}" font-size="9" fill="var(--fog)">${byMonth?p.d.slice(2,7):lab}</text>`;lastLab=lab;}});
+  let ticks='';const ev=m.events||{};vis.forEach((p,k)=>{const e=ev[p.d];if(!e)return;const b=e.some(x=>x.k==='buy'),s=e.some(x=>x.k==='sell'),x=X(i0+k).toFixed(1);
+    if(b)ticks+=`<line x1="${x}" x2="${x}" y1="${H1-7}" y2="${H1}" stroke="var(--go)" stroke-width="1.2"/>`;if(s)ticks+=`<line x1="${x}" x2="${x}" y1="${H1-14}" y2="${H1-7}" stroke="var(--stop)" stroke-width="1.2"/>`;});
+  const hasB=vis.some(p=>p.b>0),hasInv=vis.some(p=>p.inv!=null);
+  const ddPath=`M${X(i0).toFixed(1)},${(H1+G).toFixed(1)} `+vis.map((p,k)=>'L'+X(i0+k).toFixed(1)+','+Yd(dds[i0+k]).toFixed(1)).join(' ')+` L${X(i1).toFixed(1)},${(H1+G).toFixed(1)} Z`;
+  const st=adChartStats(pts,i0,i1),pc=v=>(v>=0?'+':'')+v.toFixed(1)+'%',cl=v=>v>=0?'profit':'loss';
+  const btn=(r,t)=>`<button class="preset-btn${c.range===r?' active':''}" onclick="adChartRange(${htmlJsArg(hostId)},'${r}')">${t}</button>`;
+  c.geo={i0,i1,L,R,W};
+  host.innerHTML=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><span style="font-size:10px;color:var(--fog)">Range</span>${btn('3m','3M')}${btn('6m','6M')}${btn('1y','1Y')}${btn('all','All')}
+      <span style="font-size:10px;color:var(--fog);margin-left:auto">Tap or move across the chart to read any day</span></div>
+    <svg id="${hostId}-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;max-width:100%;touch-action:pan-y;cursor:crosshair" onpointermove="adChartPick(event,${htmlJsArg(hostId)})" onpointerdown="adChartPick(event,${htmlJsArg(hostId)})">
+      ${grid}${xl}${m.capital>0&&m.capital>lo&&m.capital<hi?`<line x1="${L}" x2="${W-R}" y1="${Y(m.capital).toFixed(1)}" y2="${Y(m.capital).toFixed(1)}" stroke="var(--fog)" stroke-dasharray="5 4"/>`:''}
+      ${hasB?`<polyline fill="none" stroke="var(--fog)" stroke-width="1.4" points="${line(p=>Y(p.b>0?p.b:p.v))}"/>`:''}
+      <polyline fill="none" stroke="var(--azure)" stroke-width="2" points="${line(p=>Y(p.v))}"/>${ticks}
+      <path d="${ddPath}" fill="rgba(246,70,93,.25)" stroke="var(--stop)" stroke-width="1"/>
+      <text x="${L-5}" y="${H1+G+8}" text-anchor="end" font-size="9" fill="var(--fog)">0%</text><text x="${L-5}" y="${H1+G+H2}" text-anchor="end" font-size="9" fill="var(--stop)">-${ddMax.toFixed(1)}%</text>
+      <line id="${hostId}-x" x1="0" x2="0" y1="${T}" y2="${H1+G+H2}" stroke="var(--white)" stroke-width="1" opacity="0"/><circle id="${hostId}-dot" r="4" fill="var(--azure)" stroke="var(--ink)" stroke-width="1.5" opacity="0"/><circle id="${hostId}-bdot" r="3" fill="var(--fog)" opacity="0"/>
+      <rect x="${L}" y="${T}" width="${W-L-R}" height="${H1+G+H2-T}" fill="transparent"/>
+    </svg>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--fog);margin-top:4px"><span><b style="color:var(--azure)">━</b> Strategy value</span>${hasB?`<span><b>━</b> ${escapeHtml(m.benchName||'Benchmark')}</span>`:''}<span><b style="color:var(--go)">▮</b> buy day <b style="color:var(--stop)">▮</b> sell day</span><span><b style="color:var(--stop)">▂</b> fall from peak</span></div>
+    <div id="${hostId}-range" style="font-size:11px;color:var(--mist);margin-top:8px;line-height:1.7">Shown: <b>${escapeHtml(st.from)}</b> → <b>${escapeHtml(st.to)}</b> (${st.sessions} sessions) · return <b class="${cl(st.ret)}">${pc(st.ret)}</b>${st.bench!=null?` · ${escapeHtml(m.benchName||'benchmark')} <b class="${cl(st.bench)}">${pc(st.bench)}</b>`:''} · largest fall <b class="loss">-${st.maxDD.toFixed(1)}%</b> (low on ${escapeHtml(st.maxDDDate)})${st.best?` · best day <b class="profit">${pc(st.best.ch)}</b> ${escapeHtml(st.best.d)} · worst day <b class="loss">${pc(st.worst.ch)}</b> ${escapeHtml(st.worst.d)}`:''}</div>
+    <div id="${hostId}-info" style="margin-top:8px;padding:10px;border:1px solid var(--wire);border-radius:var(--r8);background:var(--ink3);font-size:11px;line-height:1.7"></div>`;
+  adChartSelect(hostId,c.sel!=null&&c.sel>=i0&&c.sel<=i1?c.sel:i1,c.sel!=null);
+}
+function adChartPick(ev,hostId){
+  const c=AD_CHARTS[hostId],svg=document.getElementById(hostId+'-svg');if(!c||!c.geo||!svg)return;
+  const r=svg.getBoundingClientRect(),g=c.geo,scale=r.width?g.W/r.width:1,x=(ev.clientX-r.left)*scale;
+  const f=(x-g.L)/(g.W-g.L-g.R),i=Math.max(g.i0,Math.min(g.i1,Math.round(g.i0+f*(g.i1-g.i0))));
+  adChartSelect(hostId,i,true);
+}
+function adChartSelect(hostId,i,mark){
+  const c=AD_CHARTS[hostId];if(!c)return null;const m=c.model,pts=m.points,g=c.geo;if(!(i>=0&&i<pts.length))return null;
+  c.sel=i;const p=adChartPoint(pts,i,m.capital),info=document.getElementById(hostId+'-info');
+  const xl=document.getElementById(hostId+'-x'),dot=document.getElementById(hostId+'-dot'),bd=document.getElementById(hostId+'-bdot'),svg=document.getElementById(hostId+'-svg');
+  if(mark&&g&&xl&&dot&&svg&&xl.setAttribute){
+    const poly=svg.querySelectorAll?svg.querySelectorAll('polyline'):[],k=i-g.i0,sp=poly.length?poly[poly.length-1]:null,pt=sp&&sp.points&&sp.points[k];
+    if(pt){xl.setAttribute('x1',pt.x);xl.setAttribute('x2',pt.x);xl.setAttribute('opacity','.5');dot.setAttribute('cx',pt.x);dot.setAttribute('cy',pt.y);dot.setAttribute('opacity','1');
+      const bp=poly.length>1&&poly[0].points&&poly[0].points[k];if(bd&&bp){bd.setAttribute('cx',bp.x);bd.setAttribute('cy',bp.y);bd.setAttribute('opacity','1');}}
+  }
+  if(!info)return p;
+  const pc=v=>(v>=0?'+':'')+v.toFixed(2)+'%',cl=v=>v>=0?'profit':'loss',rs=v=>(v>=0?'+':'−')+fmtINR(Math.abs(v));
+  const wd=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(p.d+'T00:00:00Z').getUTCDay()],ev=(m.events||{})[p.d]||[];
+  const cell=(k,v)=>`<div style="min-width:0"><div style="font-size:9px;color:var(--fog);text-transform:uppercase;letter-spacing:.5px">${k}</div><div style="font-weight:700;font-variant-numeric:tabular-nums">${v}</div></div>`;
+  info.innerHTML=`<div style="font-size:12px;font-weight:800;color:var(--white);margin-bottom:6px">${escapeHtml(p.d)} · ${wd}${i===pts.length-1?' · last day':''}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px 12px">
+      ${cell('Value',fmtINR(p.v))}${cell('Since start',`<span class="${cl(p.gain)}">${rs(p.gain)} (${pc(p.gainPct)})</span>`)}
+      ${p.dayPct!=null?cell('That day',`<span class="${cl(p.dayPct)}">${rs(p.dayAbs)} (${pc(p.dayPct)})</span>`):''}
+      ${cell('From the peak',p.ddPct>0.005?`<span class="loss">-${p.ddPct.toFixed(2)}%</span> <span style="font-weight:400;color:var(--fog)">peak ${fmtINR(p.peak)} on ${escapeHtml(p.peakDate)}</span>`:'<span class="profit">at a new high</span>')}
+      ${p.b!=null?cell(escapeHtml(m.benchName||'Benchmark'),`${fmtINR(p.b)} <span class="${cl(p.benchPct)}">(${pc(p.benchPct)})</span>`)+cell('Ahead of it by',`<span class="${cl(p.vsBench)}">${pc(p.vsBench)}</span>`):''}
+      ${p.inv!=null?cell(escapeHtml(m.invName||'Invested'),`${fmtINR(p.inv)} (${p.invPct.toFixed(0)}%) · cash ${fmtINR(p.v-p.inv)}`):''}
+    </div>
+    <div style="margin-top:8px;border-top:1px solid var(--plate);padding-top:6px"><span style="font-size:9px;color:var(--fog);text-transform:uppercase;letter-spacing:.5px">Trades that day</span>
+      ${ev.length?ev.slice(0,12).map(e=>`<div><span class="badge ${e.k==='buy'?'b-buy':'b-sell'}">${e.k==='buy'?'BUY':'SELL'}</span> ${escapeHtml(e.t)}</div>`).join('')+(ev.length>12?`<div style="color:var(--fog)">…and ${ev.length-12} more</div>`:''):'<div style="color:var(--fog)">None</div>'}</div>`;
+  return p;
+}
+// Models from each engine's last result
+function adChartModelLifo(){
+  if(!BT||!BT.equity||BT.equity.length<2||!BT.metrics)return null;
+  const bm=new Map((BT.bench||[]).map(b=>[b.d,b.eq])),um=new Map((BT.utilization||[]).map(u=>[u.d,u.usedCapital]));let lb=null;
+  const points=BT.equity.map(e=>{const b=bm.get(e.d);if(b>0)lb=b;return{d:e.d,v:e.eq,b:lb,inv:um.has(e.d)?um.get(e.d):null};});
+  const events={},add=(d,k,t)=>{if(!d)return;(events[d]=events[d]||[]).push({k,t});};
+  for(const t of BT.trades||[]){add(t.buyDate,'buy',`${t.sym} ${t.qty} × ₹${(+t.buyPrice).toFixed(2)}${t.avgCount>0?' (averaging lot)':''}`);add(t.sellDate,'sell',`${t.sym} ${t.qty} × ₹${(+t.sellPrice).toFixed(2)} · held ${t.holdDays}d · ${(t.netPnl>=0?'+':'−')+fmtINR(Math.abs(t.netPnl))} (${(+t.pnlPct).toFixed(1)}%)`);}
+  for(const l of ((BT.metrics.openInventory&&BT.metrics.openInventory.lots)||[]))add(l.date,'buy',`${l.sym} ${l.qty} × ₹${(+l.buyPrice).toFixed(2)} (still open)`);
+  return{capital:+BT.metrics.capital||points[0].v,benchName:'NIFTYBEES held',invName:'In lots',points,events};
+}
+function adChartModelDm(){
+  const r=_dmBtResult;if(!r)return null;const eq=(r.equityDaily&&r.equityDaily.length>1)?r.equityDaily:r.equity;if(!eq||eq.length<2)return null;
+  const cap=+r.momCapital>0?+r.momCapital:(+S.config.momCapital||100000),k=cap/100,bench=(r.benchEq||[]).filter(b=>b&&b.nav>0);let bi=0,lb=null;
+  const points=eq.map(e=>{while(bi<bench.length&&bench[bi].date<=e.date){lb=bench[bi].nav*k;bi++;}return{d:e.date,v:e.nav*k,b:lb,inv:null};});
+  const events={};
+  for(const t of r.tradeLog||[]){const buy=t.action==='BUY',liq=t.sym==='LIQUIDBEES',px=buy?t.entryPrice:t.exitPrice;
+    (events[t.date]=events[t.date]||[]).push({k:buy?'buy':'sell',t:`${t.action} ${t.sym}${liq?` (${t.units} slot)`:` ${(+t.units*k).toFixed(1)} × ₹${(+px||0).toFixed(2)}`}${!buy&&t.pnl!=null?` · ${(t.pnl>=0?'+':'−')+fmtINR(Math.abs(t.pnl*k))}${t.holdDays!=null?` · held ${t.holdDays}d`:''}`:''}${t.exitReason?' · '+t.exitReason:''}`});}
+  return{capital:cap,benchName:'NIFTYBEES held',points,events};
+}
+function adChartModelTenet(){
+  const r=TENET_LAST_RESULT;if(!r||!r.equity||r.equity.length<2)return null;
+  const points=r.equity.map(e=>({d:e.date,v:e.value,b:null,inv:e.invested})),events={};
+  for(const t of r.trades||[]){const buy=t.action!=='SELL';(events[t.date]=events[t.date]||[]).push({k:buy?'buy':'sell',t:`${t.action==='BID'?'BID (averaging) ':''}${t.etf} ${t.qty} × ₹${(+t.price).toFixed(2)}${t.team?' · '+t.team:''}${buy?` · target ${(+t.targetPct).toFixed(2)}%`:` · held ${t.holdingDays}d · ${(t.profit>=0?'+':'−')+fmtINR(Math.abs(t.profit))}`}`});}
+  return{capital:+r.metrics.initial||points[0].v,invName:'In lots',points,events};
+}
+function adChartRefresh(which){
+  try{
+    if(!which||which==='lifo'){const m=adChartModelLifo();if(m)adChartMount('bt-equity-chart',m);}
+    if(!which||which==='dm'){const m=adChartModelDm();if(m)adChartMount('dm-bt-chart',m);}
+    if(!which||which==='tenet'){const m=adChartModelTenet(),card=document.getElementById('tenet-bt-equity-card');if(m){if(card)card.style.display='block';adChartMount('tenet-bt-chart',m);}}
+  }catch(e){console.warn('adChartRefresh',e);}
+}
+let _adChartResizeT=null;
+try{window.addEventListener('resize',()=>{clearTimeout(_adChartResizeT);_adChartResizeT=setTimeout(()=>{for(const id of Object.keys(AD_CHARTS)){const h=document.getElementById(id);if(h&&h.offsetParent!==null)adChartDraw(id);}},200);});}catch(e){}
+
+// ── R26: restored — the sweep's robustness card (removed by mistake in A4; both sweeps threw at this call)
+function _stabilityBadge(worstDrop) {
+  if (worstDrop <= 0.20) return { icon: '🟢', label: 'Stable',   cls: 'go'  };
+  if (worstDrop <= 0.40) return { icon: '🟡', label: 'Moderate', cls: 'gold'};
+  return                        { icon: '🔴', label: 'Fragile',  cls: 'stop'};
+}
+
+function _stabilityExplain(badge, bestCagr, neighbourCagrs) {
+  const min  = Math.min(...neighbourCagrs);
+  const max  = Math.max(...neighbourCagrs);
+  const n    = neighbourCagrs.length;
+  const base = {
+    Stable:   `All ${n} ±1-step neighbours produce CAGR within 20% of the best combo (${bestCagr.toFixed(1)}%). This parameter set sits in a flat plateau, so the result is less likely to be a fluke of one setting.`,
+    Moderate: `Some neighbours degrade between 20–40% vs the best CAGR (${bestCagr.toFixed(1)}%). Results are reasonable but the combo is somewhat sensitive to parameter choice. Verify with walk-forward before deploying.`,
+    Fragile:  `At least one neighbour loses >40% of the best CAGR (${bestCagr.toFixed(1)}%). The combo sits on a sharp spike — slight mistuning collapses performance. Do not deploy without further validation.`,
+  }[badge.label];
+  return `${base} Neighbour CAGR range: ${min.toFixed(1)}% – ${max.toFixed(1)}%.`;
+}
+
+function _renderStabilityCard(cardId, bodyId, bestCombo, bestCagr, neighbourResults, paramLabels) {
+  const card = document.getElementById(cardId);
+  const body = document.getElementById(bodyId);
+  if (!card || !body) return;
+
+  if (!neighbourResults.length) {
+    body.innerHTML = '<div style="color:var(--fog);font-size:11px">Not enough neighbours to score (single-value params).</div>';
+    card.style.display = 'block';
+    return;
+  }
+
+  const neighbourCagrs = neighbourResults.map(r => r.cagr);
+  const worstDrop = bestCagr > 0
+    ? Math.max(...neighbourCagrs.map(c => (bestCagr - c) / bestCagr))
+    : 0;
+
+  const badge   = _stabilityBadge(worstDrop);
+  const explain = _stabilityExplain(badge, bestCagr, neighbourCagrs);
+
+  // neighbour table rows
+  const rows = neighbourResults.map(r =>
+    `<tr>
+      <td style="padding:4px 8px;font-size:10px;color:var(--fog)">${escapeHtml(r.label)}</td>
+      <td style="padding:4px 8px;font-size:10px;font-family:monospace;text-align:right;color:${r.cagr >= 0 ? 'var(--go)' : 'var(--stop)'}">${r.cagr >= 0 ? '+' : ''}${r.cagr.toFixed(1)}%</td>
+      <td style="padding:4px 8px;font-size:10px;text-align:right;color:var(--fog)">${r.drop >= 0 ? '−' : '+'}${Math.abs(r.drop * 100).toFixed(0)}% vs best</td>
+    </tr>`
+  ).join('');
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:28px">${badge.icon}</span>
+      <div>
+        <div style="font-size:16px;font-weight:900;color:var(--${badge.cls})">${badge.label}</div>
+        <div style="font-size:10px;color:var(--fog)">Best CAGR: <b style="color:var(--sky)">${bestCagr.toFixed(1)}%</b> · ${escapeHtml(paramLabels)}</div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--mist);background:var(--ink3);border-radius:var(--r6);padding:10px 14px;margin-bottom:12px;line-height:1.6">${explain}</div>
+    <details style="font-size:11px">
+      <summary style="cursor:pointer;color:var(--fog);margin-bottom:8px">▸ Show all ${neighbourResults.length} neighbours</summary>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%">
+          <thead><tr>
+            <th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--fog)">Changed param</th>
+            <th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--fog)">CAGR</th>
+            <th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--fog)">vs best</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </details>`;
+
+  card.style.display = 'block';
+}
+
 // ── PHASE 6: SINGLE CONSOLIDATED INIT ────────────────────────────────────────
 // Was 5 independent DOMContentLoaded listeners with non-deterministic firing
 // order; an error in one silently stopped the rest from running. Now one
