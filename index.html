@@ -3007,7 +3007,7 @@ let S = {
     // D4 — '52 week low' method: 'spike' (filtered) or 'raw' (sheet-exact MIN over 364d)
     wl52Method:'spike',
     dmRebalanceDays:30,  // rebalance interval: 7, 15, 30, or custom
-    eod2BaseUrl:'https://amit-alphasetup.github.io/market-data/', eod2UseMirror:true,   // A2-5: EOD2 v3 source; app-local ./data/ mirror is a fallback until A6-6
+    eod2BaseUrl:'https://amit-alphasetup.github.io/market-data/',   // A2-5: EOD2 v3 source. A6-6: the app-local ./data/ mirror fallback is removed (a saved eod2UseMirror value is ignored)
   }
 };
 
@@ -8689,7 +8689,6 @@ function researchCashflowsFromDm(result){
 // Historical data comes ONLY from an immutable EOD2 snapshot (contract alphadesk-eod2/3) read through the vendored client above.
 // Any defect BLOCKS with a reason code. No Yahoo/proxy/Supabase/Apps Script/Upstox history.
 // Every run owns an explicit ctx {runId, snapshot, mode, provenance}; data functions never read a global "current run".
-const EOD2_BASE='./data/';                    // app-local legacy mirror (v2 layout) - fallback only, see EOD2Store.openMirror
 const EOD2_CUTOFF_MIN=20*60;                  // legacy default; the live value is eod2CutoffMinutes() = calendar cutoffIST + 45 min
 const EOD2_DB='alphadesk_eod2', EOD2_STORE='series';
 const EOD2_DEFAULT_BASE='https://amit-alphasetup.github.io/market-data/';
@@ -8709,7 +8708,6 @@ const EOD2Store=(()=>{
   const isoAdd=(d,n)=>{const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10);};
   const norm=s=>String(s||'').trim().toUpperCase();
   const baseUrl=()=>{const b=String((S.config&&S.config.eod2BaseUrl)||EOD2_DEFAULT_BASE);return b.endsWith('/')?b:b+'/';};
-  const useMirror=()=>!(S.config&&S.config.eod2UseMirror===false);
   // Offline support (§5.4 item 2): the manifest and calendar bytes of the last successful open are kept in localStorage and replayed when the
   // network fetch of exactly those two files fails. Integrity is unchanged (the client still hashes everything against the manifest); the handle
   // is marked offline:true and the freshness preflight decides whether that snapshot is still acceptable.
@@ -8788,75 +8786,16 @@ const EOD2Store=(()=>{
     })();
     return purgeP;
   }
-  const validDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
-  // ── app-local legacy mirror (./data/, v2 layout). Read-only fallback until the A6-6 cut-over; every handle it returns says source:'mirror'.
-  async function openMirror(){
-    let r;
-    try{r=await fetch(EOD2_BASE+'manifest.json?t='+Date.now(),{cache:'no-store'});}catch(e){return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'mirror unreachable: '+(e&&e.message||e)};}
-    if(!r.ok)return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'mirror manifest HTTP '+r.status};
-    let m;try{m=await r.json();}catch(e){return{ok:false,code:'SCHEMA_INVALID',detail:'mirror manifest is not JSON'};}
-    const bad=[];
-    if(!m||m.dataset!=='EOD2')bad.push('dataset≠EOD2');
-    if(!/^[0-9a-f]{16,}$/i.test(String(m&&m.datasetHash||'')))bad.push('datasetHash missing');
-    if(!validDate(String(m&&m.latestSession||'')))bad.push('latestSession missing');
-    if(!m||!['PASS','PARTIAL'].includes(m.certification))bad.push('certification not PASS/PARTIAL');
-    if(!m||m.providerMixing!==false)bad.push('providerMixing≠false');
-    if(!m||m.fallbackUsed!==false)bad.push('fallbackUsed≠false');
-    if(!m||!m.files||typeof m.files!=='object')bad.push('files missing');
-    if(bad.length)return{ok:false,code:'SCHEMA_INVALID',detail:'mirror manifest rejected: '+bad.join(', ')};
-    const mem=new Map();
-    async function series(sym,kind){
-      const S0=norm(sym),key=[S0,S0.replace(/ /g,'_')].find(k=>m.files[k]);
-      const q=(m.quarantined||{})[S0]||(m.quarantined||{})[S0.replace(/ /g,'_')];
-      if(q)return{ok:false,code:'QUARANTINED',detail:[].concat(q).join('; ')};
-      if(!key)return{ok:false,code:'NOT_IN_EXPORT',detail:S0};
-      const e=m.files[key],ck=key+':'+e.sha256;
-      if(mem.has(ck))return mem.get(ck);
-      const isIdx=kind==='INDEX'||kind==='IDX'||e.kind==='INDEX';
-      const path=String(e.path||((isIdx?'index/':'etf/')+key+'.json')).replace(/\\/g,'/').replace(/^\.?\/?(data\/)?/,'');
-      let text;
-      try{const rr=await fetch(EOD2_BASE+path+'?h='+m.datasetHash.slice(0,12),{cache:'no-store'});if(!rr.ok)throw new Error('HTTP '+rr.status);text=await rr.text();}
-      catch(err){return{ok:false,code:'SOURCE_UNAVAILABLE',detail:'FILE_UNREACHABLE: '+(err&&err.message||err)};}
-      let got;try{got=await sha256HexText(text.replace(/\r\n/g,'\n'));}catch(err){return{ok:false,code:'HASH_MISMATCH',detail:'SHA_UNVERIFIABLE: '+err.message};}
-      if(String(e.sha256||'').toLowerCase()!==got)return{ok:false,code:'HASH_MISMATCH',detail:`manifest ${String(e.sha256||'').slice(0,12)}…, file ${got.slice(0,12)}…`};
-      let j;try{j=JSON.parse(text);}catch(err){return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_INVALID_JSON'};}
-      if(j.provider!=='EOD2'||!Array.isArray(j.bars)||!Array.isArray(j.fields))return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_CONTRACT: provider/fields/bars'};
-      const fi=n=>j.fields.indexOf(n),iD=fi('date'),iO=fi('open'),iH=fi('high'),iL=fi('low'),iC=fi('close'),iV=fi('volume');
-      if(iD<0||iC<0)return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_CONTRACT: date/close fields'};
-      const rows=[];
-      for(let i=0;i<j.bars.length;i++){
-        const b=j.bars[i];if(!Array.isArray(b))return{ok:false,code:'SCHEMA_INVALID',detail:'row '+i+' is not an array'};
-        const d=b[iD];if(!validDate(d))return{ok:false,code:'INVALID_DATE',detail:'row '+i+' date '+JSON.stringify(d)};
-        const row=[d];
-        for(const ix of [iO,iH,iL,iC,iV]){const v=ix<0?null:b[ix];if(v!==null&&!(typeof v==='number'&&Number.isFinite(v)))return{ok:false,code:'NONFINITE_VALUE',detail:'row '+i+' non-numeric value '+JSON.stringify(v)};row.push(v);}
-        if(i>0&&!(d>rows[i-1][0]))return{ok:false,code:'SCHEMA_INVALID',detail:'FILE_UNSORTED_OR_DUPLICATE_DATE '+d};
-        rows.push(Object.freeze(row));
-      }
-      if(!rows.length)return{ok:false,code:'SCHEMA_INVALID',detail:'no bars'};
-      const res=Object.freeze({ok:true,bars:Object.freeze(rows),meta:Object.freeze({symbol:key,kind:j.kind||(isIdx?'INDEX':'ETF'),sha256:e.sha256,first:rows[0][0],last:rows[rows.length-1][0],bars:rows.length,status:'OK',reasons:Object.freeze([]),noTradeDays:Object.freeze([]),cacheStatus:'MISS',fromCache:false})});
-      mem.set(ck,res);return res;
-    }
-    return{ok:true,source:'mirror',id:'mirror-'+m.datasetHash.slice(0,16),manifest:m,calendar:null,raw:null,series,keys:()=>Object.keys(m.files),latestCompleted:m.latestSession};
-  }
-  async function sha256HexText(text){
-    if(!(globalThis.crypto&&crypto.subtle))throw new Error('crypto.subtle unavailable (needs https)');
-    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
-    return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
   // a fresh, pinned handle (manifest fetched no-store, calendar sha-checked). Throws EOD2Block on any data problem.
   async function openFresh(){
     await purgeLegacy();
     offlineUsed=false;
-    let raw=await client().openSnapshot(),h=null,primaryErr=null;
-    if(raw.ok){
-      h={ok:true,source:'snapshot',offline:offlineUsed,id:raw.id,manifest:raw.manifest,calendar:raw.calendar,raw,series:(s)=>raw.getSeries(s),keys:()=>Object.keys(raw.manifest.files),latestCompleted:raw.manifest.latestCompletedSession||raw.manifest.latestSession};
-    }else{
-      primaryErr=raw;
-      if(raw.code==='SOURCE_UNAVAILABLE'&&useMirror()){const mh=await openMirror();if(mh.ok)h=mh;else primaryErr={ok:false,code:raw.code,detail:raw.detail+' | mirror: '+mh.detail};}
-    }
-    if(!h)throw new EOD2Block('',null,`${primaryErr.code}: ${primaryErr.detail||'snapshot unavailable'}`);
+    // A6-6: the published EOD2 snapshot is the only source. There is no app-local fallback: an unreachable source BLOCKS (the offline replay above still applies).
+    const raw=await client().openSnapshot();
+    if(!raw.ok)throw new EOD2Block('',null,`${raw.code}: ${raw.detail||'snapshot unavailable'}`);
+    const h={ok:true,source:'snapshot',offline:offlineUsed,id:raw.id,manifest:raw.manifest,calendar:raw.calendar,raw,series:(s)=>raw.getSeries(s),keys:()=>Object.keys(raw.manifest.files),latestCompleted:raw.manifest.latestCompletedSession||raw.manifest.latestSession};
     Object.freeze(h);
-    await loadNseCalendar(h.raw||null);
+    await loadNseCalendar(h.raw);
     try{
       const cur=localStorage.getItem('eod2_cur_id');
       if(cur!==h.id){if(cur)localStorage.setItem('eod2_prev_id',cur);localStorage.setItem('eod2_cur_id',h.id);}
@@ -8934,15 +8873,10 @@ const EOD2Store=(()=>{
   // Diagnostic: fetch + SHA-verify every file in a fresh snapshot.
   async function verifyAll(onProgress){
     const h=await loadHandle(true),res=[];let tampered=[];
-    if(h.raw){
-      tampered=await auditCache(h);                                             // A5-3: what the cache holds now vs the manifest hashes
-      const r=await h.raw.verifyAll({force:true,onProgress});
-      const bad=new Map((r.failures||[]).map(f=>[f.symbol,f.code]));
-      for(const k of h.keys())res.push(bad.has(k)?{sym:k,ok:false,reason:bad.get(k)}:{sym:k,ok:true,...(tampered.includes(k)?{cacheTampered:true}:{})});
-    }else{
-      const keys=h.keys();
-      for(let i=0;i<keys.length;i++){const r=await h.series(keys[i],h.manifest.files[keys[i]].kind);res.push(r.ok?{sym:keys[i],ok:true,bars:r.bars.length,first:r.meta.first,last:r.meta.last}:{sym:keys[i],ok:false,reason:r.code});if(onProgress)onProgress(i+1,keys.length);}
-    }
+    tampered=await auditCache(h);                                               // A5-3: what the cache holds now vs the manifest hashes
+    const r=await h.raw.verifyAll({force:true,onProgress});
+    const bad=new Map((r.failures||[]).map(f=>[f.symbol,f.code]));
+    for(const k of h.keys())res.push(bad.has(k)?{sym:k,ok:false,reason:bad.get(k)}:{sym:k,ok:true,...(tampered.includes(k)?{cacheTampered:true}:{})});
     return{manifest:stamp(h),results:res,source:h.source,tampered};
   }
   return{cacheStatus,clearCache,auditCache,appCache,loadManifest,loadHandle,openFresh,getSeries,getHist,expectedLatest,istNow,startRun,beginRun,endRun,takeBlocks,activeRuns,stamp,verifyAll};
@@ -9179,11 +9113,11 @@ function evaluatePreflight(contract,cov,{certifiable=true,certifiableWhy=''}={})
     blocking:rows.filter(x=>x.action==='BLOCKS_RESEARCH').length,candidates:candSyms.length,candidatesRetained:candSyms.filter(s=>retained.has(s)).length};
   return{engine:contract.strategy,rows,counts,exclusions,retainedCandidates:candSyms.filter(s=>retained.has(s)),canCertifyData:!blockCert,canResearch:!blockRes,canPreview:!blockPrev};
 }
-// Async preflight over a pinned snapshot handle (v3 handle: real coverage; legacy mirror: never certifiable).
+// Async preflight over a pinned snapshot handle (real per-symbol coverage from the v3 client).
 async function preflight(contract,snapshot){
   const h=snapshot||null;
   if(!h)return evaluatePreflight(contract,{},{certifiable:false,certifiableWhy:'no snapshot'});
-  const raw=h.raw||null,cov={certified:{},research:{},preview:{}};
+  const raw=h.raw,cov={certified:{},research:{},preview:{}};
   const syms=[...new Set(contract.deps.map(d=>d.symbol))];
   const loaded={};
   await Promise.all(syms.map(async s=>{try{loaded[s]=await h.series(s);}catch(e){loaded[s]={ok:false,code:'SOURCE_UNAVAILABLE',detail:String(e&&e.message||e)};}}));
@@ -9191,9 +9125,6 @@ async function preflight(contract,snapshot){
   for(const d of contract.deps){
     const k=d.symbol+'|'+d.role,L=loaded[d.symbol];
     if(!L.ok){const r={ok:false,code:L.code,detail:L.detail||''};cov.certified[k]=r;cov.research[k]=r;cov.preview[k]=r;continue;}
-    if(!raw){                                               // mirror: series validated, but no per-symbol certification metadata exists
-      const okb={ok:true,code:'OK',detail:''};cov.research[k]=okb;cov.preview[k]=okb;cov.certified[k]={ok:false,code:'CALENDAR_UNVERIFIED',detail:'legacy mirror has no certification metadata'};continue;
-    }
     const o=m=>({from:d.from,to:d.to,fields:d.fields,warmupSessions:d.role==='RANKING_CANDIDATE'||d.role==='CORE_REFERENCE'||d.role==='BENCHMARK'?contract.warmupSessions:0,mode:m});
     const f=r=>({ok:!!r.ok,code:r.code,detail:r.detail||''});
     cov.certified[k]=f(raw.checkCoverage(d.symbol,o('certified')));
@@ -9202,7 +9133,7 @@ async function preflight(contract,snapshot){
     cov.preview[k]=f(pvRes);
   }
   const certifiable=h.source==='snapshot'&&!h.offline&&NSE_CAL.loaded&&contract.reportEnd<=NSE_CAL.verifiedThrough;
-  const why=h.source!=='snapshot'?'legacy mirror data cannot be certified':h.offline?'offline replay of a cached manifest':!NSE_CAL.loaded?'no verified calendar':contract.reportEnd>NSE_CAL.verifiedThrough?'window beyond the verified calendar':'';
+  const why=h.source!=='snapshot'?'data is not from a published snapshot':h.offline?'offline replay of a cached manifest':!NSE_CAL.loaded?'no verified calendar':contract.reportEnd>NSE_CAL.verifiedThrough?'window beyond the verified calendar':'';
   const pf=evaluatePreflight(contract,cov,{certifiable,certifiableWhy:why});
   pf.datasetId=h.id;pf.source=h.source;
   return pf;
@@ -15120,8 +15051,8 @@ window.addEventListener('unhandledrejection',e=>{
 // A1-1 (F29): build identity. APP_SOURCE_SHA256 is written by harness stamp_build.mjs: sha256 of this file's
 // bytes with the 64 hex digits below replaced by zeros. Never edit by hand.
 const APP_VERSION='3.22';
-const APP_BUILD='2026-11-12-v3.22-R26';
-const APP_SOURCE_SHA256='b84250612ba011a18d74803a7fce6d242711a97eeac99942f511cf40a1110487';
+const APP_BUILD='2026-11-13-v3.22-R27';
+const APP_SOURCE_SHA256='7de6cb800f3257d2681b337d125d3c38e853f39b06c11152750d1c581de246f9';
 function getBuildStamp(){ return APP_BUILD+' · '+APP_SOURCE_SHA256.slice(0,12); }
 // Every export and every result carries the full 64-char hash (no runtime fetch of location.href).
 function appProvenance(){ return {appVersion:APP_VERSION,appBuild:APP_BUILD,appSourceSha256:APP_SOURCE_SHA256}; }
@@ -17093,7 +17024,7 @@ async function eod2v3Render(){
   const sum=document.getElementById('eod2v3-summary'),tb=document.getElementById('eod2v3-table');if(!sum||!tb)return null;
   try{
     const c=await EOD2Store.cacheStatus(),k=c.rows.filter(r=>r.cached).length;
-    sum.innerHTML=`dataset <b>${escapeHtml(String(c.datasetId))}</b> · source ${escapeHtml(c.source)}${c.offline?' (offline replay)':''} · latest session ${escapeHtml(String(c.latestSession))} · <b>${k}/${c.rows.length}</b> files cached (${escapeHtml(c.cacheKind)})${c.otherDatasetEntries?` · ${c.otherDatasetEntries} entries belong to other datasets`:''}${c.source!=='snapshot'?' · <span style="color:var(--gold)">legacy mirror: no v3 cache</span>':''}`;
+    sum.innerHTML=`dataset <b>${escapeHtml(String(c.datasetId))}</b> · source ${escapeHtml(c.source)}${c.offline?' (offline replay)':''} · latest session ${escapeHtml(String(c.latestSession))} · <b>${k}/${c.rows.length}</b> files cached (${escapeHtml(c.cacheKind)})${c.otherDatasetEntries?` · ${c.otherDatasetEntries} entries belong to other datasets`:''}`;
     tb.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:4px 8px;color:var(--fog)">Symbol</th><th style="text-align:left;padding:4px 8px;color:var(--fog)">Kind</th><th style="padding:4px 8px;color:var(--fog)">sha256</th><th style="padding:4px 8px;color:var(--fog)">Cache</th><th></th></tr></thead><tbody>'+
       c.rows.map(r=>`<tr data-sym="${escapeHtml(r.symbol)}"><td style="padding:3px 8px">${escapeHtml(r.symbol)}</td><td style="padding:3px 8px">${escapeHtml(r.kind)}</td><td style="padding:3px 8px;text-align:center;font-family:monospace">${escapeHtml(r.sha256.slice(0,8))}</td><td style="padding:3px 8px;text-align:center;color:${r.cached?'var(--gain)':'var(--fog)'}">${r.cached?'cached ✓':'not cached'}</td><td style="padding:3px 8px"><button class="icon-btn" style="font-size:10px" data-sym="${escapeHtml(r.symbol)}" onclick="eod2v3Clear('symbol',this.dataset.sym)">clear</button></td></tr>`).join('')+'</tbody></table>';
     return c;
